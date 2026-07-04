@@ -35,6 +35,11 @@ extension VideoDetailViewModel {
                 deferredPlayableFallback = fallback
             }
             let data = try await loadedNetworkPlayURLData(cid: cid, page: pageNumber)
+            if await prepareHistoryResumeBeforeApplyingPlayURL(data, cid: cid) {
+                signpostMessage = "bvid=\(detail.bvid) history cid"
+                await loadPlayURL(mode: mode)
+                return
+            }
             switch await applyNetworkPlayURLData(data, cid: cid, page: pageNumber) {
             case .applied(let message), .aborted(let message):
                 signpostMessage = message

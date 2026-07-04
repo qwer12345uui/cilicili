@@ -29,7 +29,7 @@ private struct LiveFollowButtonContent: View {
                 .lineLimit(1)
                 .minimumScaleFactor(0.78)
                 .frame(maxWidth: .infinity)
-                .frame(height: 25)
+                .frame(height: 28)
         }
         .disabled(viewModel.anchorUIDForFollow == nil || viewModel.isMutatingAnchorFollow)
         .opacity((viewModel.anchorUIDForFollow != nil && !viewModel.isMutatingAnchorFollow) ? 1 : 0.58)

@@ -21,6 +21,7 @@ struct HomeFeedScreenContentActionsBuilder {
     }
 
     private func openVideo(_ video: VideoItem) {
+        beginPressedPreload(video)
         viewModel.recordRecommendClick(video)
         actionStore.card.openVideo(
             video,

@@ -8,6 +8,13 @@ extension VideoDetailViewModel {
         if variants.contains(where: { $0.satisfiesPreferredQuality(preferredQuality) }) {
             return false
         }
+        let playableVariants = variants.filter(\.isPlayable)
+        let highestPlayableQuality = playableVariants.map(\.quality).max() ?? 0
+        if preferredQuality > highestPlayableQuality,
+           !playableVariants.isEmpty,
+           playableVariants.allSatisfy(\.isProgressiveFastStart) {
+            return true
+        }
         return data.shouldRefetchForPreferredQuality(preferredQuality)
     }
 

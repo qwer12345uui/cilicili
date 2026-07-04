@@ -2,6 +2,8 @@ import SwiftUI
 import UIKit
 
 struct LiveRoomInfoBlock: View {
+    @Environment(\.appThemeTintColor) private var appTintColor
+
     @ObservedObject var viewModel: LiveRoomViewModel
     @State private var isExpanded = false
 
@@ -11,7 +13,7 @@ struct LiveRoomInfoBlock: View {
         let hasDescriptionContent = descriptionPreview != nil
         let metadataText = metadataText(descriptionPreview: isExpanded ? nil : descriptionPreview)
 
-        VStack(alignment: .leading, spacing: 6) {
+        VStack(alignment: .leading, spacing: 8) {
             Text(titleText)
                 .font(.callout.weight(.semibold))
                 .lineSpacing(1.5)
@@ -19,8 +21,16 @@ struct LiveRoomInfoBlock: View {
                 .lineLimit(isExpanded ? nil : 2)
                 .fixedSize(horizontal: false, vertical: true)
                 .frame(maxWidth: .infinity, alignment: .leading)
+                .textSelection(.enabled)
+                .commentCopyContextMenu(text: titleText, title: "复制标题")
 
             HStack(alignment: .center, spacing: 8) {
+                LiveRoomInfoStatusBadge(
+                    title: viewModel.isLive ? "直播中" : "未开播",
+                    systemImage: viewModel.isLive ? "dot.radiowaves.left.and.right" : "pause.circle",
+                    tint: viewModel.isLive ? appTintColor : Color.secondary
+                )
+
                 Text(metadataText)
                     .font(.caption2)
                     .foregroundStyle(.secondary)
@@ -44,7 +54,12 @@ struct LiveRoomInfoBlock: View {
                     .accessibilityLabel(isExpanded ? "收起直播简介" : "展开直播简介")
                 }
             }
+            .frame(height: 24, alignment: .center)
             .frame(maxWidth: .infinity, alignment: .leading)
+            .commentCopyContextMenu(
+                text: hasDescriptionContent && !isExpanded ? descriptionText : nil,
+                title: "复制简介"
+            )
 
             if isExpanded {
                 BiliLinkedText(
@@ -98,6 +113,27 @@ struct LiveRoomInfoBlock: View {
             .trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty, trimmed != "这个直播间暂时没有简介。" else { return nil }
         return trimmed
+    }
+}
+
+private struct LiveRoomInfoStatusBadge: View {
+    let title: String
+    let systemImage: String
+    let tint: Color
+
+    var body: some View {
+        Label {
+            Text(title)
+                .font(.caption2.weight(.semibold))
+                .lineLimit(1)
+        } icon: {
+            Image(systemName: systemImage)
+                .font(.system(size: 10, weight: .semibold))
+        }
+        .foregroundStyle(tint)
+        .padding(.horizontal, 7)
+        .frame(height: 22)
+        .background(tint.opacity(0.12), in: Capsule())
     }
 }
 

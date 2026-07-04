@@ -1118,12 +1118,16 @@ nonisolated struct PlayURLData: Decodable, Sendable {
     let acceptQuality: [Int]?
     let acceptDescription: [String]?
     let supportFormats: [PlaySupportFormat]?
+    let lastPlayTime: TimeInterval?
+    let lastPlayCID: Int?
 
     enum CodingKeys: String, CodingKey {
         case code, message, durl, dash, quality
         case acceptQuality = "accept_quality"
         case acceptDescription = "accept_description"
         case supportFormats = "support_formats"
+        case lastPlayTime = "last_play_time"
+        case lastPlayCID = "last_play_cid"
     }
 
     nonisolated func mergingDisplayFormats(from metadata: PlayURLData) -> PlayURLData {
@@ -1135,7 +1139,9 @@ nonisolated struct PlayURLData: Decodable, Sendable {
             quality: quality,
             acceptQuality: mergedQualities(primary: acceptQuality, secondary: metadata.acceptQuality),
             acceptDescription: mergedDescriptions(metadata: metadata),
-            supportFormats: mergedSupportFormats(primary: supportFormats, secondary: metadata.supportFormats)
+            supportFormats: mergedSupportFormats(primary: supportFormats, secondary: metadata.supportFormats),
+            lastPlayTime: lastPlayTime ?? metadata.lastPlayTime,
+            lastPlayCID: lastPlayCID ?? metadata.lastPlayCID
         )
     }
 
@@ -1149,8 +1155,26 @@ nonisolated struct PlayURLData: Decodable, Sendable {
             quality: durl == nil && other.durl != nil ? (other.quality ?? quality) : (quality ?? other.quality),
             acceptQuality: mergedQualities(primary: acceptQuality, secondary: other.acceptQuality),
             acceptDescription: mergedDescriptions(metadata: other),
-            supportFormats: mergedSupportFormats(primary: supportFormats, secondary: other.supportFormats)
+            supportFormats: mergedSupportFormats(primary: supportFormats, secondary: other.supportFormats),
+            lastPlayTime: lastPlayTime ?? other.lastPlayTime,
+            lastPlayCID: lastPlayCID ?? other.lastPlayCID
         )
+    }
+
+    nonisolated func resumeTime(duration: TimeInterval?) -> TimeInterval? {
+        guard let lastPlayTime, lastPlayTime > 0 else { return nil }
+        let seconds: TimeInterval
+        if let duration, lastPlayTime <= duration + 1 {
+            seconds = lastPlayTime
+        } else {
+            seconds = lastPlayTime / 1000
+        }
+        guard seconds >= 10 else { return nil }
+        if let duration, duration > 0 {
+            let remaining = duration - seconds
+            guard remaining > 15, seconds / duration < 0.96 else { return nil }
+        }
+        return seconds
     }
 
     nonisolated var hasPlayableStreamPayload: Bool {

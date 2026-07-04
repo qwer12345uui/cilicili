@@ -16,7 +16,7 @@ struct LiveActionContent: View {
                 .minimumScaleFactor(0.68)
         }
         .frame(maxWidth: .infinity)
-        .frame(height: 25)
+        .frame(height: 28)
         .padding(.horizontal, 7)
         .foregroundStyle(foregroundStyle)
         .background(VideoDetailTheme.secondarySurface.opacity(0.92), in: Capsule())

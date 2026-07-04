@@ -2126,17 +2126,24 @@ nonisolated final class BiliAPIClient {
             return cached
         }
 
-        let data = try await fetchPlayURLUncached(
+        return try await fetchPlayURLWithPendingRequest(
+            cacheKey: key,
+            scope: scope,
             bvid: bvid,
             cid: cid,
-            qn: qn,
-            page: page,
-            preferredQuality: preferredQuality,
-            supplementsQualities: supplementsQualities,
-            preferProgressiveFastStart: preferProgressiveFastStart
-        )
-        await playURLCache.store(data, for: key, scope: scope)
-        return data
+            requestedQuality: requestedQuality,
+            source: "playURL"
+        ) { [self] in
+            try await fetchPlayURLUncached(
+                bvid: bvid,
+                cid: cid,
+                qn: qn,
+                page: page,
+                preferredQuality: preferredQuality,
+                supplementsQualities: supplementsQualities,
+                preferProgressiveFastStart: preferProgressiveFastStart
+            )
+        }
     }
 
     func fetchPgcPlayURL(
@@ -2519,14 +2526,65 @@ nonisolated final class BiliAPIClient {
             return cached
         }
 
-        let data = try await fetchStartupPlayURLUncached(
+        return try await fetchPlayURLWithPendingRequest(
+            cacheKey: key,
+            scope: scope,
             bvid: bvid,
             cid: cid,
-            page: page,
-            preferredQuality: preferredQuality
-        )
-        await playURLCache.store(data, for: key, scope: scope)
-        return data
+            requestedQuality: requestedQuality,
+            source: "startup"
+        ) { [self] in
+            try await fetchStartupPlayURLUncached(
+                bvid: bvid,
+                cid: cid,
+                page: page,
+                preferredQuality: preferredQuality
+            )
+        }
+    }
+
+    private func fetchPlayURLWithPendingRequest(
+        cacheKey: PlayURLCacheKey,
+        scope: PlayURLCacheLoginScope,
+        bvid: String,
+        cid: Int,
+        requestedQuality: Int,
+        source: String,
+        operation: @escaping () async throws -> PlayURLData
+    ) async throws -> PlayURLData {
+        let pendingKey = PendingPlayURLRequestKey(cacheKey: cacheKey, scope: scope)
+        if let existingTask = await state.playURLRequestTask(for: pendingKey) {
+            PlayerMetricsLog.logger.info(
+                "playURLRequestJoined source=\(source, privacy: .public) bvid=\(bvid, privacy: .public) cid=\(cid, privacy: .public) qn=\(requestedQuality, privacy: .public)"
+            )
+            let data = try await existingTask.value
+            await playURLCache.store(data, for: cacheKey, scope: scope)
+            return data
+        }
+
+        let task = Task<PlayURLData, Error>(priority: .userInitiated) {
+            try Task.checkCancellation()
+            return try await operation()
+        }
+        if let existingTask = await state.setPlayURLRequestTaskIfAbsent(task, for: pendingKey) {
+            task.cancel()
+            PlayerMetricsLog.logger.info(
+                "playURLRequestJoinedAfterRace source=\(source, privacy: .public) bvid=\(bvid, privacy: .public) cid=\(cid, privacy: .public) qn=\(requestedQuality, privacy: .public)"
+            )
+            let data = try await existingTask.value
+            await playURLCache.store(data, for: cacheKey, scope: scope)
+            return data
+        }
+
+        do {
+            let data = try await task.value
+            await state.clearPlayURLRequestTask(for: pendingKey)
+            await playURLCache.store(data, for: cacheKey, scope: scope)
+            return data
+        } catch {
+            await state.clearPlayURLRequestTask(for: pendingKey)
+            throw error
+        }
     }
 
     func hasCachedStartupPlayURL(
@@ -5129,6 +5187,11 @@ private struct CachedPlayURLFailure {
     let expiresAt: CFTimeInterval
 }
 
+private struct PendingPlayURLRequestKey: Hashable {
+    let cacheKey: PlayURLCacheKey
+    let scope: PlayURLCacheLoginScope
+}
+
 private struct CachedDanmaku {
     let items: [DanmakuItem]
     let storedAt: CFTimeInterval
@@ -5169,6 +5232,7 @@ private actor BiliAPIClientState {
     private var appRecommendFeedIndex: Int?
     private var startupWBISuppressedUntil: CFTimeInterval = 0
     private var playURLFailureCache: [String: CachedPlayURLFailure] = [:]
+    private var playURLRequestTasks: [PendingPlayURLRequestKey: Task<PlayURLData, Error>] = [:]
     private var playURLStageTasks: [String: Task<PlayURLData, Error>] = [:]
     private var danmakuCache: [Int: CachedDanmaku] = [:]
 
@@ -5302,6 +5366,25 @@ private actor BiliAPIClientState {
         startupWBISuppressedUntil = CACurrentMediaTime() + duration
     }
 
+    func playURLRequestTask(for key: PendingPlayURLRequestKey) -> Task<PlayURLData, Error>? {
+        playURLRequestTasks[key]
+    }
+
+    func setPlayURLRequestTaskIfAbsent(
+        _ task: Task<PlayURLData, Error>,
+        for key: PendingPlayURLRequestKey
+    ) -> Task<PlayURLData, Error>? {
+        if let existing = playURLRequestTasks[key] {
+            return existing
+        }
+        playURLRequestTasks[key] = task
+        return nil
+    }
+
+    func clearPlayURLRequestTask(for key: PendingPlayURLRequestKey) {
+        playURLRequestTasks[key] = nil
+    }
+
     func playURLStageTask(for key: String) -> Task<PlayURLData, Error>? {
         playURLStageTasks[key]
     }
@@ -5322,6 +5405,11 @@ private actor BiliAPIClientState {
         for key in taskKeys {
             playURLStageTasks[key]?.cancel()
             playURLStageTasks[key] = nil
+        }
+        let requestKeys = playURLRequestTasks.keys.filter { $0.cacheKey.bvid == bvid }
+        for key in requestKeys {
+            playURLRequestTasks[key]?.cancel()
+            playURLRequestTasks[key] = nil
         }
     }
 

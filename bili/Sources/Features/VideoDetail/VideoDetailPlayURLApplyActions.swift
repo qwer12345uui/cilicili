@@ -43,6 +43,11 @@ extension VideoDetailViewModel {
     ) async {
         let bvid = detail.bvid
         guard isCurrentPlaybackContext(bvid: bvid, cid: cid, page: page) else { return }
+        if let cid,
+           await prepareHistoryResumeBeforeApplyingPlayURL(data, cid: cid) {
+            await loadPlayURL()
+            return
+        }
         currentPlayURLData = data
         let variants = sortedPlayVariants(playVariants(from: data))
         guard let appliedState = applyPlayableVariantState(variants: variants, source: source) else { return }

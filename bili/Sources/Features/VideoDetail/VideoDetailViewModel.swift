@@ -113,6 +113,9 @@ final class VideoDetailViewModel: ObservableObject {
     var renderStoreSyncState = VideoDetailRenderStoreSyncState()
     var navigationState = VideoDetailPlaybackNavigationState()
     var playVariantSwitchToken: UUID?
+    var pendingPlaybackHistoryResumeTime: TimeInterval?
+    var pendingPlaybackHistoryResumeCID: Int?
+    var didResolveCloudHistoryResume = false
     var uploaderInteractionLoadState = VideoDetailUploaderInteractionLoadState()
     var lastUserSeekAt: Date?
     var loadTiming = VideoDetailViewModelLoadTimingState()
@@ -127,13 +130,17 @@ final class VideoDetailViewModel: ObservableObject {
         sponsorBlockService: SponsorBlockService
     ) {
         self.detail = seedVideo
-        self.selectedCID = seedVideo.cid ?? seedVideo.pages?.first?.cid
+        self.selectedCID = seedVideo.historyCID ?? seedVideo.cid ?? seedVideo.pages?.first?.cid
         self.serviceDependencies = VideoDetailViewModelDependencies(
             api: api,
             libraryStore: libraryStore,
             sessionStore: sessionStore,
             sponsorBlockService: sponsorBlockService
         )
+        if let resumeTime = seedVideo.historyResumeTime, resumeTime > 0.25 {
+            pendingPlaybackHistoryResumeTime = resumeTime
+            pendingPlaybackHistoryResumeCID = seedVideo.historyCID ?? selectedCID
+        }
         self.isDanmakuEnabled = libraryStore.danmakuEnabled
         self.danmakuSettings = libraryStore.danmakuSettings
         refreshDetailDisplayMetrics()
