@@ -45,6 +45,7 @@ extension VideoDetailViewModel {
     }
 
     private func resetPlaybackLoadingStateForNavigation() {
+        currentPlayURLData = nil
         selectedPlayVariant = nil
         if state.isLoading {
             state = .idle

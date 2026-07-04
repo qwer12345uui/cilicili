@@ -29,7 +29,7 @@ struct DynamicImageGridTile: View {
                     .foregroundStyle(.primary)
                     .padding(.horizontal, 14)
                     .padding(.vertical, 7)
-                    .glassEffect(.regular, in: Capsule())
+                    .biliRegularGlassEffect(in: Capsule())
             }
         }
     }

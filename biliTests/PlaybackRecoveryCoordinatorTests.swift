@@ -20,6 +20,40 @@ final class PlaybackRecoveryCoordinatorTests: XCTestCase {
         XCTAssertTrue(decision.shouldRefreshCDN)
     }
 
+    func testURLExpiredReloadsPlayURLEvenWhenFallbackExists() {
+        var coordinator = VideoDetailPlaybackRecoveryCoordinator()
+        let decision = coordinator.receiveFailure(input(reason: reason(.urlExpired, statusCode: 412)))
+
+        XCTAssertEqual(decision.action, .reloadPlayURL)
+        XCTAssertFalse(decision.shouldRefreshCDN)
+    }
+
+    func testURLExpiredIsIgnoredWhilePlayURLReloadIsAlreadyInFlight() {
+        var coordinator = VideoDetailPlaybackRecoveryCoordinator()
+        let decision = coordinator.receiveFailure(input(
+            reason: reason(.urlExpired, statusCode: 412),
+            hasFallbackVariant: true,
+            playURLIsLoading: true
+        ))
+
+        XCTAssertEqual(decision.action, .ignore(.playURLReloadInFlight))
+        XCTAssertFalse(decision.shouldHandleFailure)
+        XCTAssertFalse(decision.shouldMarkFailedVariant)
+    }
+
+    func testReloadMessageIsIgnoredWhilePlayURLReloadIsAlreadyInFlight() {
+        var coordinator = VideoDetailPlaybackRecoveryCoordinator()
+        let decision = coordinator.receiveFailure(input(
+            message: "播放地址已过期，正在重新获取播放地址",
+            reason: reason(.network),
+            hasFallbackVariant: true,
+            playURLIsLoading: true
+        ))
+
+        XCTAssertEqual(decision.action, .ignore(.playURLReloadInFlight))
+        XCTAssertFalse(decision.shouldHandleFailure)
+    }
+
     func testCancelledFailureIsIgnored() {
         var coordinator = VideoDetailPlaybackRecoveryCoordinator()
         let decision = coordinator.receiveFailure(input(reason: reason(.cancelled)))
@@ -44,6 +78,15 @@ final class PlaybackRecoveryCoordinatorTests: XCTestCase {
 
         XCTAssertEqual(decision.action, .switchVariant)
         XCTAssertTrue(decision.shouldRefreshCDN)
+    }
+
+    func testDecoderFailureSwitchesVariantWhenFallbackExists() {
+        var coordinator = VideoDetailPlaybackRecoveryCoordinator()
+        let decision = coordinator.receiveFailure(input(reason: reason(.decoderFailed), hasFallbackVariant: true))
+
+        XCTAssertEqual(decision.action, .switchVariant)
+        XCTAssertTrue(decision.shouldRefreshCDN)
+        XCTAssertTrue(decision.shouldMarkFailedVariant)
     }
 
     func testNetworkFailureReloadsWhenNoFallbackExistsAndAttemptsRemain() {
@@ -109,5 +152,106 @@ final class PlaybackRecoveryCoordinatorTests: XCTestCase {
             rangeDescription: nil,
             underlyingDescription: nil
         )
+    }
+}
+
+final class VideoDetailPlaybackQualityMenuBuilderTests: XCTestCase {
+    func testQualityMenuSubtitleShowsProgressiveFallbackRoute() throws {
+        let originalVariant = try dashVariant(
+            stream: stream(id: 64, codecs: "hev1.1.6.L120.90", codecid: 12)
+        )
+        let fallbackVariant = PlayVariant(
+            quality: 64,
+            title: "720P 准高清",
+            videoURL: try XCTUnwrap(URL(string: "https://example.test/video-progressive.mp4")),
+            audioURL: nil,
+            videoStream: nil,
+            audioStream: nil,
+            codec: "mp4",
+            resolution: "1280x720",
+            frameRate: "30",
+            bandwidth: 520_000,
+            isHDR: false,
+            badge: nil
+        )
+
+        let item = VideoDetailPlaybackQualityMenuBuilder.makeQualityMenuItems(
+            playVariants: [originalVariant],
+            selectedPlayVariant: fallbackVariant,
+            pendingPlayVariantID: nil,
+            isSwitchingPlayQuality: false
+        ).first
+
+        XCTAssertEqual(item?.systemImage, "checkmark")
+        XCTAssertEqual(item?.subtitle, "单流兜底")
+    }
+
+    func testQualityMenuSubtitleShowsH264CodecFallbackRoute() throws {
+        let originalVariant = try dashVariant(
+            stream: stream(id: 116, codecs: "hev1.1.6.L150.90", codecid: 12)
+        )
+        let fallbackVariant = try dashVariant(
+            stream: stream(
+                id: 116,
+                codecs: "avc1.640028",
+                codecid: 7,
+                baseURL: "https://example.test/video-h264.m4s"
+            )
+        )
+
+        let item = VideoDetailPlaybackQualityMenuBuilder.makeQualityMenuItems(
+            playVariants: [originalVariant],
+            selectedPlayVariant: fallbackVariant,
+            pendingPlayVariantID: nil,
+            isSwitchingPlayQuality: false
+        ).first
+
+        XCTAssertEqual(item?.systemImage, "checkmark")
+        XCTAssertEqual(item?.subtitle, "H.264 兜底")
+    }
+
+    private func dashVariant(stream videoStream: DASHStream) throws -> PlayVariant {
+        let audioStream = try stream(
+            id: 30280,
+            codecs: "mp4a.40.2",
+            codecid: 0,
+            baseURL: "https://example.test/audio.m4s"
+        )
+        return PlayVariant(
+            quality: videoStream.id ?? 64,
+            title: BiliVideoQuality.title(for: videoStream.id ?? 64),
+            videoURL: videoStream.playURL,
+            audioURL: audioStream.playURL,
+            videoStream: videoStream,
+            audioStream: audioStream,
+            codec: videoStream.codecLabel,
+            resolution: videoStream.resolutionLabel,
+            frameRate: videoStream.frameRate,
+            bandwidth: videoStream.bandwidth,
+            isHDR: false,
+            badge: nil
+        )
+    }
+
+    private func stream(
+        id: Int,
+        codecs: String,
+        codecid: Int,
+        baseURL: String = "https://example.test/video.m4s"
+    ) throws -> DASHStream {
+        let json = """
+        {
+          "id": \(id),
+          "baseUrl": "\(baseURL)",
+          "bandwidth": 1000000,
+          "codecs": "\(codecs)",
+          "codecid": \(codecid),
+          "width": 1280,
+          "height": 720,
+          "frameRate": "30",
+          "mimeType": "video/mp4"
+        }
+        """
+        return try JSONDecoder().decode(DASHStream.self, from: Data(json.utf8))
     }
 }

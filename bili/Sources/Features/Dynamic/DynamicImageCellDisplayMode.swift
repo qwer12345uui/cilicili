@@ -69,12 +69,15 @@ extension DynamicImageCell {
 }
 
 struct LongImageBadge: View {
+    @AppStorage(VideoCoverBadgeShadow.storageKey) private var shadowOpacity = VideoCoverBadgeShadow.defaultOpacity
+
     var body: some View {
         GlassEffectContainer(spacing: 8) {
             Label("长图", systemImage: "scroll")
                 .font(.caption2.weight(.semibold))
                 .labelStyle(.titleAndIcon)
                 .foregroundStyle(.white)
+                .videoCoverBadgeForegroundShadow(opacity: shadowOpacity)
                 .padding(.horizontal, 8)
                 .padding(.vertical, 5)
                 .biliPlayerClearGlass(interactive: false, in: Capsule())

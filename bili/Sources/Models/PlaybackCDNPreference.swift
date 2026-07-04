@@ -97,53 +97,6 @@ enum PlaybackStreamSourcePreference: String, CaseIterable, Identifiable, Codable
     }
 }
 
-enum PlayerRenderingEnginePreference: String, CaseIterable, Identifiable, Codable, Sendable {
-    case automatic
-    case avPlayer
-    case ksPlayer
-
-    nonisolated static let storageKey = "cc.bili.playback.renderingEnginePreference.v1"
-    nonisolated static let defaultValue: PlayerRenderingEnginePreference = .avPlayer
-
-    nonisolated var id: String { rawValue }
-
-    nonisolated var title: String {
-        switch self {
-        case .automatic:
-            return "自动"
-        case .avPlayer:
-            return "AVPlayer"
-        case .ksPlayer:
-            return "KSPlayer"
-        }
-    }
-
-    nonisolated var detail: String {
-        switch self {
-        case .automatic:
-            return "使用系统 AVPlayer 硬解播放路径。"
-        case .avPlayer:
-            return "使用系统 AVPlayer 播放内核，不执行 KSPlayer 自动回退。"
-        case .ksPlayer:
-            return "旧版自定义内核，当前正式播放路径已停用。"
-        }
-    }
-
-    nonisolated var normalizedForFormalPlayback: PlayerRenderingEnginePreference {
-        switch self {
-        case .automatic, .avPlayer, .ksPlayer:
-            return .avPlayer
-        }
-    }
-
-    nonisolated static func stored(in userDefaults: UserDefaults = .standard) -> PlayerRenderingEnginePreference {
-        let preference = PlayerRenderingEnginePreference(
-            rawValue: userDefaults.string(forKey: storageKey) ?? ""
-        ) ?? defaultValue
-        return preference.normalizedForFormalPlayback
-    }
-}
-
 enum HomeRecommendFeedSourcePreference: String, CaseIterable, Identifiable, Codable, Sendable {
     case web
     case app

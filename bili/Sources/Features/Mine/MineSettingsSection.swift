@@ -30,7 +30,7 @@ struct MineSettingsSection: View {
             } label: {
                 SettingsNavigationRow(
                     title: "内容过滤",
-                    subtitle: "\(libraryStore.blockedDynamicKeywords.count) 个关键词",
+                    subtitle: contentFilterSummary,
                     systemImage: "line.3.horizontal.decrease.circle"
                 )
             }
@@ -65,7 +65,23 @@ struct MineSettingsSection: View {
         return enabled.isEmpty ? "默认" : enabled.joined(separator: "、")
     }
 
+    private var contentFilterSummary: String {
+        var parts = ["动态 \(libraryStore.blockedDynamicKeywords.count) 个关键词"]
+        if libraryStore.videoRecommendationFilterConfiguration.isActive {
+            parts.append("推荐过滤开启")
+        }
+        return parts.joined(separator: "，")
+    }
+
     private var playbackSettingsSummary: String {
-        "\(libraryStore.playbackAutoOptimizationMode.title) · \(libraryStore.videoCodecPreference.title)"
+        var parts = [
+            libraryStore.playbackAutoOptimizationMode.title,
+            libraryStore.videoCodecPreference.title,
+            libraryStore.dolbyVisionRenderingPolicy.title
+        ]
+        if libraryStore.forceHardwareDecodeEnabled {
+            parts.append("硬解优先")
+        }
+        return parts.joined(separator: " · ")
     }
 }

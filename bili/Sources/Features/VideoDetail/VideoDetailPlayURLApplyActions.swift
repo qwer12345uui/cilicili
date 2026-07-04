@@ -43,7 +43,8 @@ extension VideoDetailViewModel {
     ) async {
         let bvid = detail.bvid
         guard isCurrentPlaybackContext(bvid: bvid, cid: cid, page: page) else { return }
-        let variants = sortedPlayVariants(data.playVariants(cdnPreference: libraryStore.effectivePlaybackCDNPreference))
+        currentPlayURLData = data
+        let variants = sortedPlayVariants(playVariants(from: data))
         guard let appliedState = applyPlayableVariantState(variants: variants, source: source) else { return }
         guard isCurrentPlaybackContext(bvid: bvid, cid: cid, page: page) else { return }
         if stablePlayerViewModel == nil {
@@ -63,13 +64,13 @@ extension VideoDetailViewModel {
     }
 
     func isPlayablePlayURLData(_ data: PlayURLData) -> Bool {
-        data.playVariants(cdnPreference: libraryStore.effectivePlaybackCDNPreference)
+        playVariants(from: data)
             .contains(where: \.isPlayable)
     }
 
     private func shouldSkipWarmCacheForTargetQuality(_ data: PlayURLData) -> Bool {
         guard let preferredQuality = targetPlaybackPreferredQuality else { return false }
-        let variants = data.playVariants(cdnPreference: libraryStore.effectivePlaybackCDNPreference)
+        let variants = playVariants(from: data)
         return !variants.contains { $0.satisfiesPreferredQuality(preferredQuality) }
     }
 }

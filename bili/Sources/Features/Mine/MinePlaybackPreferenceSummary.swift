@@ -27,6 +27,16 @@ extension MinePlaybackSettingsView {
                     title: libraryStore.videoCodecPreference.title,
                     systemImage: "film.stack"
                 )
+                if libraryStore.forceHardwareDecodeEnabled {
+                    MinePlaybackPreferenceChip(
+                        title: "硬解优先",
+                        systemImage: "cpu"
+                    )
+                }
+                MinePlaybackPreferenceChip(
+                    title: libraryStore.dolbyVisionRenderingPolicy.title,
+                    systemImage: "sparkles.tv"
+                )
                 MinePlaybackPreferenceChip(
                     title: BiliPlaybackRate(rawValue: libraryStore.defaultPlaybackRate)?.title ?? "\(libraryStore.defaultPlaybackRate)x",
                     systemImage: "speedometer"

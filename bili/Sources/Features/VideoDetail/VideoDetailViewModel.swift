@@ -93,6 +93,7 @@ final class VideoDetailViewModel: ObservableObject {
     @Published var lastPlayURLSource: String? {
         didSet { scheduleRenderStoreSync(.networkDiagnostics) }
     }
+    var currentPlayURLData: PlayURLData?
     @Published var resumeDiagnostics: PlaybackResumeDiagnostics = .none {
         didSet { scheduleRenderStoreSync(.networkDiagnostics) }
     }
@@ -122,6 +123,7 @@ final class VideoDetailViewModel: ObservableObject {
         seedVideo: VideoItem,
         api: BiliAPIClient,
         libraryStore: LibraryStore,
+        sessionStore: SessionStore,
         sponsorBlockService: SponsorBlockService
     ) {
         self.detail = seedVideo
@@ -129,6 +131,7 @@ final class VideoDetailViewModel: ObservableObject {
         self.serviceDependencies = VideoDetailViewModelDependencies(
             api: api,
             libraryStore: libraryStore,
+            sessionStore: sessionStore,
             sponsorBlockService: sponsorBlockService
         )
         self.isDanmakuEnabled = libraryStore.danmakuEnabled

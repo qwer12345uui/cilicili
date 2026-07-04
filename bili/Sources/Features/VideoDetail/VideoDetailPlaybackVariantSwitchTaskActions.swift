@@ -17,11 +17,30 @@ extension VideoDetailViewModel {
             defer {
                 self.clearPlayVariantSwitchIfCurrent(token)
             }
-            await VideoPreloadCenter.shared.warmVariantAndWait(
-                variant,
-                bvid: bvid,
-                timeout: 1.15
-            )
+            let didWarmVariant: Bool
+            if let cid {
+                didWarmVariant = await VideoPreloadCenter.shared.warmVariantAndWaitCached(
+                    variant,
+                    bvid: bvid,
+                    cid: cid,
+                    page: page,
+                    timeout: Self.fastStartUpgradeWarmupTimeout
+                )
+            } else {
+                didWarmVariant = await VideoPreloadCenter.shared.warmVariantAndWait(
+                    variant,
+                    bvid: bvid,
+                    timeout: Self.fastStartUpgradeWarmupTimeout
+                )
+            }
+            if !didWarmVariant {
+                PlayerMetricsLog.record(
+                    .qualitySupplement,
+                    metricsID: bvid,
+                    title: self.detail.title,
+                    message: "manualQuality warmTimeoutContinue q\(variant.quality)"
+                )
+            }
             guard !Task.isCancelled,
                   !self.isPlaybackInvalidatedForNavigation,
                   self.isCurrentPlaybackContext(bvid: bvid, cid: cid, page: page),

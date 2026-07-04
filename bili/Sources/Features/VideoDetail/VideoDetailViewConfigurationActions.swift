@@ -11,6 +11,7 @@ struct VideoDetailViewConfigurationActions {
             seedVideo: seedVideo,
             api: dependencies.api,
             libraryStore: dependencies.libraryStore,
+            sessionStore: dependencies.sessionStore,
             sponsorBlockService: dependencies.sponsorBlockService
         )
     }

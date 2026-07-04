@@ -24,7 +24,16 @@ extension VideoDetailViewModel {
         page: Int?,
         preferredQuality: Int?
     ) async throws -> PlayURLData {
-        try await api.fetchPlayURL(
+        if detail.isPGCEpisode {
+            return try await api.fetchPgcPlayURL(
+                bvid: bvid,
+                cid: cid,
+                seasonID: detail.pgcSeasonID,
+                epID: detail.pgcEpisodeID,
+                preferredQuality: preferredQuality
+            )
+        }
+        return try await api.fetchPlayURL(
             bvid: bvid,
             cid: cid,
             page: page,

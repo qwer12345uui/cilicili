@@ -19,4 +19,12 @@ final class HomeFeedPageCoordinator {
     func usesNativeAppRecommendSource(for mode: HomeFeedMode) -> Bool {
         mode == .recommend && libraryStore.homeRecommendFeedSourcePreference == .app
     }
+
+    func filterFeedRecommendations(_ videos: [VideoItem]) -> [VideoItem] {
+        VideoRecommendationFilter.filtered(
+            videos,
+            configuration: libraryStore.videoRecommendationFilterConfiguration,
+            context: .feed
+        )
+    }
 }

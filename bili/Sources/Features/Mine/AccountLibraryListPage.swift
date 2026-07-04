@@ -50,13 +50,26 @@ struct AccountLibraryListPage: View {
                 VideoRouteLink(item.videoItem) {
                     LibraryVideoRow(item: item, timestampTitle: kind.timestampTitle)
                 }
+                .task {
+                    await loadMoreIfNeeded(current: item)
+                }
             }
 
             if state.isLoading {
                 LibraryLoadingRow(title: kind.loadingTitle)
+            } else if loadMoreState.isLoading {
+                LibraryLoadingRow(title: kind.loadMoreTitle)
             } else if case .failed(let message) = state {
                 LibraryErrorRow(title: kind.errorTitle, message: message) {
                     Task { await reload() }
+                }
+            } else if case .failed(let message) = loadMoreState {
+                LibraryErrorRow(title: kind.loadMoreErrorTitle, message: message) {
+                    Task { await loadMore() }
+                }
+            } else if hasMore {
+                LibraryLoadMoreTriggerRow(title: kind.loadMoreTitle) {
+                    Task { await loadMore() }
                 }
             }
         }
@@ -99,6 +112,24 @@ struct AccountLibraryListPage: View {
         viewModel.favoriteFolders
     }
 
+    private var loadMoreState: LoadingState {
+        switch kind {
+        case .history:
+            return viewModel.historyLoadMoreState
+        case .favorites:
+            return .idle
+        }
+    }
+
+    private var hasMore: Bool {
+        switch kind {
+        case .history:
+            return viewModel.historyHasMore
+        case .favorites:
+            return false
+        }
+    }
+
     private func loadIfNeeded() async {
         guard sessionStore.isLoggedIn, items.isEmpty, !state.isLoading else { return }
         await reload()
@@ -110,6 +141,24 @@ struct AccountLibraryListPage: View {
             await viewModel.refreshHistory()
         case .favorites:
             await viewModel.refreshFavorites()
+        }
+    }
+
+    private func loadMoreIfNeeded(current item: AccountVideoEntry) async {
+        switch kind {
+        case .history:
+            await viewModel.loadMoreHistoryIfNeeded(current: item)
+        case .favorites:
+            break
+        }
+    }
+
+    private func loadMore() async {
+        switch kind {
+        case .history:
+            await viewModel.loadMoreHistory()
+        case .favorites:
+            break
         }
     }
 }

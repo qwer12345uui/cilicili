@@ -5,7 +5,7 @@ extension VideoDetailViewModel {
     static let relatedRecommendationsLimit = 5
     static let minimumExpandedRelatedCount = relatedRecommendationsLimit
     static let seekWarmupBucketDuration: TimeInterval = 30
-    static let maxInFlightSeekWarmups = 3
+    static let maxInFlightSeekWarmups = 1
     static let recentSeekWarmupLimit = 10
     static let fastStartUpgradeStabilityDelayNanoseconds: UInt64 = 1_250_000_000
     static let fastStartUpgradeWarmupTimeout: TimeInterval = 1.15

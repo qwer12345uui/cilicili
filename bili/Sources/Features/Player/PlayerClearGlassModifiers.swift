@@ -22,15 +22,7 @@ extension View {
         interactive: Bool,
         in shape: S
     ) -> some View {
-        if #available(iOS 26, *) {
-            glassEffect(
-                .clear
-                    .interactive(interactive),
-                in: shape
-            )
-        } else {
-            background(.ultraThinMaterial, in: shape)
-        }
+        modifier(BiliPlayerClearGlassModifier(interactive: interactive, shape: shape))
     }
 
     func biliPlayerExpandedHitTarget(horizontal: CGFloat = 4, vertical: CGFloat = 8) -> some View {
@@ -45,5 +37,37 @@ extension View {
         let horizontal = max((44 - metrics.controlHeight) / 2, 4)
         let vertical = max((44 - metrics.controlHeight) / 2, 8)
         return biliPlayerExpandedHitTarget(horizontal: horizontal, vertical: vertical)
+    }
+}
+
+private struct BiliPlayerClearGlassModifier<GlassShape: Shape>: ViewModifier {
+    @AppStorage(AppLiquidGlassStylePreference.storageKey) private var rawPreference = AppLiquidGlassStylePreference.defaultValue.rawValue
+    let interactive: Bool
+    let shape: GlassShape
+
+    private var preference: AppLiquidGlassStylePreference {
+        AppLiquidGlassStylePreference(storedRawValue: rawPreference)
+    }
+
+    @ViewBuilder
+    func body(content: Content) -> some View {
+        if #available(iOS 26, *) {
+            switch preference {
+            case .current:
+                content.glassEffect(
+                    .clear
+                        .interactive(interactive),
+                    in: shape
+                )
+            case .appleRecommended:
+                content.glassEffect(
+                    .regular
+                        .interactive(interactive),
+                    in: shape
+                )
+            }
+        } else {
+            content.background(.ultraThinMaterial, in: shape)
+        }
     }
 }

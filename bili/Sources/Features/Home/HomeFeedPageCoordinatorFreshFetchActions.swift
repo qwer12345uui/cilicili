@@ -12,26 +12,26 @@ extension HomeFeedPageCoordinator {
             return try await api.fetchPopularVideos(page: popularPage)
         case .recommend:
             if usesNativeAppRecommendSource(for: mode) {
-                return try await api.fetchRecommendFeed(
+                return filterFeedRecommendations(try await api.fetchRecommendFeed(
                     freshIndex: freshIndex,
                     limit: maximumFreshCount
-                )
+                ))
             }
             if usesGuestRecommendDiversity(for: mode) {
-                return try await fetchGuestRecommendPage(
+                return filterFeedRecommendations(try await fetchGuestRecommendPage(
                     excluding: Set(previousIDs),
                     minimumFreshCount: minimumFreshCount ?? (previousIDs.isEmpty ? 14 : 10),
                     maximumFreshCount: maximumFreshCount,
                     maximumAttempts: 5
-                )
+                ))
             }
             if let minimumFreshCount {
-                return try await fetchUniqueRecommendRefreshPage(
+                return filterFeedRecommendations(try await fetchUniqueRecommendRefreshPage(
                     excluding: Set(previousIDs),
                     minimumFreshCount: minimumFreshCount,
                     maximumFreshCount: maximumFreshCount,
                     maximumAttempts: 5
-                )
+                ))
             }
             var lastPage = [VideoItem]()
             for attempt in 0..<5 {
@@ -42,9 +42,10 @@ extension HomeFeedPageCoordinator {
                     freshIndex: freshIndex,
                     limit: maximumFreshCount
                 )
-                lastPage = page
-                if HomeFeedVisibleChangeDetector.hasVisibleChange(in: page, comparedTo: previousIDs) {
-                    return page
+                let filteredPage = filterFeedRecommendations(page)
+                lastPage = filteredPage
+                if HomeFeedVisibleChangeDetector.hasVisibleChange(in: filteredPage, comparedTo: previousIDs) {
+                    return filteredPage
                 }
             }
             return lastPage

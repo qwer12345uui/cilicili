@@ -26,7 +26,16 @@ extension VideoDetailViewModel {
         try await fetchPlayURLWithTimeout(
             timeout: playURLFullRecoveryTimeoutNanoseconds
         ) { [self] in
-            try await api.fetchPlayURL(
+            if detail.isPGCEpisode {
+                return try await api.fetchPgcPlayURL(
+                    bvid: detail.bvid,
+                    cid: cid,
+                    seasonID: detail.pgcSeasonID,
+                    epID: detail.pgcEpisodeID,
+                    preferredQuality: adaptiveStartupPreferredQuality
+                )
+            }
+            return try await api.fetchPlayURL(
                 bvid: detail.bvid,
                 cid: cid,
                 page: page,

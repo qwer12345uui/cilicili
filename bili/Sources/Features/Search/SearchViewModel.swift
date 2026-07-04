@@ -51,6 +51,8 @@ enum SearchSortOrder: String, CaseIterable, Identifiable, Hashable {
 
 enum SearchScope: String, CaseIterable, Identifiable, Hashable {
     case video
+    case bangumi
+    case movie
     case user
 
     var id: String { rawValue }
@@ -59,6 +61,10 @@ enum SearchScope: String, CaseIterable, Identifiable, Hashable {
         switch self {
         case .video:
             return "视频"
+        case .bangumi:
+            return "番剧"
+        case .movie:
+            return "影视"
         case .user:
             return "UP主"
         }
@@ -68,6 +74,10 @@ enum SearchScope: String, CaseIterable, Identifiable, Hashable {
         switch self {
         case .video:
             return "play.rectangle"
+        case .bangumi:
+            return "play.tv"
+        case .movie:
+            return "film"
         case .user:
             return "person.crop.circle"
         }
@@ -238,6 +248,12 @@ final class SearchViewModel: ObservableObject {
         case .video:
             return try await api.searchVideos(keyword: keyword, page: page, order: selectedOrder.apiValue)
                 .map(SearchResultItem.video)
+        case .bangumi:
+            return try await api.searchBangumi(keyword: keyword, page: page)
+                .map(SearchResultItem.bangumi)
+        case .movie:
+            return try await api.searchMovies(keyword: keyword, page: page)
+                .map(SearchResultItem.movie)
         case .user:
             return try await api.searchUsers(keyword: keyword, page: page)
                 .map(SearchResultItem.user)

@@ -40,6 +40,9 @@ extension View {
         navigationDestination(for: VideoItem.self) { video in
             VideoDetailView(seedVideo: video)
         }
+        .navigationDestination(for: PgcSeasonRoute.self) { route in
+            PgcSeasonView(route: route)
+        }
         .navigationDestination(for: VideoOwner.self) { owner in
             UploaderView(owner: owner)
         }

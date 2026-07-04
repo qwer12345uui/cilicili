@@ -10,6 +10,7 @@ extension VideoDetailViewModel {
         failedPlayVariantIDs.removeAll()
 
         guard !variants.isEmpty else {
+            currentPlayURLData = nil
             playVariants = []
             selectedPlayVariant = nil
             playURLState = .failed(codecUnavailableMessage())
@@ -25,7 +26,10 @@ extension VideoDetailViewModel {
     }
 
     func codecUnavailableMessage() -> String {
-        libraryStore.videoCodecPreference.forcedUnavailableMessage
+        if libraryStore.forceHardwareDecodeEnabled {
+            return "当前视频没有可播放的硬解或单流播放地址，可切换编码后重试。"
+        }
+        return libraryStore.videoCodecPreference.forcedUnavailableMessage
             ?? "当前视频没有可硬解的播放地址，可稍后重试或调整播放设置。"
     }
 

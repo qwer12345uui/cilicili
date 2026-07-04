@@ -1,6 +1,7 @@
 import SwiftUI
 
 struct PlayerPerformanceOverlayContent: View {
+    @ObservedObject var diagnosticsStore: VideoDetailNetworkDiagnosticsRenderStore
     let metricsID: String
     let session: PlayerPerformanceSession?
     let playerViewModel: PlayerStateViewModel?
@@ -16,10 +17,7 @@ struct PlayerPerformanceOverlayContent: View {
 
             PlayerPerformanceOverlayHeaderRow(
                 metricsID: metricsID,
-                copyText: PlayerPerformanceOverlayFormatting.performanceCopyText(
-                    metricsID: metricsID,
-                    session: session
-                )
+                copyTextProvider: copyText
             )
 
             Divider()
@@ -29,11 +27,15 @@ struct PlayerPerformanceOverlayContent: View {
                 VStack(alignment: .leading, spacing: 7) {
                     if let session {
                         PlayerPerformanceOverlayLoadedContent(
+                            diagnosticsStore: diagnosticsStore,
                             session: session,
                             playerViewModel: playerViewModel
                         )
                     } else {
-                        PlayerPerformanceOverlayEmptyContent()
+                        PlayerPerformanceOverlayEmptyContent(
+                            diagnosticsStore: diagnosticsStore,
+                            playerViewModel: playerViewModel
+                        )
                     }
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -54,5 +56,14 @@ struct PlayerPerformanceOverlayContent: View {
                 .stroke(PlayerPerformanceOverlayFormatting.panelStroke, lineWidth: 0.7)
         }
         .shadow(color: .black.opacity(0.22), radius: 18, y: 8)
+    }
+
+    private func copyText() -> String? {
+        PlayerPerformanceOverlayDiagnosticsCopyTextFormatter.text(
+            metricsID: metricsID,
+            session: session,
+            diagnosticsStore: diagnosticsStore,
+            playerViewModel: playerViewModel
+        )
     }
 }

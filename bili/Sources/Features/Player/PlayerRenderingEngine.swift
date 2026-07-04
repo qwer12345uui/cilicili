@@ -114,10 +114,29 @@ struct PlayerPlaybackSnapshot: Equatable, Sendable {
 }
 
 struct PlayerEngineDiagnostics: Equatable, Sendable {
+    enum PlaybackPipeline: String, Sendable {
+        case unknown
+        case dashLocalHLS
+        case liveHLSProxy
+        case directAVURLAsset
+
+        var title: String {
+            switch self {
+            case .unknown:
+                return "未知"
+            case .dashLocalHLS:
+                return "DASH/fMP4 -> 本地 HLS -> AVPlayer"
+            case .liveHLSProxy:
+                return "远端 HLS -> 本地代理 -> AVPlayer"
+            case .directAVURLAsset:
+                return "直连 AVURLAsset -> AVPlayer"
+            }
+        }
+    }
+
     enum DecodePath: String, Sendable {
         case unknown
         case avPlayer
-        case sampleBuffer
 
         var title: String {
             switch self {
@@ -125,42 +144,60 @@ struct PlayerEngineDiagnostics: Equatable, Sendable {
                 return "未知"
             case .avPlayer:
                 return "AVPlayer / 系统解码"
-            case .sampleBuffer:
-                return "SampleBuffer / 系统硬解"
             }
         }
     }
 
     var engineName: String
     var decodePath: DecodePath
+    var playbackPipeline: PlaybackPipeline
     var codec: String?
+    var videoCodecIdentifier: String?
+    var audioCodecIdentifier: String?
+    var videoCodecid: Int?
+    var audioCodecid: Int?
     var resolution: String?
     var frameRate: String?
     var bandwidth: Int?
     var dynamicRange: BiliVideoDynamicRange
     var isDASH: Bool
     var usesLocalHLSBridge: Bool
+    var localPlaylistURL: String?
+    var sourceVideoHost: String?
+    var sourceAudioHost: String?
     var hlsVideoVariantCount: Int
     var hlsVideoVariantQualities: [Int]
+    var hlsVideoVariantDetails: [String]
     var preferredForwardBufferDuration: TimeInterval?
     var maxBufferDuration: TimeInterval?
     var asynchronousDecompressionEnabled: Bool
     var hardwareDecodeRequested: Bool
     var isHardwareDecodeCompatible: Bool?
     var environmentSummary: String?
+    var nativeHDRVideoLayerState: String? = nil
+    var nativeHDRVideoLayerSummary: String? = nil
 
     static let empty = PlayerEngineDiagnostics(
         engineName: "未创建",
         decodePath: .unknown,
+        playbackPipeline: .unknown,
         codec: nil,
+        videoCodecIdentifier: nil,
+        audioCodecIdentifier: nil,
+        videoCodecid: nil,
+        audioCodecid: nil,
         resolution: nil,
         frameRate: nil,
         bandwidth: nil,
         dynamicRange: .sdr,
         isDASH: false,
         usesLocalHLSBridge: false,
+        localPlaylistURL: nil,
+        sourceVideoHost: nil,
+        sourceAudioHost: nil,
         hlsVideoVariantCount: 0,
         hlsVideoVariantQualities: [],
+        hlsVideoVariantDetails: [],
         preferredForwardBufferDuration: nil,
         maxBufferDuration: nil,
         asynchronousDecompressionEnabled: false,
@@ -170,7 +207,7 @@ struct PlayerEngineDiagnostics: Equatable, Sendable {
     )
 
     var compactDescription: String {
-        var parts = [engineName, decodePath.title]
+        var parts = [engineName, decodePath.title, playbackPipeline.title]
         if let codec, !codec.isEmpty {
             parts.append(codec)
         }
@@ -201,7 +238,81 @@ struct PlayerEngineDiagnostics: Equatable, Sendable {
                 .joined(separator: "/")
             parts.append(qualities)
         }
+        if !hlsVideoVariantDetails.isEmpty {
+            parts.append(hlsVideoVariantDetails.joined(separator: "/"))
+        }
+        if let nativeHDRVideoLayerSummary, !nativeHDRVideoLayerSummary.isEmpty {
+            parts.append("NativeHDR \(nativeHDRVideoLayerSummary)")
+        }
         return parts.joined(separator: " · ")
+    }
+
+    var sourceDynamicRangeTitle: String {
+        Self.dynamicRangeTitle(dynamicRange)
+    }
+
+    var renderedDynamicRangeTitle: String {
+        if dynamicRange == .dolbyVision,
+           nativeHDRVideoLayerState == "ready" {
+            return "Dolby Vision (原生视频层)"
+        }
+        guard usesLocalHLSBridge,
+              let hlsRange = hlsRenderedDynamicRangeTitle
+        else { return sourceDynamicRangeTitle }
+        if dynamicRange == .dolbyVision, hlsRange != sourceDynamicRangeTitle {
+            if hlsRange.contains("Dolby Vision") {
+                return hlsRange
+            }
+            return "\(hlsRange) (Dolby Vision 基层)"
+        }
+        return hlsRange
+    }
+
+    private var hlsRenderedDynamicRangeTitle: String? {
+        let details = hlsVideoVariantDetails.joined(separator: " ")
+        let lowercasedDetails = details.lowercased()
+        if lowercasedDetails.contains("dvpolicy=protectedhlg") {
+            return "HLG (Dolby Vision 元数据关闭)"
+        }
+        if lowercasedDetails.contains("dvpolicy=compatiblehlg") {
+            return "HLG"
+        }
+        if lowercasedDetails.contains("dvpolicy=applenativep8hls")
+            || lowercasedDetails.contains("dvpath=applenativep8hls") {
+            return "Dolby Vision (Apple 原生 P8)"
+        }
+        if lowercasedDetails.contains("dvpolicy=fulleffect") {
+            return "Dolby Vision (原生主轨)"
+        }
+        if lowercasedDetails.contains("dvpolicy=supplementalhls") {
+            return "Dolby Vision (HLS supplemental)"
+        }
+        if lowercasedDetails.contains("supp=dvh1")
+            || lowercasedDetails.contains("supp=dvhe")
+            || lowercasedDetails.contains("supplemental-codecs=\"dvh1")
+            || lowercasedDetails.contains("supplemental-codecs=\"dvhe") {
+            return "Dolby Vision"
+        }
+        if details.contains("HLG") || details.contains("color=18") {
+            return "HLG"
+        }
+        if details.contains("PQ") || details.contains("color=16") {
+            return dynamicRange == .dolbyVision ? "Dolby Vision" : "HDR10"
+        }
+        return nil
+    }
+
+    private static func dynamicRangeTitle(_ dynamicRange: BiliVideoDynamicRange) -> String {
+        switch dynamicRange {
+        case .sdr:
+            return "SDR"
+        case .hdr10:
+            return "HDR10"
+        case .hlg:
+            return "HLG"
+        case .dolbyVision:
+            return "Dolby Vision"
+        }
     }
 }
 
@@ -399,15 +510,7 @@ extension UIView {
 @MainActor
 enum DefaultPlayerRenderingEngine {
     static func make() -> PlayerRenderingEngine {
-        make(kernel: PlayerKernelType.stored())
-    }
-
-    static func make(preference: PlayerRenderingEnginePreference) -> PlayerRenderingEngine {
-        make(kernel: PlayerKernelType(preference: preference))
-    }
-
-    static func make(kernel: PlayerKernelType) -> PlayerRenderingEngine {
-        AdaptivePlayerRenderingEngine(preferredKernel: kernel.normalizedForFormalPlayback)
+        AVPlayerHLSBridgeEngine()
     }
 }
 
@@ -1391,14 +1494,7 @@ struct PlayerPlaybackAdaptationProfile: Equatable, Sendable {
         case slow = 3
 
         nonisolated var startupQualityCeiling: Int? {
-            switch self {
-            case .normal, .fallback:
-                return nil
-            case .cautious:
-                return 80
-            case .slow:
-                return 32
-            }
+            nil
         }
 
         nonisolated var shouldAllowStartupCacheFallback: Bool {

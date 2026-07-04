@@ -24,12 +24,20 @@ extension VideoDetailViewModel {
         cid: Int,
         page: Int?
     ) async throws -> PlayURLData {
-        try await api.fetchStartupPlayURL(
+        if detail.isPGCEpisode {
+            return try await api.fetchPgcPlayURL(
+                bvid: bvid,
+                cid: cid,
+                seasonID: detail.pgcSeasonID,
+                epID: detail.pgcEpisodeID,
+                preferredQuality: adaptiveStartupPreferredQuality
+            )
+        }
+        return try await api.fetchStartupPlayURL(
             bvid: bvid,
             cid: cid,
             page: page,
-            preferredQuality: adaptiveStartupPreferredQuality,
-            startupQualityCeiling: adaptiveStartupQualityCeiling
+            preferredQuality: adaptiveStartupPreferredQuality
         )
     }
 
@@ -47,7 +55,16 @@ extension VideoDetailViewModel {
             let supplemented = try await fetchPlayURLWithTimeout(
                 timeout: initialTargetQualitySupplementTimeoutNanoseconds
             ) { [self] in
-                try await api.fetchPlayURL(
+                if detail.isPGCEpisode {
+                    return try await api.fetchPgcPlayURL(
+                        bvid: bvid,
+                        cid: cid,
+                        seasonID: detail.pgcSeasonID,
+                        epID: detail.pgcEpisodeID,
+                        preferredQuality: preferredQuality
+                    )
+                }
+                return try await api.fetchPlayURL(
                     bvid: bvid,
                     cid: cid,
                     page: page,

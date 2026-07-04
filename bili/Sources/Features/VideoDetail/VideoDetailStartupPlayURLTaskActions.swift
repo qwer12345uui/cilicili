@@ -14,14 +14,12 @@ extension VideoDetailViewModel {
         page: Int?
     ) async throws -> PlayURLData {
         let adaptiveQuality = adaptiveStartupPreferredQuality
-        let adaptiveCeiling = adaptiveStartupQualityCeiling
         let streamSource = libraryStore.playbackStreamSourcePreference
         let key = [
             bvid,
             String(cid),
             page.map(String.init) ?? "-",
             "q\(adaptiveQuality ?? 0)",
-            "ceiling\(adaptiveCeiling ?? 0)",
             streamSource.cachePlatform
         ].joined(separator: "|")
         if startupPlayURLTaskKey == key, let startupPlayURLTask {

@@ -13,6 +13,7 @@ extension VideoDetailViewModel {
 
     func applyCachedDetailForFastStartIfAvailable() async -> Bool {
         guard !isPlaybackInvalidatedForNavigation else { return false }
+        guard !detail.isPGCEpisode else { return false }
         guard let cached = await VideoPreloadCenter.shared.cachedDetail(for: detail.bvid) else {
             return false
         }

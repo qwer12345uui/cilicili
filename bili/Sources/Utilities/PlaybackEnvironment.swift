@@ -63,14 +63,6 @@ nonisolated struct PlaybackEnvironment: Sendable {
             || isConstrainedNetwork
     }
 
-    nonisolated var fastStartQuality: Int {
-        32
-    }
-
-    nonisolated var startupPreferredQualityCeiling: Int {
-        32
-    }
-
     nonisolated var preferredQualityLadder: [Int] {
         if shouldPreferConservativePlayback {
             return [64, 32, 16, 6]
@@ -209,10 +201,6 @@ nonisolated enum PlaybackCodecPolicy {
 #else
         VTIsHardwareDecodeSupported(kCMVideoCodecType_HEVC)
 #endif
-    }
-
-    nonisolated static var canDecodeAV1: Bool {
-        return false
     }
 
     nonisolated static var canDecodeHDRVideo: Bool {

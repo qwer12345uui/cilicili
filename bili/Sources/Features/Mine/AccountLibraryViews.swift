@@ -68,6 +68,24 @@ enum AccountLibraryKind: Hashable, Identifiable {
             return "账号收藏同步失败"
         }
     }
+
+    var loadMoreTitle: String {
+        switch self {
+        case .history:
+            return "正在加载更多观看记录"
+        case .favorites:
+            return "正在加载更多收藏"
+        }
+    }
+
+    var loadMoreErrorTitle: String {
+        switch self {
+        case .history:
+            return "更多观看记录加载失败"
+        case .favorites:
+            return "更多收藏加载失败"
+        }
+    }
 }
 
 struct AccountLibraryButtonRow: View {

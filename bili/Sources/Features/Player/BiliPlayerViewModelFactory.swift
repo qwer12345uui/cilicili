@@ -42,7 +42,14 @@ enum BiliPlayerViewModelFactory {
             resumeTime: resumeTime ?? 0,
             dynamicRange: playVariant.dynamicRange,
             cdnPreference: cdnPreference,
-            metricsID: historyVideo?.bvid
+            metricsID: historyVideo?.bvid,
+            artworkURL: artworkURL(from: historyVideo?.pic)
         )
+    }
+
+    private static func artworkURL(from urlString: String?) -> URL? {
+        guard let normalized = urlString?.normalizedBiliURL() else { return nil }
+        return URL(string: normalized.biliImageThumbnailURL(maxSide: 720))
+            ?? URL(string: normalized)
     }
 }

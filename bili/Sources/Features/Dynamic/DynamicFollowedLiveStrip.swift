@@ -57,7 +57,7 @@ private struct FollowedLiveAvatar: View {
                     .foregroundStyle(.primary)
                     .padding(.horizontal, 5)
                     .padding(.vertical, 2.5)
-                    .glassEffect(.regular, in: Capsule())
+                    .biliRegularGlassEffect(in: Capsule())
                     .offset(y: 4)
             }
 

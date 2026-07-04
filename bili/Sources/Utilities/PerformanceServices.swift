@@ -293,8 +293,7 @@ actor VideoPreloadCenter {
                     bvid: bvid,
                     cid: cid,
                     page: page,
-                    preferredQuality: effectivePreferredQuality,
-                    startupQualityCeiling: nil
+                    preferredQuality: effectivePreferredQuality
                 )
                 guard !Task.isCancelled else {
                     self.finish(key)
@@ -996,6 +995,48 @@ actor VideoPreloadCenter {
         return cachedPlayURL(for: bvid, cid: cid, page: page, preferredQuality: preferredQuality)
     }
 
+    func pendingPlayURL(
+        for bvid: String,
+        cid: Int,
+        page: Int?,
+        preferredQuality: Int? = nil,
+        maximumPendingWait: UInt64
+    ) async -> PlayURLData? {
+        guard maximumPendingWait > 0 else { return nil }
+        let keys = pendingCacheKeys(
+            bvid: bvid,
+            cid: cid,
+            page: page,
+            preferredQuality: preferredQuality
+        )
+        guard let pendingKey = keys.first(where: { key in
+            guard tasks[key] != nil else { return false }
+            guard let preferredQuality else { return true }
+            return taskPreferredQualities[key] == preferredQuality
+        }),
+        let task = tasks[pendingKey]
+        else { return nil }
+
+        let timeoutTask = Task(priority: .utility) {
+            try? await Task.sleep(nanoseconds: maximumPendingWait)
+            return false
+        }
+        let didFinish = await withTaskGroup(of: Bool.self, returning: Bool.self) { group in
+            group.addTask {
+                await task.value != nil
+            }
+            group.addTask {
+                await timeoutTask.value
+            }
+            let result = await group.next() ?? false
+            group.cancelAll()
+            timeoutTask.cancel()
+            return result
+        }
+        guard didFinish else { return nil }
+        return cachedPlayURL(for: bvid, cid: cid, page: page, preferredQuality: preferredQuality)
+    }
+
     func store(
         _ data: PlayURLData,
         bvid: String,
@@ -1280,15 +1321,12 @@ actor VideoPreloadCenter {
                     message: "startupPrebuild=\(didPrebuild ? "ready" : "skip") variant=q\(variant.quality)"
                 )
                 let didWarmRanges = await rangesTask.value
-                if didWarmRanges {
-                    self.markMediaWarmupReady(key)
-                }
                 await PlayerMetricsLog.record(
                     .manifestStage,
                     metricsID: bvid,
                     message: "startupRanges=\(didWarmRanges ? "ready" : "skip") variant=q\(variant.quality)"
                 )
-                self.finishMediaWarmup(key, didWarm: didPrebuild || didWarmRanges)
+                self.finishMediaWarmup(key, didWarm: didPrebuild)
             }
         } else {
             didCreateWarmup = false
@@ -1540,24 +1578,101 @@ actor VideoPreloadCenter {
     private func promoteStartupWarmupIfPossible(for video: VideoItem) {
         guard let cid = video.cid else { return }
         let effectivePreferredQuality = defaultPreferredQuality
-        guard let data = cachedPlayablePlayURL(
-            for: video.bvid,
+        let effectiveTargetPreferredQuality = defaultTargetPreferredQuality ?? effectivePreferredQuality
+        let effectiveCDNPreference = defaultCDNPreference
+        promoteCachedStartupWarmupIfPossible(
+            bvid: video.bvid,
             cid: cid,
             page: nil,
-            preferredQuality: effectivePreferredQuality
+            preferredQuality: effectivePreferredQuality,
+            targetPreferredQuality: effectiveTargetPreferredQuality,
+            cdnPreference: effectiveCDNPreference,
+            source: "focusCache"
+        )
+        promotePendingStartupWarmupIfPossible(
+            bvid: video.bvid,
+            cid: cid,
+            page: nil,
+            preferredQuality: effectivePreferredQuality,
+            targetPreferredQuality: effectiveTargetPreferredQuality,
+            cdnPreference: effectiveCDNPreference
+        )
+    }
+
+    private func promoteCachedStartupWarmupIfPossible(
+        bvid: String,
+        cid: Int,
+        page: Int?,
+        preferredQuality: Int?,
+        targetPreferredQuality: Int?,
+        cdnPreference: PlaybackCDNPreference,
+        source: String
+    ) {
+        guard isFocusedPlayback(bvid) else { return }
+        guard let data = cachedPlayablePlayURL(
+            for: bvid,
+            cid: cid,
+            page: page,
+            preferredQuality: preferredQuality
         ) else { return }
 
         scheduleStartupPackageWarmup(
             data,
-            bvid: video.bvid,
+            bvid: bvid,
             cid: cid,
-            preferredQuality: effectivePreferredQuality,
-            targetPreferredQuality: defaultTargetPreferredQuality ?? effectivePreferredQuality,
-            page: nil,
-            cdnPreference: defaultCDNPreference,
+            preferredQuality: preferredQuality,
+            targetPreferredQuality: targetPreferredQuality,
+            page: page,
+            cdnPreference: cdnPreference,
             mediaWarmupMode: .full,
             delay: 0
         )
+        PlayerMetricsLog.logger.info(
+            "playInfoStartupWarmupPromote bvid=\(bvid, privacy: .public) cid=\(cid, privacy: .public) preferred=\(preferredQuality ?? 0, privacy: .public) source=\(source, privacy: .public)"
+        )
+        Task { @MainActor in
+            PlayerMetricsLog.record(
+                .manifestStage,
+                metricsID: bvid,
+                message: "startupPromote=\(source) q\(preferredQuality ?? 0)"
+            )
+        }
+    }
+
+    private func promotePendingStartupWarmupIfPossible(
+        bvid: String,
+        cid: Int,
+        page: Int?,
+        preferredQuality: Int?,
+        targetPreferredQuality: Int?,
+        cdnPreference: PlaybackCDNPreference
+    ) {
+        let keys = pendingCacheKeys(
+            bvid: bvid,
+            cid: cid,
+            page: page,
+            preferredQuality: preferredQuality
+        )
+        guard let pendingKey = keys.first(where: { key in
+            guard tasks[key] != nil else { return false }
+            guard let preferredQuality else { return true }
+            return taskPreferredQualities[key] == preferredQuality
+        }),
+        let task = tasks[pendingKey]
+        else { return }
+
+        Task(priority: .userInitiated) { [task, bvid, cid, page, preferredQuality, targetPreferredQuality, cdnPreference] in
+            guard await task.value != nil else { return }
+            self.promoteCachedStartupWarmupIfPossible(
+                bvid: bvid,
+                cid: cid,
+                page: page,
+                preferredQuality: preferredQuality,
+                targetPreferredQuality: targetPreferredQuality,
+                cdnPreference: cdnPreference,
+                source: "focusPending"
+            )
+        }
     }
 
     private func shouldAllowPreload(bvid: String, priority: TaskPriority) -> Bool {
@@ -1812,9 +1927,9 @@ actor VideoPreloadCenter {
         ].joined(separator: "|")
     }
 
-    private nonisolated static func playURLCodecCachePolicyToken(preferredQuality _: Int?) -> String {
+    private nonisolated static func playURLCodecCachePolicyToken(preferredQuality: Int?) -> String {
         let preference = VideoCodecPreference.stored()
-        let policy = "hevcFirstNoAV1V1"
+        let policy = preferredQuality == 126 ? "dolbyAutoStrictNoAV1V3" : "hevcFirstNoAV1V1"
         return "codec-\(preference.rawValue)-\(policy)"
     }
 
@@ -1958,9 +2073,6 @@ actor VideoPreloadCenter {
             } else {
                 didWarmRanges = false
             }
-            if didWarmRanges {
-                self.markMediaWarmupReady(key)
-            }
             await PlayerMetricsLog.record(
                 .manifestStage,
                 metricsID: bvid,
@@ -1969,7 +2081,7 @@ actor VideoPreloadCenter {
             PlayerMetricsLog.logger.info(
                 "playInfoStartupWarmupComplete bvid=\(bvid, privacy: .public) mode=\(routePlanOnly ? "routePlanOnly" : "full", privacy: .public) routePlan=\(didPrebuild ? "ready" : "skip", privacy: .public) ranges=\(routePlanOnly ? "deferred" : (didWarmRanges ? "ready" : "skip"), privacy: .public)"
             )
-            self.finishMediaWarmup(key, didWarm: didPrebuild || didWarmRanges)
+            self.finishMediaWarmup(key, didWarm: didPrebuild)
         }
     }
 
@@ -2425,7 +2537,10 @@ actor VideoPreloadCenter {
         guard !videoTracks.isEmpty else { return false }
         let bridgedAudioTrack = HLSBridgeTrack(
             url: audioURL,
-            fallbackURLs: audioTrack.backupPlayURLs(cdnPreference: cdnPreference),
+            fallbackURLs: audioTrack.fallbackPlayURLs(
+                cdnPreference: cdnPreference,
+                selectedURL: audioURL
+            ),
             stream: audioTrack,
             mediaType: .audio
         )
@@ -2607,7 +2722,10 @@ actor VideoPreloadCenter {
             else { return nil }
             return HLSBridgeTrack(
                 url: audioURL,
-                fallbackURLs: audioTrack.backupPlayURLs(cdnPreference: cdnPreference),
+                fallbackURLs: audioTrack.fallbackPlayURLs(
+                    cdnPreference: cdnPreference,
+                    selectedURL: audioURL
+                ),
                 stream: audioTrack,
                 mediaType: .audio
             )
@@ -3248,6 +3366,94 @@ nonisolated enum RemoteImageCachePolicy: Hashable, Sendable {
     }
 }
 
+nonisolated enum RemoteImageQualityPreference: String, CaseIterable, Identifiable, Codable, Sendable {
+    case automatic
+    case dataSaver
+    case balanced
+    case high
+
+    static let storageKey = "cc.bili.display.remoteImageQualityPreference.v1"
+    static let defaultValue: RemoteImageQualityPreference = .automatic
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .automatic:
+            return "自动"
+        case .dataSaver:
+            return "省流"
+        case .balanced:
+            return "均衡"
+        case .high:
+            return "高清"
+        }
+    }
+
+    var detail: String {
+        switch self {
+        case .automatic:
+            return "Wi-Fi 保持高清，蜂窝、低电量或发热时降低封面和缩略图尺寸。"
+        case .dataSaver:
+            return "优先少流量，适合蜂窝网络或缓存空间紧张时使用。"
+        case .balanced:
+            return "限制超大缩略图，兼顾清晰度和缓存占用。"
+        case .high:
+            return "按界面请求尺寸加载，适合 Wi-Fi 和高质量封面。"
+        }
+    }
+
+    static func stored(in userDefaults: UserDefaults = .standard) -> RemoteImageQualityPreference {
+        guard let rawValue = userDefaults.string(forKey: storageKey),
+              let preference = RemoteImageQualityPreference(rawValue: rawValue)
+        else { return defaultValue }
+        return preference
+    }
+
+    static func effectiveMaximumPixelLength(_ requested: Int) -> Int {
+        stored().effectiveMaximumPixelLength(requested)
+    }
+
+    func effectiveMaximumPixelLength(_ requested: Int) -> Int {
+        let requested = max(96, requested)
+        let cap: Int
+        switch self {
+        case .automatic:
+            let environment = PlaybackEnvironment.current
+            if environment.isLowPowerModeEnabled || environment.isThermallyConstrained {
+                cap = 640
+            } else {
+                switch environment.networkClass {
+                case .wifi, .unknown:
+                    cap = 1280
+                case .cellular, .constrained:
+                    cap = 760
+                }
+            }
+        case .dataSaver:
+            cap = 560
+        case .balanced:
+            cap = 960
+        case .high:
+            cap = 2600
+        }
+        return min(requested, cap)
+    }
+
+    static func effectiveThumbnailSize(width: Int, height: Int) -> (width: Int, height: Int) {
+        let width = max(1, width)
+        let height = max(1, height)
+        let maxSide = max(width, height)
+        let effectiveMaxSide = effectiveMaximumPixelLength(maxSide)
+        guard effectiveMaxSide < maxSide else { return (width, height) }
+        let ratio = Double(effectiveMaxSide) / Double(maxSide)
+        return (
+            max(1, Int((Double(width) * ratio).rounded())),
+            max(1, Int((Double(height) * ratio).rounded()))
+        )
+    }
+}
+
 nonisolated struct RemoteImageSource: Hashable, Sendable {
     let url: URL
     let fallbackURL: URL?
@@ -3267,6 +3473,26 @@ enum RemoteImageLoadingPhase: Equatable {
     case loading
     case loaded
     case failed
+}
+
+@MainActor
+private final class RemoteImageDisplayMemoryCache {
+    static let shared = RemoteImageDisplayMemoryCache()
+
+    private let cache = NSCache<NSString, UIImage>()
+
+    private init() {
+        cache.countLimit = 360
+        cache.totalCostLimit = 64 * 1024 * 1024
+    }
+
+    func image(for identity: String) -> UIImage? {
+        cache.object(forKey: identity as NSString)
+    }
+
+    func store(_ image: UIImage, for identity: String) {
+        cache.setObject(image, forKey: identity as NSString, cost: image.memoryCost)
+    }
 }
 
 struct CachedRemoteImage<Content: View, Placeholder: View>: View {
@@ -3325,14 +3551,14 @@ struct CachedRemoteImage<Content: View, Placeholder: View>: View {
 
     var body: some View {
         Group {
-            if let image = loader.image {
+            if let image = displayedImage {
                 content(Image(uiImage: image))
                     .transition(animatesAppearance ? .opacity : .identity)
             } else {
                 placeholder(displayedPhase, retry)
             }
         }
-        .animation(animatesAppearance ? .easeInOut(duration: 0.16) : nil, value: loader.image != nil)
+        .animation(animatesAppearance ? .easeInOut(duration: 0.16) : nil, value: displayedImage != nil)
         .onChange(of: loader.phase) { _, phase in
             scheduleAutomaticRetryIfNeeded(for: phase)
         }
@@ -3364,6 +3590,10 @@ struct CachedRemoteImage<Content: View, Placeholder: View>: View {
 
     private var loadTaskIdentity: String {
         "\(cacheIdentity)|reload:\(reloadToken)"
+    }
+
+    private var displayedImage: UIImage? {
+        loader.image ?? RemoteImageDisplayMemoryCache.shared.image(for: cacheIdentity)
     }
 
     private var displayedPhase: RemoteImageLoadingPhase {
@@ -3508,6 +3738,7 @@ final class CachedRemoteImageLoader: ObservableObject {
                     guard loadIdentity == identity else { return }
                     image = cachedImage
                     imageIdentity = identity
+                    RemoteImageDisplayMemoryCache.shared.store(cachedImage, for: identity)
                     phase = .loaded
                     task = nil
                     return
@@ -3530,6 +3761,7 @@ final class CachedRemoteImageLoader: ObservableObject {
                     guard self?.loadIdentity == identity else { return }
                     self?.image = loadedImage
                     self?.imageIdentity = identity
+                    RemoteImageDisplayMemoryCache.shared.store(loadedImage, for: identity)
                     self?.phase = .loaded
                     self?.task = nil
                 }

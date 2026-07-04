@@ -1,5 +1,6 @@
 import AVFoundation
 import AVKit
+import CryptoKit
 import CoreImage
 import Network
 import OSLog
@@ -10,7 +11,7 @@ import UIKit
 final class AVPlayerHLSBridgeEngine: PlayerRenderingEngine {
     private static let interactiveSeekTolerance = CMTime(seconds: 0.35, preferredTimescale: 600)
     private static let seekProtectionReleaseDelayNanoseconds: UInt64 = 900_000_000
-    private static let dolbyVisionFirstFrameTimeoutNanoseconds: UInt64 = 11_000_000_000
+    private static let hdrFirstFrameTimeoutNanoseconds: UInt64 = 11_000_000_000
     private static let terminalStallDelayNanoseconds: UInt64 = 14_000_000_000
     private static let itemReadinessTimeoutNanoseconds: UInt64 = 14_000_000_000
     private static let loadedRangeContinuityTolerance: TimeInterval = 0.12
@@ -42,6 +43,9 @@ final class AVPlayerHLSBridgeEngine: PlayerRenderingEngine {
     private weak var surfaceView: UIView?
     private var playerLayer: AVPlayerLayer?
     private weak var playerViewController: AVPlayerViewController?
+    private let nativeDolbyVideoOverlay = NativeDolbyVideoOverlayRenderer()
+    private var nativeDolbyVideoSyncTask: Task<Void, Never>?
+    private var lastDisplayDynamicRangePolicySummary: String?
     private var playerItem: AVPlayerItem?
     private var videoOutput: AVPlayerItemVideoOutput?
     private var lastVideoFrameImage: UIImage?
@@ -64,6 +68,8 @@ final class AVPlayerHLSBridgeEngine: PlayerRenderingEngine {
     private var seekProtectionReleaseTask: Task<Void, Never>?
     private var seekProtectionTargetTime: TimeInterval?
     private var seekProtectionAppliedAt: CFTimeInterval?
+    private var seekWarmupTask: Task<Void, Never>?
+    private var seekWarmupGeneration = 0
     private var automaticallyWaitsBeforeSeekProtection: Bool?
     private var startupBitRateLiftTask: Task<Void, Never>?
     private var terminalStallTask: Task<Void, Never>?
@@ -120,22 +126,56 @@ final class AVPlayerHLSBridgeEngine: PlayerRenderingEngine {
         PlayerEngineDiagnostics(
             engineName: "AVPlayer",
             decodePath: .avPlayer,
+            playbackPipeline: diagnosticsPlaybackPipeline,
             codec: source?.videoStream?.codecLabel,
+            videoCodecIdentifier: source?.videoStream?.codecs,
+            audioCodecIdentifier: source?.audioStream?.codecs,
+            videoCodecid: source?.videoStream?.codecid,
+            audioCodecid: source?.audioStream?.codecid,
             resolution: source?.videoStream?.resolutionLabel,
             frameRate: source?.videoStream?.displayFrameRate,
             bandwidth: source?.videoStream?.bandwidth,
             dynamicRange: source?.dynamicRange ?? .sdr,
             isDASH: source?.audioURL != nil,
             usesLocalHLSBridge: hlsBridge != nil || liveHLSProxy != nil,
+            localPlaylistURL: diagnosticsLocalPlaylistURL,
+            sourceVideoHost: source?.videoURL?.host,
+            sourceAudioHost: source?.audioURL?.host,
             hlsVideoVariantCount: hlsBridge?.videoVariantCount ?? 0,
             hlsVideoVariantQualities: hlsBridge?.videoVariantQualities ?? [],
+            hlsVideoVariantDetails: diagnosticVideoVariantDetails,
             preferredForwardBufferDuration: player.currentItem?.preferredForwardBufferDuration,
             maxBufferDuration: nil,
             asynchronousDecompressionEnabled: false,
-            hardwareDecodeRequested: true,
+            hardwareDecodeRequested: source?.videoStream != nil || source?.audioURL != nil,
             isHardwareDecodeCompatible: source?.videoStream?.isHardwareDecodingCompatibleVideo,
-            environmentSummary: PlaybackEnvironment.current.diagnosticSummary
+            environmentSummary: PlaybackEnvironment.current.diagnosticSummary,
+            nativeHDRVideoLayerState: nativeDolbyVideoOverlay.stateRawValue,
+            nativeHDRVideoLayerSummary: nativeDolbyVideoOverlay.diagnosticSummary
         )
+    }
+
+    private var diagnosticVideoVariantDetails: [String] {
+        var details = hlsBridge?.videoVariantDetails ?? []
+        if let overlaySummary = nativeDolbyVideoOverlay.diagnosticSummary {
+            details.append("nativeHDR \(overlaySummary)")
+        }
+        return details
+    }
+
+    private var diagnosticsPlaybackPipeline: PlayerEngineDiagnostics.PlaybackPipeline {
+        if hlsBridge != nil {
+            return .dashLocalHLS
+        }
+        if liveHLSProxy != nil {
+            return .liveHLSProxy
+        }
+        return .directAVURLAsset
+    }
+
+    private var diagnosticsLocalPlaylistURL: String? {
+        hlsBridge?.masterPlaylistURL.absoluteString
+            ?? liveHLSProxy?.playlistURL.absoluteString
     }
 
     var volume: Float {
@@ -152,6 +192,12 @@ final class AVPlayerHLSBridgeEngine: PlayerRenderingEngine {
     var onFirstFrame: (@MainActor (TimeInterval) -> Void)?
 
     init() {
+        nativeDolbyVideoOverlay.onReadyForDisplay = { [weak self] in
+            self?.handleNativeDolbyVideoOverlayReady()
+        }
+        nativeDolbyVideoOverlay.onReadyToPlay = { [weak self] in
+            self?.handleNativeDolbyVideoOverlayReadyToPlay()
+        }
         configureAudioSession()
         observePlayerState()
         observeAppLifecycle()
@@ -177,7 +223,13 @@ final class AVPlayerHLSBridgeEngine: PlayerRenderingEngine {
         if let periodicTimeObserver {
             player.removeTimeObserver(periodicTimeObserver)
         }
+        nativeDolbyVideoSyncTask?.cancel()
+        let nativeDolbyVideoOverlay = nativeDolbyVideoOverlay
+        Task { @MainActor in
+            nativeDolbyVideoOverlay.stop()
+        }
         seekProtectionReleaseTask?.cancel()
+        seekWarmupTask?.cancel()
         startupBitRateLiftTask?.cancel()
         terminalStallTask?.cancel()
         itemReadinessTimeoutTask?.cancel()
@@ -200,6 +252,7 @@ final class AVPlayerHLSBridgeEngine: PlayerRenderingEngine {
         } else {
             let layer = ensurePlayerLayer(in: surface)
             layer.player = player
+            nativeDolbyVideoOverlay.attach(to: surface, gravity: videoGravity)
         }
         refreshSurfaceLayout()
     }
@@ -211,10 +264,12 @@ final class AVPlayerHLSBridgeEngine: PlayerRenderingEngine {
         pendingSurfaceDetachTask = Task { @MainActor [weak self, weak detachedSurface] in
             await Task.yield()
             guard let self,
+                  let detachedSurface,
                   !Task.isCancelled,
                   self.surfaceView == nil || self.surfaceView === detachedSurface
             else { return }
             self.removePlayerLayer()
+            self.nativeDolbyVideoOverlay.detach(from: detachedSurface)
             self.pendingSurfaceDetachTask = nil
         }
         surfaceView = nil
@@ -227,6 +282,7 @@ final class AVPlayerHLSBridgeEngine: PlayerRenderingEngine {
             in: surfaceView,
             gravity: videoGravity
         )
+        nativeDolbyVideoOverlay.refreshLayout(in: surfaceView, gravity: videoGravity)
     }
 
     func recoverSurface() {
@@ -245,6 +301,7 @@ final class AVPlayerHLSBridgeEngine: PlayerRenderingEngine {
         refreshSurfaceLayout()
         layer.setNeedsLayout()
         layer.setNeedsDisplay()
+        nativeDolbyVideoOverlay.attach(to: surfaceView, gravity: videoGravity)
     }
 
     func setViewModel(_ viewModel: PlayerStateViewModel?) {
@@ -256,6 +313,7 @@ final class AVPlayerHLSBridgeEngine: PlayerRenderingEngine {
         videoGravity = gravity
         playerViewController?.videoGravity = gravity
         playerLayer?.videoGravity = gravity
+        nativeDolbyVideoOverlay.setVideoGravity(gravity, in: surfaceView)
     }
 
     func setContentOverlay(_ overlay: AnyView?) {
@@ -323,6 +381,8 @@ final class AVPlayerHLSBridgeEngine: PlayerRenderingEngine {
         isSeekProtectionActive = false
         seekProtectionReleaseTask?.cancel()
         seekProtectionReleaseTask = nil
+        seekWarmupTask?.cancel()
+        seekWarmupTask = nil
         seekProtectionTargetTime = nil
         seekProtectionAppliedAt = nil
         automaticallyWaitsBeforeSeekProtection = nil
@@ -337,7 +397,12 @@ final class AVPlayerHLSBridgeEngine: PlayerRenderingEngine {
         publishPlaybackState(.preparing)
         let prepared: PreparedPlayerItem
         do {
-            prepared = try await Self.makePlayerItem(source: source)
+            prepared = try await Self.makePlayerItem(
+                source: source,
+                onRemoteFailure: { [weak self] reason in
+                    self?.handleHLSRemoteFailure(reason, generation: generation)
+                }
+            )
         } catch {
             lastPlaybackFailureReason = prepareFailureReason(for: error, source: source)
             throw error
@@ -366,6 +431,7 @@ final class AVPlayerHLSBridgeEngine: PlayerRenderingEngine {
         configureStartupBuffering(for: item, source: source)
         attachVideoOutput(to: item)
         player.replaceCurrentItem(with: item)
+        configureNativeDolbyVideoOverlayIfNeeded(for: source, generation: generation)
         recordPrepareStage(
             source: source,
             stage: "installed",
@@ -409,6 +475,7 @@ final class AVPlayerHLSBridgeEngine: PlayerRenderingEngine {
             return
         }
         beginPlayback()
+        syncNativeDolbyVideoOverlay(reason: "play", force: true)
         scheduleTerminalStallWatchdog(reason: "play")
         let currentTime = displayTime(fromPlayerTime: player.currentTime().seconds)
         if player.rate > 0 || player.timeControlStatus == .playing {
@@ -426,6 +493,7 @@ final class AVPlayerHLSBridgeEngine: PlayerRenderingEngine {
         wantsPlayback = false
         cancelTerminalStallWatchdog()
         player.pause()
+        nativeDolbyVideoOverlay.pause()
         publishPlaybackState(.paused)
     }
 
@@ -435,6 +503,7 @@ final class AVPlayerHLSBridgeEngine: PlayerRenderingEngine {
         cancelTerminalStallWatchdog()
         player.rate = 0
         player.pause()
+        nativeDolbyVideoOverlay.pause()
         player.currentItem?.cancelPendingSeeks()
         player.cancelPendingPrerolls()
         publishPlaybackState(.paused)
@@ -445,6 +514,7 @@ final class AVPlayerHLSBridgeEngine: PlayerRenderingEngine {
         wantsPlayback = false
         cancelTerminalStallWatchdog()
         silencePlayerImmediately()
+        nativeDolbyVideoOverlay.pause()
         player.currentItem?.cancelPendingSeeks()
         publishPlaybackState(.paused)
     }
@@ -454,6 +524,9 @@ final class AVPlayerHLSBridgeEngine: PlayerRenderingEngine {
         isStopped = true
         wantsPlayback = false
         cancelTerminalStallWatchdog()
+        nativeDolbyVideoSyncTask?.cancel()
+        nativeDolbyVideoSyncTask = nil
+        nativeDolbyVideoOverlay.stop()
         pendingSurfaceDetachTask?.cancel()
         pendingSurfaceDetachTask = nil
         isPlaybackFailureRecoveryInProgress = false
@@ -476,6 +549,7 @@ final class AVPlayerHLSBridgeEngine: PlayerRenderingEngine {
         applyRateAwareAudioPitchAlgorithm()
         if player.rate > 0 {
             player.rate = currentRate
+            nativeDolbyVideoOverlay.play(rate: currentRate)
         }
     }
 
@@ -535,6 +609,7 @@ final class AVPlayerHLSBridgeEngine: PlayerRenderingEngine {
                 self.finishSeekTransaction(generation: generation, finished: finished, shouldResume: self.wantsPlayback)
             }
         }
+        nativeDolbyVideoOverlay.seek(to: displayTarget, shouldPlay: wantsPlayback)
         return displayTarget
     }
 
@@ -566,6 +641,7 @@ final class AVPlayerHLSBridgeEngine: PlayerRenderingEngine {
                 self.finishSeekTransaction(generation: generation, finished: finished, shouldResume: self.wantsPlayback)
             }
         }
+        nativeDolbyVideoOverlay.seek(to: displayTarget, shouldPlay: wantsPlayback)
         return displayTarget
     }
 
@@ -598,6 +674,7 @@ final class AVPlayerHLSBridgeEngine: PlayerRenderingEngine {
                 self.finishSeekTransaction(generation: generation, finished: finished, shouldResume: self.wantsPlayback)
             }
         }
+        nativeDolbyVideoOverlay.seek(to: displayTarget, shouldPlay: wantsPlayback)
         return displayTarget
     }
 
@@ -624,6 +701,7 @@ final class AVPlayerHLSBridgeEngine: PlayerRenderingEngine {
                 continuation.resume(returning: finished)
             }
         }
+        nativeDolbyVideoOverlay.seek(to: displayTarget, shouldPlay: false)
         guard isCurrentPlaybackGeneration(seekPlaybackGeneration) else { return nil }
         finishSeekTransaction(generation: generation, finished: finished, shouldResume: false)
         return finished ? displayTarget : nil
@@ -714,6 +792,8 @@ final class AVPlayerHLSBridgeEngine: PlayerRenderingEngine {
         } else {
             player.playImmediately(atRate: currentRate)
         }
+        nativeDolbyVideoOverlay.play(rate: currentRate)
+        syncNativeDolbyVideoOverlay(reason: "begin", force: false)
     }
 
     private func applyTargetAudioState() {
@@ -732,6 +812,86 @@ final class AVPlayerHLSBridgeEngine: PlayerRenderingEngine {
         player.rate = 0
         player.pause()
         player.cancelPendingPrerolls()
+        nativeDolbyVideoOverlay.pause()
+    }
+
+    private func configureNativeDolbyVideoOverlayIfNeeded(
+        for source: PlayerStreamSource,
+        generation: Int
+    ) {
+        guard shouldUseNativeDolbyVideoOverlay(for: source) else {
+            nativeDolbyVideoSyncTask?.cancel()
+            nativeDolbyVideoSyncTask = nil
+            nativeDolbyVideoOverlay.stop()
+            return
+        }
+        nativeDolbyVideoOverlay.prepare(source: source, surface: surfaceView, gravity: videoGravity)
+        startNativeDolbyVideoSyncLoop(generation: generation)
+    }
+
+    private func shouldUseNativeDolbyVideoOverlay(for source: PlayerStreamSource) -> Bool {
+        guard DolbyVisionRenderingPolicy.stored().playablePolicy == .appleNativeP8HLS,
+              source.dynamicRange == .dolbyVision,
+              source.audioURL != nil,
+              source.videoURL != nil,
+              supportsNativeHDRVideoOverlay
+        else { return false }
+        return true
+    }
+
+    private var supportsNativeHDRVideoOverlay: Bool {
+        if let surfaceView {
+            return surfaceView.traitCollection.displayGamut == .P3
+        }
+        return UITraitCollection.current.displayGamut == .P3
+    }
+
+    private func startNativeDolbyVideoSyncLoop(generation: Int) {
+        nativeDolbyVideoSyncTask?.cancel()
+        nativeDolbyVideoSyncTask = Task { @MainActor [weak self] in
+            while !Task.isCancelled {
+                guard let self,
+                      !Task.isCancelled,
+                      self.isCurrentPlaybackGeneration(generation),
+                      self.nativeDolbyVideoOverlay.isActive
+                else { return }
+                self.syncNativeDolbyVideoOverlay(reason: "timer", force: false)
+                try? await Task.sleep(nanoseconds: 450_000_000)
+            }
+        }
+    }
+
+    private func syncNativeDolbyVideoOverlay(reason: String, force: Bool) {
+        syncNativeDolbyVideoOverlay(reason: reason, force: force, countsAsResync: true)
+    }
+
+    private func syncNativeDolbyVideoOverlay(reason: String, force: Bool, countsAsResync: Bool) {
+        guard nativeDolbyVideoOverlay.isActive else { return }
+        let masterTime = displayTime(fromPlayerTime: player.currentTime().seconds)
+        guard masterTime.isFinite, masterTime >= 0 else { return }
+        nativeDolbyVideoOverlay.sync(
+            to: masterTime,
+            shouldPlay: wantsPlayback && !isPerformingSeek,
+            rate: currentRate,
+            force: force,
+            reason: reason,
+            countsAsResync: countsAsResync
+        )
+    }
+
+    private func handleNativeDolbyVideoOverlayReadyToPlay() {
+        guard source?.dynamicRange == .dolbyVision,
+              DolbyVisionRenderingPolicy.stored().playablePolicy == .appleNativeP8HLS
+        else { return }
+        syncNativeDolbyVideoOverlay(reason: "nativeReady", force: true, countsAsResync: false)
+    }
+
+    private func handleNativeDolbyVideoOverlayReady() {
+        guard source?.dynamicRange == .dolbyVision,
+              DolbyVisionRenderingPolicy.stored().playablePolicy == .appleNativeP8HLS
+        else { return }
+        reportFirstFrameIfPossible(allowsNativeHDRVideoOverlay: true)
+        maybeReleaseSeekProtectionIfReady(reason: "nativeHDR")
     }
 
     private func tearDownCurrentItemForReplacement() {
@@ -751,6 +911,9 @@ final class AVPlayerHLSBridgeEngine: PlayerRenderingEngine {
         lastVideoFrameImage = nil
         removeCurrentItemObservers()
         removePeriodicTimeObserver()
+        nativeDolbyVideoSyncTask?.cancel()
+        nativeDolbyVideoSyncTask = nil
+        nativeDolbyVideoOverlay.stop()
         if oldItem != nil {
             player.replaceCurrentItem(with: nil)
         }
@@ -840,6 +1003,18 @@ final class AVPlayerHLSBridgeEngine: PlayerRenderingEngine {
         }
     }
 
+    private func handleHLSRemoteFailure(_ reason: HLSBridgeFailureReason, generation: Int) {
+        guard isCurrentPlaybackGeneration(generation),
+              !isStopped,
+              !reason.allowsSameSourceRecovery
+        else { return }
+        lastPlaybackFailureReason = reason
+        itemReadinessTimeoutTask?.cancel()
+        itemReadinessTimeoutTask = nil
+        cancelTerminalStallWatchdog()
+        publishPlaybackState(.failed(reason.playbackMessage))
+    }
+
     private func handleCurrentItemReadyToPlay(_ item: AVPlayerItem) {
         guard isCurrentPlayerItem(item) else { return }
         itemReadinessTimeoutTask?.cancel()
@@ -910,6 +1085,7 @@ final class AVPlayerHLSBridgeEngine: PlayerRenderingEngine {
             controller.player = player
         }
         controller.showsPlaybackControls = false
+        applyDisplayDynamicRangePolicy(to: controller)
         if controller.videoGravity != videoGravity {
             controller.videoGravity = videoGravity
         }
@@ -1001,6 +1177,7 @@ final class AVPlayerHLSBridgeEngine: PlayerRenderingEngine {
             if layerReadyForDisplayObserver == nil {
                 observeLayerReadyForDisplay(playerLayer)
             }
+            applyDisplayDynamicRangePolicy(to: playerLayer)
             AVPlayerLayoutCoordinator.shared.apply(playerLayer: playerLayer, in: surface, gravity: videoGravity)
             return playerLayer
         }
@@ -1008,6 +1185,7 @@ final class AVPlayerHLSBridgeEngine: PlayerRenderingEngine {
         let layer = AVPlayerLayer(player: player)
         layer.videoGravity = videoGravity
         layer.backgroundColor = UIColor.black.cgColor
+        applyDisplayDynamicRangePolicy(to: layer)
         AVPlayerLayoutCoordinator.shared.apply(playerLayer: layer, in: surface, gravity: videoGravity)
         layer.needsDisplayOnBoundsChange = false
         layer.actions = [
@@ -1022,6 +1200,37 @@ final class AVPlayerHLSBridgeEngine: PlayerRenderingEngine {
         playerLayer = layer
         observeLayerReadyForDisplay(layer)
         return layer
+    }
+
+    private func applyDisplayDynamicRangePolicy(to controller: AVPlayerViewController) {
+        let isHDR = source?.dynamicRange.isHDR == true
+        var policyParts = ["target=controller", "hdr=\(isHDR)"]
+        controller.preferredDisplayDynamicRange = isHDR ? .automatic : .standard
+        controller.view.layer.toneMapMode = .automatic
+        policyParts.append("preferred=\(isHDR ? "automatic" : "standard")")
+        policyParts.append("toneMap=automatic")
+        logDisplayDynamicRangePolicyIfNeeded(policyParts.joined(separator: " "))
+    }
+
+    private func applyDisplayDynamicRangePolicy(to layer: AVPlayerLayer) {
+        let isHDR = source?.dynamicRange.isHDR == true
+        var policyParts = ["target=layer", "hdr=\(isHDR)"]
+        if source?.dynamicRange == .dolbyVision {
+            policyParts.append("dvPolicy=\(DolbyVisionRenderingPolicy.stored().playablePolicy.rawValue)")
+        }
+        layer.preferredDynamicRange = isHDR ? .automatic : .standard
+        layer.toneMapMode = .automatic
+        policyParts.append("preferred=\(isHDR ? "automatic" : "standard")")
+        policyParts.append("toneMap=automatic")
+        logDisplayDynamicRangePolicyIfNeeded(policyParts.joined(separator: " "))
+    }
+
+    private func logDisplayDynamicRangePolicyIfNeeded(_ summary: String) {
+        guard lastDisplayDynamicRangePolicySummary != summary else { return }
+        lastDisplayDynamicRangePolicySummary = summary
+        PlayerMetricsLog.logger.info(
+            "avPlayerDisplayDynamicRangePolicy \(summary, privacy: .public)"
+        )
     }
 
     private func configureAudioSession() {
@@ -1361,6 +1570,9 @@ final class AVPlayerHLSBridgeEngine: PlayerRenderingEngine {
     }
 
     private func normalizedPlaybackFailureMessage(for item: AVPlayerItem, fallback: String?) -> String? {
+        if let reason = hlsBridge?.recentRemoteFailureReason() {
+            return reason.playbackMessage
+        }
         if let statusCode = item.errorLog()?.events.last?.errorStatusCode,
            let message = HLSBridgeRemoteFailure.playbackMessage(forHTTPStatus: statusCode) {
             return message
@@ -1370,6 +1582,9 @@ final class AVPlayerHLSBridgeEngine: PlayerRenderingEngine {
     }
 
     private func playbackFailureReason(for item: AVPlayerItem, fallback: String?) -> HLSBridgeFailureReason? {
+        if let reason = hlsBridge?.recentRemoteFailureReason() {
+            return reason
+        }
         if let statusCode = item.errorLog()?.events.last?.errorStatusCode {
             return HLSBridgeRemoteFailure.reason(forHTTPStatus: statusCode)
         }
@@ -1436,6 +1651,10 @@ final class AVPlayerHLSBridgeEngine: PlayerRenderingEngine {
     }
 
     private func shouldAttemptSameSourceRecovery(item: AVPlayerItem, errorMessage: String?) -> Bool {
+        if let lastPlaybackFailureReason,
+           !lastPlaybackFailureReason.allowsSameSourceRecovery {
+            return false
+        }
         if let statusCode = item.errorLog()?.events.last?.errorStatusCode,
            !HLSBridgeRemoteFailure.allowsSameSourceRecovery(forHTTPStatus: statusCode) {
             return false
@@ -2083,11 +2302,16 @@ final class AVPlayerHLSBridgeEngine: PlayerRenderingEngine {
         onPlaybackIntentChange?(wantsPlayback)
     }
 
-    private func reportFirstFrameIfPossible(currentTime: TimeInterval? = nil) {
+    private func reportFirstFrameIfPossible(
+        currentTime: TimeInterval? = nil,
+        allowsNativeHDRVideoOverlay: Bool = false
+    ) {
         guard !isStopped, player.currentItem != nil else { return }
         guard !didReportFirstFrame else { return }
-        guard playerViewController?.isReadyForDisplay == true
+        let isBaseLayerReady = playerViewController?.isReadyForDisplay == true
             || playerLayer?.isReadyForDisplay == true
+        let isNativeHDRLayerReady = allowsNativeHDRVideoOverlay && nativeDolbyVideoOverlay.isReadyForDisplay
+        guard isBaseLayerReady || isNativeHDRLayerReady
         else { return }
         didReportFirstFrame = true
         cancelTerminalStallWatchdog()
@@ -2103,7 +2327,7 @@ final class AVPlayerHLSBridgeEngine: PlayerRenderingEngine {
         guard firstFrameWatchdogTask == nil,
               !didReportFirstFrame,
               wantsPlayback,
-              source?.dynamicRange == .dolbyVision,
+              source?.dynamicRange.isHDR == true,
               let item = player.currentItem,
               isCurrentPlayerItem(item)
         else { return }
@@ -2112,7 +2336,7 @@ final class AVPlayerHLSBridgeEngine: PlayerRenderingEngine {
         let watchdogGeneration = firstFrameWatchdogGeneration
         let startedAt = CACurrentMediaTime()
         firstFrameWatchdogTask = Task { @MainActor [weak self, weak item] in
-            try? await Task.sleep(nanoseconds: Self.dolbyVisionFirstFrameTimeoutNanoseconds)
+            try? await Task.sleep(nanoseconds: Self.hdrFirstFrameTimeoutNanoseconds)
             guard let self else { return }
             defer {
                 if self.firstFrameWatchdogGeneration == watchdogGeneration {
@@ -2125,9 +2349,13 @@ final class AVPlayerHLSBridgeEngine: PlayerRenderingEngine {
                   self.wantsPlayback,
                   self.isCurrentPlaybackGeneration(generation),
                   self.isCurrentPlayerItem(item),
-                  self.source?.dynamicRange == .dolbyVision
+                  self.source?.dynamicRange.isHDR == true
             else { return }
-            self.handleDolbyVisionFirstFrameTimeout(item: item, reason: reason, startedAt: startedAt)
+            if self.nativeDolbyVideoOverlay.isReadyForDisplay {
+                self.reportFirstFrameIfPossible(allowsNativeHDRVideoOverlay: true)
+                return
+            }
+            await self.handleHDRFirstFrameTimeout(item: item, reason: reason, startedAt: startedAt)
         }
     }
 
@@ -2137,14 +2365,15 @@ final class AVPlayerHLSBridgeEngine: PlayerRenderingEngine {
         firstFrameWatchdogTask = nil
     }
 
-    private func handleDolbyVisionFirstFrameTimeout(
+    private func handleHDRFirstFrameTimeout(
         item: AVPlayerItem,
         reason: String,
         startedAt: CFTimeInterval
-    ) {
+    ) async {
         guard isCurrentPlayerItem(item), let source else { return }
         let elapsedMilliseconds = Int(PlayerMetricsLog.elapsedMilliseconds(since: startedAt).rounded())
-        let message = "杜比视界首帧超时"
+        let dynamicRangeTitle = source.dynamicRange == .dolbyVision ? "杜比视界" : "HDR"
+        let message = "\(dynamicRangeTitle) 首帧超时"
         lastPlaybackFailureReason = HLSBridgeFailureReason(
             layer: .avPlayerItem,
             category: .decoderFailed,
@@ -2154,14 +2383,21 @@ final class AVPlayerHLSBridgeEngine: PlayerRenderingEngine {
             underlyingDescription: message
         )
         PlayerMetricsLog.logger.error(
-            "avPlayerDolbyVisionFirstFrameTimeout reason=\(reason, privacy: .public) elapsedMs=\(elapsedMilliseconds, privacy: .public) id=\(source.metricsID, privacy: .public)"
+            "avPlayerHDRFirstFrameTimeout dynamicRange=\(source.dynamicRange.rawValue, privacy: .public) reason=\(reason, privacy: .public) elapsedMs=\(elapsedMilliseconds, privacy: .public) id=\(source.metricsID, privacy: .public)"
         )
         PlayerMetricsLog.record(
             .network,
             metricsID: source.metricsID,
             title: source.title,
-            message: "dolbyFirstFrameTimeout reason=\(reason) elapsed=\(elapsedMilliseconds)ms status=\(item.status.rawValue) keepUp=\(item.isPlaybackLikelyToKeepUp) buffer=\(String(format: "%.2fs", bufferAhead(for: item)))"
+            message: "hdrFirstFrameTimeout dynamicRange=\(source.dynamicRange.rawValue) reason=\(reason) elapsed=\(elapsedMilliseconds)ms status=\(item.status.rawValue) keepUp=\(item.isPlaybackLikelyToKeepUp) buffer=\(String(format: "%.2fs", bufferAhead(for: item)))"
         )
+        if await recoverFromPlaybackFailureIfPossible(
+            item: item,
+            errorMessage: message,
+            reason: "hdrFirstFrameTimeout"
+        ) {
+            return
+        }
         publishPlaybackState(.failed(message))
     }
 
@@ -2262,7 +2498,19 @@ final class AVPlayerHLSBridgeEngine: PlayerRenderingEngine {
 
     private func warmSeekTargetIfNeeded(_ displayTime: TimeInterval) {
         guard displayTime.isFinite, displayTime >= 0 else { return }
-        hlsBridge?.warmSeekTarget(around: displayTime, metricsID: source?.metricsID)
+        guard let hlsBridge else { return }
+        seekWarmupGeneration &+= 1
+        let generation = seekWarmupGeneration
+        let metricsID = source?.metricsID
+        seekWarmupTask?.cancel()
+        seekWarmupTask = Task(priority: .userInitiated) { [weak self] in
+            guard let self else { return }
+            await hlsBridge.warmSeekTarget(around: displayTime, metricsID: metricsID)
+            guard !Task.isCancelled,
+                  self.seekWarmupGeneration == generation
+            else { return }
+            self.seekWarmupTask = nil
+        }
     }
 
     private func playerTime(fromDisplayTime time: TimeInterval) -> TimeInterval {
@@ -2276,7 +2524,10 @@ final class AVPlayerHLSBridgeEngine: PlayerRenderingEngine {
         return max(time - mediaTimeOffset, 0)
     }
 
-    private static func makePlayerItem(source: PlayerStreamSource) async throws -> PreparedPlayerItem {
+    private static func makePlayerItem(
+        source: PlayerStreamSource,
+        onRemoteFailure: HLSRemoteFailureHandler? = nil
+    ) async throws -> PreparedPlayerItem {
         guard let videoURL = source.videoURL else {
             throw PlayerEngineError.missingVideoURL
         }
@@ -2291,17 +2542,19 @@ final class AVPlayerHLSBridgeEngine: PlayerRenderingEngine {
                audioStream.segmentBase?.indexByteRange != nil {
                 do {
                     // Keep AVPlayer on a standard HTTP HLS surface for device playback.
-                    // The bridge only accepts HEVC video + AAC audio inputs so the
-                    // decode path stays fully inside Apple's hardware pipeline.
+                    // The bridge only accepts hardware-compatible video/audio inputs so
+                    // the decode path stays fully inside Apple's pipeline.
                     let manifest = try await BiliHLSManifestBuilder.make(
                         source: source,
-                        shouldValidateHardwareDecoding: true
+                        shouldValidateHardwareDecoding: true,
+                        onRemoteFailure: onRemoteFailure
                     )
                     guard let bridge = manifest.bridge else {
                         throw PlayerEngineError.unsupportedMedia
                     }
                     let asset = AVURLAsset(url: manifest.masterPlaylistURL)
                     let item = AVPlayerItem(asset: asset)
+                    applyDolbyVisionMetadataPolicy(to: item, source: source)
                     item.preferredForwardBufferDuration = PlaybackEnvironment.current.startupForwardBufferDuration
                     return PreparedPlayerItem(item: item, bridge: bridge, liveProxy: nil, assets: [asset], isDirectLiveHLS: false)
                 } catch {
@@ -2318,8 +2571,21 @@ final class AVPlayerHLSBridgeEngine: PlayerRenderingEngine {
         let isDirectLiveHLS = videoURL.isLikelyHLSManifest && source.durationHint == nil
         let asset = AVURLAsset(url: videoURL, options: ["AVURLAssetHTTPHeaderFieldsKey": headers])
         let item = AVPlayerItem(asset: asset)
+        applyDolbyVisionMetadataPolicy(to: item, source: source)
         item.preferredForwardBufferDuration = isDirectLiveHLS ? 0.5 : PlaybackEnvironment.current.startupForwardBufferDuration
         return PreparedPlayerItem(item: item, bridge: nil, liveProxy: nil, assets: [asset], isDirectLiveHLS: isDirectLiveHLS)
+    }
+
+    private nonisolated static func applyDolbyVisionMetadataPolicy(
+        to item: AVPlayerItem,
+        source: PlayerStreamSource
+    ) {
+        guard source.dynamicRange == .dolbyVision,
+              DolbyVisionRenderingPolicy.stored().hlsBridgePolicy == .compatibleHLG
+        else { return }
+        if #available(iOS 14.1, *) {
+            item.appliesPerFrameHDRDisplayMetadata = false
+        }
     }
 
     private nonisolated static func enforceHardwareDecodingCompatibility(for source: PlayerStreamSource) throws {
@@ -2342,56 +2608,6 @@ final class AVPlayerHLSBridgeEngine: PlayerRenderingEngine {
             )
             throw PlayerEngineError.unsupportedMedia
         }
-    }
-
-    private nonisolated static func makeComposition(
-        videoURL: URL,
-        audioURL: URL,
-        headers: [String: String]
-    ) async throws -> AVMutableComposition {
-        let options = ["AVURLAssetHTTPHeaderFieldsKey": headers]
-        let videoAsset = AVURLAsset(url: videoURL, options: options)
-        let audioAsset = AVURLAsset(url: audioURL, options: options)
-
-        async let videoTracks = videoAsset.loadTracks(withMediaType: .video)
-        async let audioTracks = audioAsset.loadTracks(withMediaType: .audio)
-        async let videoDuration = videoAsset.load(.duration)
-        async let audioDuration = audioAsset.load(.duration)
-
-        guard let sourceVideoTrack = try await videoTracks.first else {
-            throw PlayerEngineError.unsupportedMedia
-        }
-        let sourceAudioTrack = try await audioTracks.first
-        let duration = try await minFinite(videoDuration, audioDuration)
-        let composition = AVMutableComposition()
-        let range = CMTimeRange(start: .zero, duration: duration)
-
-        if let videoTrack = composition.addMutableTrack(withMediaType: .video, preferredTrackID: kCMPersistentTrackID_Invalid) {
-            try videoTrack.insertTimeRange(range, of: sourceVideoTrack, at: .zero)
-            videoTrack.preferredTransform = try await sourceVideoTrack.load(.preferredTransform)
-        }
-
-        if let sourceAudioTrack,
-           let audioTrack = composition.addMutableTrack(withMediaType: .audio, preferredTrackID: kCMPersistentTrackID_Invalid) {
-            try audioTrack.insertTimeRange(range, of: sourceAudioTrack, at: .zero)
-        }
-
-        return composition
-    }
-
-    private nonisolated static func minFinite(_ lhs: CMTime, _ rhs: CMTime) -> CMTime {
-        let left = lhs.seconds
-        let right = rhs.seconds
-        if left.isFinite, right.isFinite, left > 0, right > 0 {
-            return left <= right ? lhs : rhs
-        }
-        if left.isFinite, left > 0 {
-            return lhs
-        }
-        if right.isFinite, right > 0 {
-            return rhs
-        }
-        return .positiveInfinity
     }
 
     private nonisolated static func hlsBridgeTrack(
@@ -2419,10 +2635,496 @@ private struct PreparedPlayerItem {
     let isDirectLiveHLS: Bool
 }
 
+@MainActor
+private final class NativeDolbyVideoOverlayRenderer {
+    private enum State: String {
+        case disabled
+        case loading
+        case ready
+        case failed
+    }
+
+    private static let resyncThreshold: TimeInterval = 0.45
+
+    private let player = AVPlayer()
+    private var prepareTask: Task<Void, Never>?
+    private var asset: AVURLAsset?
+    private var item: AVPlayerItem?
+    private var localVideoBridge: LocalHLSVideoOnlyBridge?
+    private var layer: AVPlayerLayer?
+    private weak var surface: UIView?
+    private var itemStatusObserver: NSKeyValueObservation?
+    private var layerReadyObserver: NSKeyValueObservation?
+    private var state: State = .disabled
+    private var host: String?
+    private var sourceKind: String?
+    private var playlistHost: String?
+    private var lastErrorDescription: String?
+    private var lastDriftMilliseconds: Int?
+    private var displayPolicySummary: String?
+    private var hasSyncedReadyItem = false
+    private var didNotifyReadyToPlay = false
+    private var didNotifyReadyForDisplay = false
+    private(set) var resyncCount = 0
+    var onReadyForDisplay: (() -> Void)?
+    var onReadyToPlay: (() -> Void)?
+
+    var isActive: Bool {
+        state == .loading || state == .ready
+    }
+
+    var isReadyForDisplay: Bool {
+        state == .ready
+    }
+
+    var stateRawValue: String? {
+        guard state != .disabled else { return nil }
+        return state.rawValue
+    }
+
+    var diagnosticSummary: String? {
+        guard state != .disabled else { return nil }
+        var parts = ["state=\(state.rawValue)"]
+        if let sourceKind {
+            parts.append("source=\(sourceKind)")
+        }
+        if let item {
+            parts.append("item=\(Self.itemStatusDescription(item.status))")
+            if item.status == .readyToPlay {
+                parts.append("buffer=\(String(format: "%.2fs", Self.bufferAhead(for: item, at: player.currentTime())))")
+            }
+        }
+        parts.append("tc=\(Self.timeControlStatusDescription(player.timeControlStatus))")
+        if let waitingReason = player.reasonForWaitingToPlay?.rawValue {
+            parts.append("wait=\(Self.shortErrorDescription(waitingReason) ?? waitingReason)")
+        }
+        if let host {
+            parts.append("host=\(Self.redactedHost(host))")
+        }
+        if let playlistHost {
+            parts.append("playlist=\(Self.redactedHost(playlistHost))")
+        }
+        if let lastDriftMilliseconds {
+            parts.append("drift=\(lastDriftMilliseconds)ms")
+        }
+        if let displayPolicySummary {
+            parts.append(displayPolicySummary)
+        }
+        parts.append("resync=\(resyncCount)")
+        if let lastErrorDescription, !lastErrorDescription.isEmpty {
+            parts.append("error=\(lastErrorDescription)")
+        }
+        return parts.joined(separator: " ")
+    }
+
+    init() {
+        player.isMuted = true
+        player.volume = 0
+        player.automaticallyWaitsToMinimizeStalling = false
+    }
+
+    func prepare(source: PlayerStreamSource, surface: UIView?, gravity: AVLayerVideoGravity) {
+        stop()
+        guard let videoURL = source.videoURL,
+              let videoStream = source.videoStream
+        else { return }
+        host = videoURL.host
+        sourceKind = "localVideoHLS"
+        state = .loading
+        lastErrorDescription = nil
+        lastDriftMilliseconds = nil
+        hasSyncedReadyItem = false
+        didNotifyReadyToPlay = false
+        didNotifyReadyForDisplay = false
+        resyncCount = 0
+        self.surface = surface
+
+        let headers = source.httpHeaders
+        let durationHint = source.durationHint
+        let metricsID = source.metricsID
+        let dynamicRange = source.dynamicRange
+        let fallbackURLs = videoStream.backupPlayURLs(cdnPreference: source.cdnPreference)
+        prepareTask = Task { [weak self] in
+            do {
+                let bridge = try await LocalHLSBridge.makeVideoOnly(
+                    videoTrack: HLSBridgeTrack(
+                        url: videoURL,
+                        fallbackURLs: fallbackURLs,
+                        stream: videoStream,
+                        mediaType: .video,
+                        dynamicRange: dynamicRange
+                    ),
+                    durationHint: durationHint,
+                    headers: headers,
+                    metricsID: metricsID,
+                    renderingPolicy: .appleNativeP8HLS
+                )
+                guard !Task.isCancelled else {
+                    bridge.stop()
+                    return
+                }
+                await MainActor.run { [weak self] in
+                    self?.install(bridge: bridge, gravity: gravity)
+                }
+            } catch {
+                await MainActor.run { [weak self] in
+                    self?.fail(Self.shortErrorDescription(error.localizedDescription))
+                }
+            }
+        }
+    }
+
+    private func install(bridge: LocalHLSVideoOnlyBridge, gravity: AVLayerVideoGravity) {
+        guard state == .loading else {
+            bridge.stop()
+            return
+        }
+        localVideoBridge = bridge
+        playlistHost = bridge.masterPlaylistURL.host
+
+        let asset = AVURLAsset(url: bridge.masterPlaylistURL)
+        let item = AVPlayerItem(asset: asset)
+        item.preferredForwardBufferDuration = PlaybackEnvironment.current.startupForwardBufferDuration
+        player.replaceCurrentItem(with: item)
+        player.isMuted = true
+        player.volume = 0
+
+        self.asset = asset
+        self.item = item
+        observeStatus(for: item)
+        attach(to: surface, gravity: gravity)
+    }
+
+    func attach(to surface: UIView?, gravity: AVLayerVideoGravity) {
+        guard let surface else { return }
+        self.surface = surface
+        guard item != nil else { return }
+        let layer = ensureLayer(in: surface)
+        layer.player = player
+        layer.videoGravity = gravity
+        applyDisplayPolicy(to: layer)
+        refreshLayout(in: surface, gravity: gravity)
+    }
+
+    func detach(from surface: UIView) {
+        guard self.surface === surface else { return }
+        layer?.removeFromSuperlayer()
+        layerReadyObserver = nil
+        layer = nil
+        self.surface = nil
+    }
+
+    func refreshLayout(in surface: UIView?, gravity: AVLayerVideoGravity) {
+        guard let surface, let layer, layer.superlayer === surface.layer else { return }
+        AVPlayerLayoutCoordinator.shared.apply(playerLayer: layer, in: surface, gravity: gravity)
+    }
+
+    func setVideoGravity(_ gravity: AVLayerVideoGravity, in surface: UIView?) {
+        layer?.videoGravity = gravity
+        refreshLayout(in: surface, gravity: gravity)
+    }
+
+    func play(rate: Float) {
+        guard item != nil else { return }
+        let playbackRate = max(rate, 0.1)
+        player.defaultRate = playbackRate
+        player.playImmediately(atRate: playbackRate)
+    }
+
+    func pause() {
+        player.pause()
+    }
+
+    func seek(to time: TimeInterval, shouldPlay: Bool) {
+        guard item?.status == .readyToPlay else { return }
+        let target = CMTime(seconds: max(time, 0), preferredTimescale: 600)
+        player.seek(to: target, toleranceBefore: .zero, toleranceAfter: .zero) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                self.hasSyncedReadyItem = true
+                self.updateReadyState()
+                if shouldPlay {
+                    self.play(rate: self.player.defaultRate)
+                }
+            }
+        }
+    }
+
+    func sync(
+        to masterTime: TimeInterval,
+        shouldPlay: Bool,
+        rate: Float,
+        force: Bool,
+        reason _: String,
+        countsAsResync: Bool = true
+    ) {
+        guard item?.status == .readyToPlay else { return }
+        let currentTime = player.currentTime().seconds
+        let drift = currentTime.isFinite ? currentTime - masterTime : .infinity
+        lastDriftMilliseconds = drift.isFinite ? Int((drift * 1000).rounded()) : nil
+        let shouldResync = force || !drift.isFinite || abs(drift) > Self.resyncThreshold
+        if shouldResync {
+            if countsAsResync {
+                resyncCount += 1
+            }
+            seek(to: masterTime, shouldPlay: shouldPlay)
+            return
+        }
+        hasSyncedReadyItem = true
+        updateReadyState()
+        if shouldPlay {
+            if abs(player.rate - rate) > 0.01 {
+                play(rate: rate)
+            } else if player.rate <= 0 {
+                play(rate: rate)
+            }
+        } else if player.rate != 0 {
+            pause()
+        }
+    }
+
+    func stop() {
+        prepareTask?.cancel()
+        prepareTask = nil
+        player.pause()
+        player.replaceCurrentItem(with: nil)
+        layer?.player = nil
+        layer?.removeFromSuperlayer()
+        layerReadyObserver = nil
+        itemStatusObserver = nil
+        asset?.cancelLoading()
+        localVideoBridge?.stop()
+        asset = nil
+        item = nil
+        localVideoBridge = nil
+        layer = nil
+        surface = nil
+        host = nil
+        sourceKind = nil
+        playlistHost = nil
+        lastErrorDescription = nil
+        lastDriftMilliseconds = nil
+        displayPolicySummary = nil
+        hasSyncedReadyItem = false
+        didNotifyReadyToPlay = false
+        didNotifyReadyForDisplay = false
+        resyncCount = 0
+        state = .disabled
+    }
+
+    private func ensureLayer(in surface: UIView) -> AVPlayerLayer {
+        if let layer {
+            if layer.superlayer !== surface.layer {
+                CATransaction.begin()
+                CATransaction.setDisableActions(true)
+                layer.removeFromSuperlayer()
+                surface.layer.addSublayer(layer)
+                CATransaction.commit()
+            }
+            if layerReadyObserver == nil {
+                observeReadyForDisplay(layer)
+            }
+            return layer
+        }
+
+        let layer = AVPlayerLayer(player: player)
+        layer.backgroundColor = UIColor.black.cgColor
+        layer.isHidden = true
+        layer.needsDisplayOnBoundsChange = false
+        layer.actions = [
+            "bounds": NSNull(),
+            "position": NSNull(),
+            "frame": NSNull()
+        ]
+        applyDisplayPolicy(to: layer)
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        surface.layer.addSublayer(layer)
+        CATransaction.commit()
+        self.layer = layer
+        observeReadyForDisplay(layer)
+        return layer
+    }
+
+    private func applyDisplayPolicy(to layer: AVPlayerLayer) {
+        layer.preferredDynamicRange = .high
+        layer.toneMapMode = .never
+        displayPolicySummary = "display=high/noToneMap"
+    }
+
+    private func observeStatus(for item: AVPlayerItem) {
+        let itemIdentity = ObjectIdentifier(item)
+        itemStatusObserver = item.observe(\.status, options: [.initial, .new]) { [weak self] _, _ in
+            Task { @MainActor [weak self] in
+                guard let self,
+                      let currentItem = self.item,
+                      ObjectIdentifier(currentItem) == itemIdentity
+                else { return }
+                switch currentItem.status {
+                case .readyToPlay:
+                    self.notifyReadyToPlayIfNeeded()
+                    self.updateReadyState()
+                case .failed:
+                    self.fail(Self.itemFailureDescription(currentItem))
+                case .unknown:
+                    self.state = .loading
+                @unknown default:
+                    self.state = .loading
+                }
+            }
+        }
+    }
+
+    private func observeReadyForDisplay(_ layer: AVPlayerLayer) {
+        let layerIdentity = ObjectIdentifier(layer)
+        layerReadyObserver = layer.observe(\.isReadyForDisplay, options: [.initial, .new]) { [weak self] _, _ in
+            Task { @MainActor [weak self] in
+                guard let self,
+                      let currentLayer = self.layer,
+                      ObjectIdentifier(currentLayer) == layerIdentity
+                else { return }
+                if currentLayer.isReadyForDisplay {
+                    self.updateReadyState()
+                }
+            }
+        }
+    }
+
+    private func updateReadyState() {
+        guard item?.status == .readyToPlay else { return }
+        if layer?.isReadyForDisplay == true, hasSyncedReadyItem {
+            layer?.isHidden = false
+            state = .ready
+            notifyReadyForDisplayIfNeeded()
+        } else if state != .failed {
+            state = .loading
+        }
+    }
+
+    private func notifyReadyForDisplayIfNeeded() {
+        guard !didNotifyReadyForDisplay else { return }
+        didNotifyReadyForDisplay = true
+        onReadyForDisplay?()
+    }
+
+    private func notifyReadyToPlayIfNeeded() {
+        guard !didNotifyReadyToPlay else { return }
+        didNotifyReadyToPlay = true
+        onReadyToPlay?()
+    }
+
+    private static func redactedHost(_ host: String) -> String {
+        let components = host
+            .lowercased()
+            .split(separator: ".")
+            .map(String.init)
+        guard components.count >= 2 else { return "<redacted>" }
+        return "*." + components.suffix(2).joined(separator: ".")
+    }
+
+    private static func itemStatusDescription(_ status: AVPlayerItem.Status) -> String {
+        switch status {
+        case .unknown:
+            return "unknown"
+        case .readyToPlay:
+            return "ready"
+        case .failed:
+            return "failed"
+        @unknown default:
+            return "unknown"
+        }
+    }
+
+    private static func timeControlStatusDescription(_ status: AVPlayer.TimeControlStatus) -> String {
+        switch status {
+        case .paused:
+            return "paused"
+        case .waitingToPlayAtSpecifiedRate:
+            return "waiting"
+        case .playing:
+            return "playing"
+        @unknown default:
+            return "unknown"
+        }
+    }
+
+    private static func bufferAhead(for item: AVPlayerItem, at currentTime: CMTime) -> TimeInterval {
+        let currentSeconds = currentTime.seconds
+        guard currentSeconds.isFinite else { return 0 }
+        return item.loadedTimeRanges
+            .map(\.timeRangeValue)
+            .map { range -> TimeInterval in
+                let start = range.start.seconds
+                let end = range.end.seconds
+                guard start.isFinite, end.isFinite, end >= currentSeconds else { return 0 }
+                return max(0, end - max(start, currentSeconds))
+            }
+            .max() ?? 0
+    }
+
+    private func fail(_ description: String?) {
+        state = .failed
+        lastErrorDescription = description
+        layer?.isHidden = true
+    }
+
+    private static func itemFailureDescription(_ item: AVPlayerItem) -> String? {
+        let base = shortErrorDescription(item.error?.localizedDescription)
+        let log = item.errorLog()?.events.reversed().compactMap { event -> String? in
+            var parts = [String]()
+            if event.errorStatusCode != 0 {
+                parts.append("status=\(event.errorStatusCode)")
+            }
+            if let comment = shortErrorDescription(event.errorComment), !comment.isEmpty {
+                parts.append("comment=\(comment)")
+            }
+            if let uri = shortErrorDescription(event.uri), !uri.isEmpty {
+                parts.append("uri=\(uri)")
+            }
+            return parts.isEmpty ? nil : parts.joined(separator: ",")
+        }.first
+        return [base, log]
+            .compactMap { $0 }
+            .filter { !$0.isEmpty }
+            .joined(separator: " ")
+    }
+
+    private static func shortErrorDescription(_ value: String?) -> String? {
+        guard let value,
+              !value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        else { return nil }
+        let normalized = value
+            .replacingOccurrences(of: "\n", with: " ")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard normalized.count > 80 else { return normalized }
+        return String(normalized.prefix(77)) + "..."
+    }
+}
+
 private extension URL {
     var isLikelyHLSManifest: Bool {
         pathExtension.localizedCaseInsensitiveCompare("m3u8") == .orderedSame
             || absoluteString.range(of: ".m3u8", options: .caseInsensitive) != nil
+    }
+}
+
+nonisolated struct LocalHLSVideoOnlyBridge: Sendable {
+    let masterPlaylistURL: URL
+    let videoVariantDetails: [String]
+    private let server: LocalHLSProxyServer
+
+    fileprivate init(
+        masterPlaylistURL: URL,
+        videoVariantDetails: [String],
+        server: LocalHLSProxyServer
+    ) {
+        self.masterPlaylistURL = masterPlaylistURL
+        self.videoVariantDetails = videoVariantDetails
+        self.server = server
+    }
+
+    nonisolated func stop() {
+        server.stop()
     }
 }
 
@@ -2432,6 +3134,7 @@ struct LocalHLSBridge: Sendable {
     let videoClockDelay: TimeInterval
     let videoVariantCount: Int
     let videoVariantQualities: [Int]
+    let videoVariantDetails: [String]
     let routePlanCacheState: String
     let serverCacheState: String
     private let seekPlanner: HLSBridgeSeekPlanner?
@@ -2441,6 +3144,18 @@ struct LocalHLSBridge: Sendable {
         server.updateMetricsID(metricsID)
     }
 
+    nonisolated func updateRemoteFailureHandler(_ handler: HLSRemoteFailureHandler?) {
+        server.updateRemoteFailureHandler(handler)
+    }
+
+    nonisolated func updateHeaders(_ headers: [String: String]) {
+        server.updateHeaders(headers)
+    }
+
+    nonisolated func recentRemoteFailureReason() -> HLSBridgeFailureReason? {
+        server.recentRemoteFailureReason()
+    }
+
     nonisolated func withCacheDiagnostics(routePlanState: String, serverState: String) -> LocalHLSBridge {
         LocalHLSBridge(
             masterPlaylistURL: masterPlaylistURL,
@@ -2448,6 +3163,7 @@ struct LocalHLSBridge: Sendable {
             videoClockDelay: videoClockDelay,
             videoVariantCount: videoVariantCount,
             videoVariantQualities: videoVariantQualities,
+            videoVariantDetails: videoVariantDetails,
             routePlanCacheState: routePlanState,
             serverCacheState: serverState,
             seekPlanner: seekPlanner,
@@ -2463,11 +3179,9 @@ struct LocalHLSBridge: Sendable {
         seekPlanner?.alignedSeekTime(near: playbackTime)
     }
 
-    nonisolated func warmSeekTarget(around playbackTime: TimeInterval, metricsID: String?) {
+    nonisolated func warmSeekTarget(around playbackTime: TimeInterval, metricsID: String?) async {
         guard let seekPlanner else { return }
-        Task.detached(priority: .utility) {
-            await seekPlanner.warm(around: playbackTime, metricsID: metricsID)
-        }
+        await seekPlanner.warm(around: playbackTime, metricsID: metricsID)
     }
 
     nonisolated static func make(
@@ -2475,14 +3189,18 @@ struct LocalHLSBridge: Sendable {
         audioTrack: HLSBridgeTrack,
         durationHint: TimeInterval?,
         headers: [String: String],
-        metricsID: String? = nil
+        metricsID: String? = nil,
+        onRemoteFailure: HLSRemoteFailureHandler? = nil,
+        storesBridgeForReuse: Bool = false
     ) async throws -> LocalHLSBridge {
         try await make(
             videoTracks: [videoTrack],
             audioTrack: audioTrack,
             durationHint: durationHint,
             headers: headers,
-            metricsID: metricsID
+            metricsID: metricsID,
+            onRemoteFailure: onRemoteFailure,
+            storesBridgeForReuse: storesBridgeForReuse
         )
     }
 
@@ -2491,7 +3209,9 @@ struct LocalHLSBridge: Sendable {
         audioTrack: HLSBridgeTrack,
         durationHint: TimeInterval?,
         headers: [String: String],
-        metricsID: String? = nil
+        metricsID: String? = nil,
+        onRemoteFailure: HLSRemoteFailureHandler? = nil,
+        storesBridgeForReuse: Bool = false
     ) async throws -> LocalHLSBridge {
         guard let primaryVideoTrack = videoTracks.first else {
             throw PlayerEngineError.missingVideoURL
@@ -2519,11 +3239,15 @@ struct LocalHLSBridge: Sendable {
         )
         let bridgeResult: (bridge: LocalHLSBridge, state: LocalHLSBridgeInstanceCache.State)
         if let cacheKey {
-            bridgeResult = try await LocalHLSBridgeInstanceCache.shared.cachedOrBuild(for: cacheKey) {
+            bridgeResult = try await LocalHLSBridgeInstanceCache.shared.cachedOrBuild(
+                for: cacheKey,
+                storesForReuse: storesBridgeForReuse
+            ) {
                 try await build(
                     from: plan,
                     headers: headers,
-                    metricsID: metricsID
+                    metricsID: metricsID,
+                    onRemoteFailure: onRemoteFailure
                 )
             }
         } else {
@@ -2531,7 +3255,8 @@ struct LocalHLSBridge: Sendable {
                 try await build(
                     from: plan,
                     headers: headers,
-                    metricsID: metricsID
+                    metricsID: metricsID,
+                    onRemoteFailure: onRemoteFailure
                 ),
                 .miss
             )
@@ -2541,6 +3266,8 @@ struct LocalHLSBridge: Sendable {
             serverState: bridgeResult.state.rawValue
         )
         bridge.updateMetricsID(metricsID)
+        bridge.updateHeaders(headers)
+        bridge.updateRemoteFailureHandler(onRemoteFailure)
         let elapsedMilliseconds = PlayerMetricsLog.elapsedMilliseconds(since: start)
         PlayerMetricsLog.logger.info(
             "hlsBridgeMakeReady routePlan=\(planState, privacy: .public) server=\(bridgeResult.state.rawValue, privacy: .public) elapsedMs=\(elapsedMilliseconds, format: .fixed(precision: 1), privacy: .public)"
@@ -2567,7 +3294,8 @@ struct LocalHLSBridge: Sendable {
                 audioTrack: audioTrack,
                 durationHint: durationHint,
                 headers: headers,
-                metricsID: metricsID
+                metricsID: metricsID,
+                storesBridgeForReuse: true
             )
             return true
         } catch {
@@ -2576,6 +3304,48 @@ struct LocalHLSBridge: Sendable {
             )
             return false
         }
+    }
+
+    nonisolated static func makeVideoOnly(
+        videoTrack: HLSBridgeTrack,
+        durationHint: TimeInterval?,
+        headers: [String: String],
+        metricsID: String? = nil,
+        renderingPolicy: DolbyVisionRenderingPolicy
+    ) async throws -> LocalHLSVideoOnlyBridge {
+        let start = CACurrentMediaTime()
+        let rendition = try await makeRendition(
+            for: videoTrack,
+            durationHint: durationHint,
+            headers: headers,
+            metricsID: metricsID,
+            renderingPolicy: renderingPolicy
+        )
+        let server = try LocalHLSProxyServer.make(
+            headers: headers,
+            metricsID: metricsID,
+            onRemoteFailure: nil
+        )
+        let renderedPlaylists = renderVideoOnlyPlaylists(
+            rendition: rendition,
+            masterPlaylistVersion: masterPlaylistVersion(for: [rendition]),
+            baseURL: server.baseURL
+        )
+        server.updateRoutes(renderedPlaylists.routes)
+        try await server.start()
+        let elapsedMilliseconds = PlayerMetricsLog.elapsedMilliseconds(since: start)
+        PlayerMetricsLog.logger.info(
+            "nativeHDRVideoOnlyHLSReady elapsedMs=\(elapsedMilliseconds, format: .fixed(precision: 1), privacy: .public) routes=\(renderedPlaylists.routes.count, privacy: .public) codec=\(rendition.hlsAdvertisedCodec, privacy: .public) range=\(rendition.hlsVideoRangeValue ?? "-", privacy: .public) supplemental=\(rendition.hlsAdvertisedSupplementalCodec ?? "-", privacy: .public)"
+        )
+        await recordManifestStage(
+            metricsID: metricsID,
+            "nativeHDR=localVideoHLS \(formatMilliseconds(elapsedMilliseconds)) codec=\(rendition.hlsAdvertisedCodec)"
+        )
+        return LocalHLSVideoOnlyBridge(
+            masterPlaylistURL: renderedPlaylists.masterPlaylistURL,
+            videoVariantDetails: [rendition.diagnosticSummary],
+            server: server
+        )
     }
 
     @discardableResult
@@ -2775,7 +3545,8 @@ struct LocalHLSBridge: Sendable {
     private nonisolated static func build(
         from plan: HLSBridgeRoutePlan,
         headers: [String: String],
-        metricsID: String?
+        metricsID: String?,
+        onRemoteFailure: HLSRemoteFailureHandler?
     ) async throws -> LocalHLSBridge {
         guard let videoRendition = plan.videoRenditions.first else {
             throw PlayerEngineError.missingVideoURL
@@ -2783,50 +3554,27 @@ struct LocalHLSBridge: Sendable {
         let start = CACurrentMediaTime()
         let videoRenditions = plan.videoRenditions
         let audioRendition = plan.audioRendition
-        let server = try LocalHLSProxyServer.make(headers: headers, metricsID: metricsID)
+        let server = try LocalHLSProxyServer.make(
+            headers: headers,
+            metricsID: metricsID,
+            onRemoteFailure: onRemoteFailure
+        )
         let baseURL = server.baseURL
-        let audioPlaylistURL = baseURL.appendingPathComponent("audio.m3u8")
-        let masterPlaylistURL = baseURL.appendingPathComponent("master.m3u8")
-        let audioPlaylist = audioRendition.playlist(baseURL: baseURL, routePrefix: "audio")
-        let videoPlaylistEntries = videoRenditions.enumerated().map { index, rendition in
-            let routePrefix = videoRoutePrefix(for: index)
-            let playlistURL = baseURL.appendingPathComponent("\(routePrefix).m3u8")
-            return """
-            #EXT-X-STREAM-INF:BANDWIDTH=\(rendition.bandwidth),CODECS="\(rendition.hlsAdvertisedCodec),\(audioRendition.codec)",AUDIO="audio"\(rendition.hlsResolutionAttribute)\(rendition.hlsVideoRangeAttribute)\(rendition.hlsAdvertisedSupplementalCodecAttribute)
-            \(playlistURL.absoluteString)
-            """
-        }.joined(separator: "\n")
-        let dolbyVisionManifestSummary = videoRenditions
-            .filter { $0.dynamicRange == .dolbyVision }
-            .map { rendition in
-                "q\(rendition.quality ?? -1) source=\(rendition.codec) hls=\(rendition.hlsAdvertisedCodec) range=\(rendition.hlsVideoRangeValue ?? "-") supplemental=\(rendition.hlsAdvertisedSupplementalCodec ?? "-")"
-            }
-            .joined(separator: ";")
-        let masterPlaylist = """
-        #EXTM3U
-        #EXT-X-VERSION:\(plan.masterPlaylistVersion)
-        #EXT-X-INDEPENDENT-SEGMENTS
-        #EXT-X-MEDIA:TYPE=AUDIO,GROUP-ID="audio",NAME="audio",DEFAULT=YES,AUTOSELECT=YES,URI="\(audioPlaylistURL.absoluteString)"
-        \(videoPlaylistEntries)
-        """
-
-        var routes: [String: HLSProxyRoute] = [
-            "/master.m3u8": .data(Data(masterPlaylist.utf8), contentType: "application/vnd.apple.mpegurl"),
-            "/audio.m3u8": .data(Data(audioPlaylist.utf8), contentType: "application/vnd.apple.mpegurl")
-        ]
-        for (index, rendition) in videoRenditions.enumerated() {
-            let routePrefix = videoRoutePrefix(for: index)
-            let playlist = rendition.playlist(baseURL: baseURL, routePrefix: routePrefix)
-            routes["/\(routePrefix).m3u8"] = .data(Data(playlist.utf8), contentType: "application/vnd.apple.mpegurl")
-            rendition.registerRoutes(routePrefix: routePrefix, into: &routes)
-        }
-        audioRendition.registerRoutes(routePrefix: "audio", into: &routes)
+        let renderedPlaylists = renderPlaylists(from: plan, baseURL: baseURL)
+        let masterPlaylistURL = renderedPlaylists.masterPlaylistURL
+        let routes = renderedPlaylists.routes
         server.updateRoutes(routes)
         try await server.start()
         let serverMilliseconds = PlayerMetricsLog.elapsedMilliseconds(since: start)
         PlayerMetricsLog.logger.info(
             "hlsBridgeServerReady elapsedMs=\(serverMilliseconds, format: .fixed(precision: 1), privacy: .public) dynamicRange=\(videoRendition.dynamicRange.rawValue, privacy: .public) codec=\(videoRendition.codec, privacy: .public) version=\(plan.masterPlaylistVersion, privacy: .public) variants=\(videoRenditions.count, privacy: .public) routes=\(routes.count, privacy: .public)"
         )
+        let dolbyVisionManifestSummary = videoRenditions
+            .filter { $0.dynamicRange == .dolbyVision }
+            .map { rendition in
+                "q\(rendition.quality ?? -1) policy=\(rendition.dolbyVisionRenderingPolicy.rawValue) path=\(rendition.dolbyVisionRenderingPath) source=\(rendition.codec) hls=\(rendition.hlsAdvertisedCodec) range=\(rendition.hlsVideoRangeValue ?? "-") supplemental=\(rendition.hlsAdvertisedSupplementalCodec ?? "-")"
+            }
+            .joined(separator: ";")
         if !dolbyVisionManifestSummary.isEmpty {
             PlayerMetricsLog.logger.info(
                 "hlsBridgeDolbyVisionManifest \(dolbyVisionManifestSummary, privacy: .public)"
@@ -2856,6 +3604,7 @@ struct LocalHLSBridge: Sendable {
             videoClockDelay: 0,
             videoVariantCount: videoRenditions.count,
             videoVariantQualities: videoRenditions.compactMap(\.quality),
+            videoVariantDetails: videoRenditions.map(\.diagnosticSummary),
             routePlanCacheState: "-",
             serverCacheState: "-",
             seekPlanner: HLSBridgeSeekPlanner(
@@ -2864,6 +3613,89 @@ struct LocalHLSBridge: Sendable {
                 headers: headers
             ),
             server: server
+        )
+    }
+
+#if DEBUG
+    nonisolated static func makeForTesting(
+        from plan: HLSBridgeRoutePlan,
+        headers: [String: String] = [:],
+        metricsID: String? = nil,
+        onRemoteFailure: HLSRemoteFailureHandler? = nil
+    ) async throws -> LocalHLSBridge {
+        try await build(
+            from: plan,
+            headers: headers,
+            metricsID: metricsID,
+            onRemoteFailure: onRemoteFailure
+        )
+    }
+#endif
+
+    nonisolated static func renderPlaylists(from plan: HLSBridgeRoutePlan, baseURL: URL) -> HLSBridgeRenderedPlaylists {
+        let audioRendition = plan.audioRendition
+        let audioPlaylistURL = baseURL.appendingPathComponent("audio.m3u8")
+        let masterPlaylistURL = baseURL.appendingPathComponent("master.m3u8")
+        let audioPlaylist = audioRendition.playlist(baseURL: baseURL, routePrefix: "audio")
+        let videoPlaylistEntries = plan.videoRenditions.enumerated().map { index, rendition in
+            let routePrefix = videoRoutePrefix(for: index)
+            let playlistURL = baseURL.appendingPathComponent("\(routePrefix).m3u8")
+            return """
+            #EXT-X-STREAM-INF:BANDWIDTH=\(rendition.bandwidth),CODECS="\(rendition.hlsAdvertisedCodec),\(audioRendition.codec)",AUDIO="audio"\(rendition.hlsResolutionAttribute)\(rendition.hlsFrameRateAttribute)\(rendition.hlsVideoRangeAttribute)\(rendition.hlsAdvertisedSupplementalCodecAttribute)
+            \(playlistURL.absoluteString)
+            """
+        }.joined(separator: "\n")
+        let masterPlaylist = """
+        #EXTM3U
+        #EXT-X-VERSION:\(plan.masterPlaylistVersion)
+        #EXT-X-INDEPENDENT-SEGMENTS
+        #EXT-X-MEDIA:TYPE=AUDIO,GROUP-ID="audio",NAME="audio",DEFAULT=YES,AUTOSELECT=YES,URI="\(audioPlaylistURL.absoluteString)"
+        \(videoPlaylistEntries)
+        """
+
+        var routes: [String: HLSProxyRoute] = [
+            "/master.m3u8": .data(Data(masterPlaylist.utf8), contentType: "application/vnd.apple.mpegurl"),
+            "/audio.m3u8": .data(Data(audioPlaylist.utf8), contentType: "application/vnd.apple.mpegurl")
+        ]
+        for (index, rendition) in plan.videoRenditions.enumerated() {
+            let routePrefix = videoRoutePrefix(for: index)
+            let playlist = rendition.playlist(baseURL: baseURL, routePrefix: routePrefix)
+            routes["/\(routePrefix).m3u8"] = .data(Data(playlist.utf8), contentType: "application/vnd.apple.mpegurl")
+            rendition.registerRoutes(routePrefix: routePrefix, into: &routes)
+        }
+        audioRendition.registerRoutes(routePrefix: "audio", into: &routes)
+        return HLSBridgeRenderedPlaylists(
+            masterPlaylistURL: masterPlaylistURL,
+            routes: routes
+        )
+    }
+
+    nonisolated static func renderVideoOnlyPlaylists(
+        rendition: HLSRendition,
+        masterPlaylistVersion: Int,
+        baseURL: URL
+    ) -> HLSBridgeRenderedPlaylists {
+        let playlistURL = baseURL.appendingPathComponent("video.m3u8")
+        let masterPlaylistURL = baseURL.appendingPathComponent("master.m3u8")
+        let masterPlaylist = """
+        #EXTM3U
+        #EXT-X-VERSION:\(masterPlaylistVersion)
+        #EXT-X-INDEPENDENT-SEGMENTS
+        #EXT-X-STREAM-INF:BANDWIDTH=\(rendition.bandwidth),CODECS="\(rendition.hlsAdvertisedCodec)"\(rendition.hlsResolutionAttribute)\(rendition.hlsFrameRateAttribute)\(rendition.hlsVideoRangeAttribute)\(rendition.hlsAdvertisedSupplementalCodecAttribute)
+        \(playlistURL.absoluteString)
+        """
+
+        var routes: [String: HLSProxyRoute] = [
+            "/master.m3u8": .data(Data(masterPlaylist.utf8), contentType: "application/vnd.apple.mpegurl"),
+            "/video.m3u8": .data(
+                Data(rendition.playlist(baseURL: baseURL, routePrefix: "video").utf8),
+                contentType: "application/vnd.apple.mpegurl"
+            )
+        ]
+        rendition.registerRoutes(routePrefix: "video", into: &routes)
+        return HLSBridgeRenderedPlaylists(
+            masterPlaylistURL: masterPlaylistURL,
+            routes: routes
         )
     }
 
@@ -3008,7 +3840,14 @@ struct LocalHLSBridge: Sendable {
     }
 
     private nonisolated static var optionalVideoRenditionPostPrimaryWaitNanoseconds: UInt64 {
-        0
+        switch PlaybackEnvironment.current.networkClass {
+        case .wifi:
+            return 220_000_000
+        case .unknown:
+            return 160_000_000
+        case .cellular, .constrained:
+            return 100_000_000
+        }
     }
 
     private nonisolated static func formatMilliseconds(_ value: Double) -> String {
@@ -3062,7 +3901,8 @@ struct LocalHLSBridge: Sendable {
         for track: HLSBridgeTrack,
         durationHint: TimeInterval?,
         headers: [String: String],
-        metricsID: String?
+        metricsID: String?,
+        renderingPolicy: DolbyVisionRenderingPolicy? = nil
     ) async throws -> HLSRendition {
         guard let segmentBase = track.stream?.segmentBase,
               let initialization = segmentBase.initializationByteRange,
@@ -3077,7 +3917,12 @@ struct LocalHLSBridge: Sendable {
             "hlsBridgeRenditionStart media=\(mediaType, privacy: .public) quality=\(track.stream?.id ?? -1, privacy: .public) index=\(indexRange.start, privacy: .public)-\(indexRange.endInclusive, privacy: .public)"
         )
         let renditionResult = try await HLSRenditionCache.shared.cachedOrBuild(
-            for: renditionCacheKey(for: track, initialization: initialization, indexRange: indexRange)
+            for: renditionCacheKey(
+                for: track,
+                initialization: initialization,
+                indexRange: indexRange,
+                renderingPolicy: renderingPolicy
+            )
         ) {
             let fetchStart = CACurrentMediaTime()
             let sourceURLs = [track.url] + track.fallbackURLs
@@ -3121,7 +3966,8 @@ struct LocalHLSBridge: Sendable {
                 initializationData: initializationData,
                 references: references,
                 durationHint: durationHint,
-                timelineOffsetOverride: resolvedTimelineOffset
+                timelineOffsetOverride: resolvedTimelineOffset,
+                renderingPolicy: renderingPolicy
             )
         }
         let rendition = renditionResult.rendition
@@ -3595,7 +4441,12 @@ struct LocalHLSBridge: Sendable {
         do {
             let sourceURLs = [track.url] + track.fallbackURLs
             let renditionResult = try await HLSRenditionCache.shared.cachedOrBuild(
-                for: renditionCacheKey(for: track, initialization: initialization, indexRange: indexRange)
+                for: renditionCacheKey(
+                    for: track,
+                    initialization: initialization,
+                    indexRange: indexRange,
+                    renderingPolicy: nil
+                )
             ) {
                 let bootstrapPayload = try await fetchRenditionBootstrapPayload(
                     initialization: initialization,
@@ -3679,7 +4530,8 @@ struct LocalHLSBridge: Sendable {
         initializationData: Data?,
         references: [SIDXParser.Reference],
         durationHint: TimeInterval?,
-        timelineOffsetOverride: HLSRenditionTimelineOffset?
+        timelineOffsetOverride: HLSRenditionTimelineOffset?,
+        renderingPolicy: DolbyVisionRenderingPolicy? = nil
     ) throws -> HLSRendition {
         let timelineOffset = timelineOffsetOverride ?? HLSRenditionTimelineOffset(
             baseMediaDecodeTimeTicks: references.first?.startTimeTicks ?? 0
@@ -3689,12 +4541,31 @@ struct LocalHLSBridge: Sendable {
         let mediaTimeOffset = timescale > 0
             ? TimeInterval(mediaTimeOffsetTicks) / TimeInterval(timescale)
             : references.first?.startTime ?? 0
-        let dolbyVisionConfiguration = try dolbyVisionConfiguration(
+        let dolbyVisionConfiguration = dolbyVisionConfiguration(
             for: track,
             initializationData: initializationData
         )
-        let initializationNormalization = dolbyVisionConfiguration?.normalizedInitializationDataForHLS(initializationData)
+        let dolbyVisionRenderingPolicy = (renderingPolicy ?? DolbyVisionRenderingPolicy.stored().hlsBridgePolicy).playablePolicy
+        let streamCodec = normalizedCodec(track.stream?.codecs, mediaType: track.mediaType)
+        let usesHEVCCompatibleHLS = track.dynamicRange == .dolbyVision && dolbyVisionConfiguration == nil
+            ? false
+            : usesHEVCCompatibleHLS(for: track, codec: streamCodec)
+        let hevcInitializationNormalization = dolbyVisionConfiguration == nil && usesHEVCCompatibleHLS
+            ? DolbyVisionCodecConfiguration.normalizedHEVCInitializationDataForHLS(initializationData)
+            : nil
+        let initializationNormalization = dolbyVisionConfiguration?.normalizedInitializationDataForHLS(
+            initializationData,
+            renderingPolicy: dolbyVisionRenderingPolicy
+        )
+            ?? hevcInitializationNormalization
         let normalizedInitializationData = initializationNormalization?.data ?? initializationData
+        let videoColorInformation = track.mediaType.isVideo
+            ? DolbyVisionCodecConfiguration.videoColorInformation(from: normalizedInitializationData ?? initializationData)
+            : nil
+        let hlsBaseLayerCodec = initializationNormalization?.hlsBaseLayerCodec
+            ?? (usesHEVCCompatibleHLS
+                ? DolbyVisionCodecConfiguration.hlsCompatibleHEVCCodec(from: streamCodec, initializationData: initializationData)
+                : nil)
         let rendition = HLSRendition(
             sourceURL: track.url,
             fallbackSourceURLs: track.fallbackURLs,
@@ -3705,16 +4576,24 @@ struct LocalHLSBridge: Sendable {
             references: references,
             targetDuration: max(references.map(\.duration).max() ?? durationHint ?? 1, 1),
             bandwidth: max(track.stream?.bandwidth ?? 0, 128_000),
-            codec: normalizedCodec(track.stream?.codecs, mediaType: track.mediaType),
+            codec: streamCodec,
             mediaTimeOffset: mediaTimeOffset,
             baseMediaDecodeTimeOffsetTicks: timelineOffset.baseMediaDecodeTimeTicks,
             dynamicRange: track.dynamicRange,
             dolbyVisionConfiguration: dolbyVisionConfiguration,
-            dimensions: track.stream?.hlsDimensions
+            dolbyVisionRenderingPolicy: dolbyVisionRenderingPolicy,
+            videoColorInformation: videoColorInformation,
+            hlsBaseLayerCodec: hlsBaseLayerCodec,
+            dimensions: track.stream?.hlsDimensions,
+            frameRate: DASHStream.numericFrameRate(from: track.stream?.frameRate)
         )
         if let dolbyVisionConfiguration {
             PlayerMetricsLog.logger.info(
-                "hlsBridgeDolbyVisionConfigured q=\(track.stream?.id ?? -1, privacy: .public) sourceCodec=\(rendition.codec, privacy: .public) box=\(dolbyVisionConfiguration.boxType, privacy: .public) profile=\(dolbyVisionConfiguration.profile, privacy: .public) level=\(dolbyVisionConfiguration.level, privacy: .public) compatibility=\(dolbyVisionConfiguration.baseLayerSignalCompatibilityID, privacy: .public) sampleEntry=\(initializationNormalization?.originalSampleEntryType ?? "-", privacy: .public) hlsSampleEntry=\(initializationNormalization?.hlsSampleEntryType ?? "-", privacy: .public) initRewrite=\(initializationNormalization?.didRewriteSampleEntry == true, privacy: .public) hlsCodec=\(rendition.hlsAdvertisedCodec, privacy: .public) videoRange=\(rendition.hlsVideoRangeValue ?? "-", privacy: .public) supplemental=\(rendition.hlsAdvertisedSupplementalCodec ?? "-", privacy: .public)"
+                "hlsBridgeDolbyVisionConfigured q=\(track.stream?.id ?? -1, privacy: .public) policy=\(dolbyVisionRenderingPolicy.rawValue, privacy: .public) sourceCodec=\(rendition.codec, privacy: .public) baseCodec=\(rendition.hlsCompatibleBaseLayerCodec, privacy: .public) box=\(dolbyVisionConfiguration.boxType, privacy: .public) profile=\(dolbyVisionConfiguration.profile, privacy: .public) level=\(dolbyVisionConfiguration.level, privacy: .public) compatibility=\(dolbyVisionConfiguration.baseLayerSignalCompatibilityID, privacy: .public) color=\(videoColorInformation?.diagnosticSummary ?? "-", privacy: .public) sampleEntry=\(initializationNormalization?.originalSampleEntryType ?? "-", privacy: .public) hlsSampleEntry=\(initializationNormalization?.hlsSampleEntryType ?? "-", privacy: .public) initRewrite=\(initializationNormalization?.didRewriteSampleEntry == true, privacy: .public) hlsCodec=\(rendition.hlsAdvertisedCodec, privacy: .public) videoRange=\(rendition.hlsVideoRangeValue ?? "-", privacy: .public) supplemental=\(rendition.hlsAdvertisedSupplementalCodec ?? "-", privacy: .public)"
+            )
+        } else if usesHEVCCompatibleHLS {
+            PlayerMetricsLog.logger.info(
+                "hlsBridgeHEVCConfigured q=\(track.stream?.id ?? -1, privacy: .public) dynamicRange=\(track.dynamicRange.rawValue, privacy: .public) color=\(videoColorInformation?.diagnosticSummary ?? "-", privacy: .public) sourceCodec=\(rendition.codec, privacy: .public) hlsCodec=\(rendition.hlsAdvertisedCodec, privacy: .public) videoRange=\(rendition.hlsVideoRangeValue ?? "-", privacy: .public) sampleEntry=\(initializationNormalization?.originalSampleEntryType ?? "-", privacy: .public) hlsSampleEntry=\(initializationNormalization?.hlsSampleEntryType ?? "-", privacy: .public) initRewrite=\(initializationNormalization?.didRewriteSampleEntry == true, privacy: .public)"
             )
         }
         return rendition
@@ -3729,7 +4608,7 @@ struct LocalHLSBridge: Sendable {
     ) async throws -> Data? {
         guard existingData == nil,
               track.mediaType.isVideo,
-              track.dynamicRange == .dolbyVision
+              track.dynamicRange.isHDR
         else { return existingData }
         return try await fetchByteRange(
             initialization,
@@ -3742,17 +4621,28 @@ struct LocalHLSBridge: Sendable {
     private nonisolated static func dolbyVisionConfiguration(
         for track: HLSBridgeTrack,
         initializationData: Data?
-    ) throws -> DolbyVisionCodecConfiguration? {
+    ) -> DolbyVisionCodecConfiguration? {
         guard track.mediaType.isVideo,
               track.dynamicRange == .dolbyVision
         else { return nil }
         guard let configuration = DolbyVisionCodecConfiguration.parse(from: initializationData) else {
-            PlayerMetricsLog.logger.error(
-                "hlsBridgeDolbyVisionRejected reason=missingConfiguration codec=\(track.stream?.codecs ?? "-", privacy: .public) q=\(track.stream?.id ?? -1, privacy: .public)"
+            PlayerMetricsLog.logger.info(
+                "hlsBridgeDolbyVisionFallback reason=missingConfiguration codec=\(track.stream?.codecs ?? "-", privacy: .public) q=\(track.stream?.id ?? -1, privacy: .public)"
             )
-            throw PlayerEngineError.unsupportedMedia
+            return nil
         }
         return configuration
+    }
+
+    private nonisolated static func usesHEVCCompatibleHLS(for track: HLSBridgeTrack, codec: String) -> Bool {
+        guard track.mediaType.isVideo else { return false }
+        let lowercasedCodec = codec.lowercased()
+        return track.dynamicRange.isHDR
+            || track.stream?.isHEVCVideoCodec == true
+            || lowercasedCodec.contains("hvc1")
+            || lowercasedCodec.contains("hev1")
+            || lowercasedCodec.contains("dvh1")
+            || lowercasedCodec.contains("dvhe")
     }
 
     private nonisolated static func startupTimelineOffset(
@@ -3774,7 +4664,8 @@ struct LocalHLSBridge: Sendable {
     private nonisolated static func renditionCacheKey(
         for track: HLSBridgeTrack,
         initialization: HTTPByteRange,
-        indexRange: HTTPByteRange
+        indexRange: HTTPByteRange,
+        renderingPolicy: DolbyVisionRenderingPolicy? = nil
     ) -> String {
         let mediaType = switch track.mediaType {
         case .audio:
@@ -3782,15 +4673,17 @@ struct LocalHLSBridge: Sendable {
         case .video:
             "video"
         }
+        let policy = (renderingPolicy ?? DolbyVisionRenderingPolicy.stored().hlsBridgePolicy).playablePolicy
         return [
-            "timeline-v11-dv-init-normalize",
+            "timeline-v22-dv-apple-native-policy",
             mediaType,
             track.cacheIdentity,
             "\(initialization.start)-\(initialization.endInclusive)",
             "\(indexRange.start)-\(indexRange.endInclusive)",
             "\(track.stream?.bandwidth ?? 0)",
             track.stream?.codecs ?? "",
-            track.dynamicRange.rawValue
+            track.dynamicRange.rawValue,
+            policy.rawValue
         ].joined(separator: "|")
     }
 
@@ -3810,17 +4703,34 @@ struct LocalHLSBridge: Sendable {
         } else {
             durationKey = "-"
         }
-        let headerKey = headers
-            .sorted { $0.key < $1.key }
-            .map { "\($0.key)=\($0.value)" }
-            .joined(separator: "&")
+        let headerKey = headerCacheKey(headers)
         return [
-            "route-plan-v3-dv-init-normalize",
+            "route-plan-v7-header-digest",
             videoKeys.joined(separator: "@@"),
             audioKey,
             durationKey,
             headerKey
         ].joined(separator: "||")
+    }
+
+    private nonisolated static func headerCacheKey(_ headers: [String: String]) -> String {
+        guard !headers.isEmpty else { return "-" }
+        return headers
+            .filter { key, _ in
+                key.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() != "cookie"
+            }
+            .map { key, value in
+                let normalizedKey = key.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+                return "\(normalizedKey)=sha256:\(sha256Hex(value))"
+            }
+            .sorted()
+            .joined(separator: "&")
+    }
+
+    private nonisolated static func sha256Hex(_ value: String) -> String {
+        SHA256.hash(data: Data(value.utf8))
+            .map { String(format: "%02x", $0) }
+            .joined()
     }
 
     private nonisolated static func bridgeTrackCacheKey(for track: HLSBridgeTrack) -> String? {
@@ -3848,7 +4758,26 @@ struct LocalHLSBridge: Sendable {
     }
 }
 
-private struct HLSRendition: Sendable {
+enum HLSPlaylistAttributeFormatter {
+    nonisolated static func frameRateAttribute(for frameRate: Double?) -> String {
+        guard let frameRate, frameRate.isFinite, frameRate > 0 else { return "" }
+        let rounded = (frameRate * 1000).rounded() / 1000
+        guard rounded > 0 else { return "" }
+        if rounded.rounded() == rounded {
+            return ",FRAME-RATE=\(Int(rounded))"
+        }
+        var value = String(format: "%.3f", locale: Locale(identifier: "en_US_POSIX"), rounded)
+        while value.last == "0" {
+            value.removeLast()
+        }
+        if value.last == "." {
+            value.removeLast()
+        }
+        return ",FRAME-RATE=\(value)"
+    }
+}
+
+struct HLSRendition: Sendable {
     let sourceURL: URL
     let fallbackSourceURLs: [URL]
     let mediaType: HLSBridgeTrack.MediaType
@@ -3863,13 +4792,71 @@ private struct HLSRendition: Sendable {
     let baseMediaDecodeTimeOffsetTicks: UInt64
     let dynamicRange: BiliVideoDynamicRange
     let dolbyVisionConfiguration: DolbyVisionCodecConfiguration?
+    let dolbyVisionRenderingPolicy: DolbyVisionRenderingPolicy
+    let videoColorInformation: VideoColorInformation?
+    let hlsBaseLayerCodec: String?
     let dimensions: CGSize?
+    let frameRate: Double?
+
+    nonisolated init(
+        sourceURL: URL,
+        fallbackSourceURLs: [URL],
+        mediaType: HLSBridgeTrack.MediaType,
+        quality: Int?,
+        initialization: HTTPByteRange,
+        initializationData: Data?,
+        references: [SIDXParser.Reference],
+        targetDuration: TimeInterval,
+        bandwidth: Int,
+        codec: String,
+        mediaTimeOffset: TimeInterval,
+        baseMediaDecodeTimeOffsetTicks: UInt64,
+        dynamicRange: BiliVideoDynamicRange,
+        dolbyVisionConfiguration: DolbyVisionCodecConfiguration?,
+        dolbyVisionRenderingPolicy: DolbyVisionRenderingPolicy = .stored(),
+        videoColorInformation: VideoColorInformation? = nil,
+        hlsBaseLayerCodec: String?,
+        dimensions: CGSize?,
+        frameRate: Double?
+    ) {
+        self.sourceURL = sourceURL
+        self.fallbackSourceURLs = fallbackSourceURLs
+        self.mediaType = mediaType
+        self.quality = quality
+        self.initialization = initialization
+        self.initializationData = initializationData
+        self.references = references
+        self.targetDuration = targetDuration
+        self.bandwidth = bandwidth
+        self.codec = codec
+        self.mediaTimeOffset = mediaTimeOffset
+        self.baseMediaDecodeTimeOffsetTicks = baseMediaDecodeTimeOffsetTicks
+        self.dynamicRange = dynamicRange
+        self.dolbyVisionConfiguration = dolbyVisionConfiguration
+        self.dolbyVisionRenderingPolicy = dolbyVisionRenderingPolicy
+        self.videoColorInformation = videoColorInformation
+        self.hlsBaseLayerCodec = hlsBaseLayerCodec
+        self.dimensions = dimensions
+        self.frameRate = frameRate
+    }
+
+    nonisolated var hlsCompatibleBaseLayerCodec: String {
+        hlsBaseLayerCodec ?? DolbyVisionCodecConfiguration.hlsCompatibleBaseLayerCodec(from: codec)
+    }
 
     nonisolated var hlsAdvertisedCodec: String {
-        guard dynamicRange == .dolbyVision,
-              let dolbyVisionConfiguration
-        else { return codec }
-        return dolbyVisionConfiguration.hlsAdvertisedCodec(baseLayerCodec: codec)
+        if dynamicRange == .dolbyVision,
+           let dolbyVisionConfiguration {
+            return dolbyVisionConfiguration.hlsAdvertisedCodec(
+                baseLayerCodec: hlsCompatibleBaseLayerCodec,
+                renderingPolicy: dolbyVisionRenderingPolicy
+            )
+        }
+        if mediaType.isVideo,
+           let hlsBaseLayerCodec {
+            return hlsBaseLayerCodec
+        }
+        return codec
     }
 
     nonisolated var hlsAdvertisedSupplementalCodecAttribute: String {
@@ -3879,10 +4866,12 @@ private struct HLSRendition: Sendable {
 
     nonisolated var hlsAdvertisedSupplementalCodec: String? {
         guard dynamicRange == .dolbyVision,
-              let dolbyVisionConfiguration,
-              dolbyVisionConfiguration.usesSupplementalCodecsAttribute
+              let dolbyVisionConfiguration
         else { return nil }
-        return dolbyVisionConfiguration.supplementalCodecString
+        return dolbyVisionConfiguration.hlsAdvertisedSupplementalCodec(
+            baseLayerCodec: hlsCompatibleBaseLayerCodec,
+            renderingPolicy: dolbyVisionRenderingPolicy
+        )
     }
 
     nonisolated var hlsVideoRangeAttribute: String {
@@ -3892,13 +4881,15 @@ private struct HLSRendition: Sendable {
 
     nonisolated var hlsVideoRangeValue: String? {
         if dynamicRange == .dolbyVision {
-            guard let dolbyVisionConfiguration else { return nil }
-            return dolbyVisionConfiguration.hlsVideoRangeAttribute
+            if dolbyVisionRenderingPolicy.playablePolicy == .compatibleHLG
+                || dolbyVisionRenderingPolicy.playablePolicy == .metadataPassthrough {
+                return videoColorInformation?.hlsVideoRangeAttribute
+                    ?? dolbyVisionConfiguration?.hlsVideoRangeAttribute
+            }
+            return dolbyVisionConfiguration?.hlsVideoRangeAttribute
+                ?? videoColorInformation?.hlsVideoRangeAttribute
         }
-        guard dynamicRange != .dolbyVision,
-              let videoRange = dynamicRange.hlsVideoRangeAttribute
-        else { return nil }
-        return videoRange
+        return videoColorInformation?.hlsVideoRangeAttribute
     }
 
     nonisolated var hlsResolutionAttribute: String {
@@ -3908,6 +4899,42 @@ private struct HLSRendition: Sendable {
               dimensions.height > 0
         else { return "" }
         return ",RESOLUTION=\(Int(dimensions.width))x\(Int(dimensions.height))"
+    }
+
+    nonisolated var hlsFrameRateAttribute: String {
+        guard mediaType.isVideo else { return "" }
+        return HLSPlaylistAttributeFormatter.frameRateAttribute(for: frameRate)
+    }
+
+    nonisolated var diagnosticSummary: String {
+        var parts = [quality.map { "q\($0)" } ?? "q-", hlsAdvertisedCodec]
+        if let videoRange = hlsVideoRangeValue {
+            parts.append(videoRange)
+        }
+        if let videoColorInformation {
+            parts.append("color=\(videoColorInformation.transferCharacteristics)")
+        }
+        if let supplemental = hlsAdvertisedSupplementalCodec {
+            parts.append("supp=\(supplemental)")
+        }
+        if dynamicRange == .dolbyVision {
+            parts.append("dvPolicy=\(dolbyVisionRenderingPolicy.rawValue)")
+            parts.append("dvPath=\(dolbyVisionRenderingPath)")
+        }
+        return parts.joined(separator: " ")
+    }
+
+    nonisolated var dolbyVisionRenderingPath: String {
+        switch dolbyVisionRenderingPolicy.playablePolicy {
+        case .compatibleHLG:
+            return "compatibleBaseLayer"
+        case .metadataPassthrough:
+            return "metadataPassthrough"
+        case .appleNativeP8HLS:
+            return "appleNativeP8HLS"
+        case .protectedHLG, .fullEffect, .supplementalHLS:
+            return "deprecated"
+        }
     }
 
     nonisolated func playlist(baseURL: URL, routePrefix: String) -> String {
@@ -3988,10 +5015,15 @@ private struct HLSRendition: Sendable {
     }
 }
 
-private struct HLSBridgeRoutePlan: Sendable {
+struct HLSBridgeRoutePlan: Sendable {
     let videoRenditions: [HLSRendition]
     let audioRendition: HLSRendition
     let masterPlaylistVersion: Int
+}
+
+struct HLSBridgeRenderedPlaylists: Sendable {
+    let masterPlaylistURL: URL
+    let routes: [String: HLSProxyRoute]
 }
 
 private struct HLSBridgeSeekPlanner: Sendable {
@@ -4004,24 +5036,26 @@ private struct HLSBridgeSeekPlanner: Sendable {
     }
 
     nonisolated func warm(around playbackTime: TimeInterval, metricsID: String?) async {
+        guard !Task.isCancelled else { return }
         let start = CACurrentMediaTime()
         let videoRanges = video.warmRanges(around: playbackTime)
         let audioRanges = audio.warmRanges(around: playbackTime)
         guard !videoRanges.isEmpty || !audioRanges.isEmpty else { return }
 
         await withTaskGroup(of: Bool.self) { group in
-            if !videoRanges.isEmpty {
+            if !videoRanges.isEmpty, !Task.isCancelled {
                 group.addTask(priority: .utility) {
                     await Self.warm(ranges: videoRanges, map: video, headers: headers)
                 }
             }
-            if !audioRanges.isEmpty {
+            if !audioRanges.isEmpty, !Task.isCancelled {
                 group.addTask(priority: .utility) {
                     await Self.warm(ranges: audioRanges, map: audio, headers: headers)
                 }
             }
             var didWarm = false
             for await result in group where result {
+                guard !Task.isCancelled else { return }
                 didWarm = true
             }
             guard didWarm else { return }
@@ -4044,6 +5078,7 @@ private struct HLSBridgeSeekPlanner: Sendable {
         guard !map.sourceURLs.isEmpty else { return false }
         var didWarm = false
         for range in ranges {
+            guard !Task.isCancelled else { return didWarm }
             do {
                 _ = try await LocalHLSBridge.fetchByteRange(
                     range,
@@ -4051,6 +5086,7 @@ private struct HLSBridgeSeekPlanner: Sendable {
                     headers: headers,
                     strategy: .fastFallback
                 )
+                guard !Task.isCancelled else { return didWarm }
                 didWarm = true
             } catch {}
         }
@@ -4062,7 +5098,7 @@ private final class LocalLiveHLSProxy: @unchecked Sendable {
     let playlistURL: URL
 
     private let sourcePlaylistURL: URL
-    private let headers: [String: String]
+    nonisolated(unsafe) private var headers: [String: String]
     private let metricsID: String?
     private let listener: NWListener
     private let queue: DispatchQueue
@@ -4081,7 +5117,7 @@ private final class LocalLiveHLSProxy: @unchecked Sendable {
         self.sourcePlaylistURL = sourcePlaylistURL
         self.headers = headers
         self.metricsID = metricsID
-        self.listener = try NWListener(using: .tcp, on: endpointPort)
+        self.listener = try NWListener(using: Self.listenerParameters(), on: endpointPort)
         self.queue = DispatchQueue(label: "cc.bili.live-hls.\(port)", qos: .userInitiated)
     }
 
@@ -4165,6 +5201,13 @@ private final class LocalLiveHLSProxy: @unchecked Sendable {
 
     private func handleConnection(_ connection: NWConnection) {
         guard !isClosed else {
+            connection.cancel()
+            return
+        }
+        guard Self.allowsConnectionEndpoint(connection.endpoint) else {
+            PlayerMetricsLog.logger.error(
+                "directLiveHLSRejectedNonLoopback endpoint=\(String(describing: connection.endpoint), privacy: .private)"
+            )
             connection.cancel()
             return
         }
@@ -4379,6 +5422,14 @@ private final class LocalLiveHLSProxy: @unchecked Sendable {
         return (data, contentType)
     }
 
+    fileprivate nonisolated static func listenerParameters() throws -> NWParameters {
+        try HLSLoopbackEndpointPolicy.tcpListenerParameters()
+    }
+
+    fileprivate nonisolated static func allowsConnectionEndpoint(_ endpoint: NWEndpoint) -> Bool {
+        HLSLoopbackEndpointPolicy.allows(endpoint)
+    }
+
     private static func fetchRemoteData(_ url: URL, headers: [String: String], timeoutInterval: TimeInterval) async throws -> Data {
         var request = URLRequest(url: url)
         request.cachePolicy = .reloadIgnoringLocalAndRemoteCacheData
@@ -4471,6 +5522,18 @@ private final class LocalLiveHLSProxy: @unchecked Sendable {
         !isClosed && activeConnections[identifier] != nil
     }
 }
+
+#if DEBUG
+enum LocalLiveHLSProxyTesting {
+    nonisolated static func listenerRequiredLocalEndpoint() throws -> NWEndpoint? {
+        try LocalLiveHLSProxy.listenerParameters().requiredLocalEndpoint
+    }
+
+    nonisolated static func allowsConnectionEndpoint(_ endpoint: NWEndpoint) -> Bool {
+        LocalLiveHLSProxy.allowsConnectionEndpoint(endpoint)
+    }
+}
+#endif
 
 private actor HLSRenditionCache {
     static let shared = HLSRenditionCache()
@@ -4684,8 +5747,12 @@ private actor HLSRenditionCache {
         let baseMediaDecodeTimeOffsetTicks: UInt64
         let dynamicRange: String
         let dolbyVisionConfiguration: PersistedDolbyVisionConfiguration?
+        let dolbyVisionRenderingPolicy: String?
+        let videoColorInformation: VideoColorInformation?
+        let hlsBaseLayerCodec: String?
         let dimensionsWidth: Double?
         let dimensionsHeight: Double?
+        let frameRate: Double?
 
         init?(rendition: HLSRendition) {
             self.sourceURL = rendition.sourceURL.absoluteString
@@ -4702,8 +5769,12 @@ private actor HLSRenditionCache {
             self.baseMediaDecodeTimeOffsetTicks = rendition.baseMediaDecodeTimeOffsetTicks
             self.dynamicRange = rendition.dynamicRange.rawValue
             self.dolbyVisionConfiguration = rendition.dolbyVisionConfiguration.map(PersistedDolbyVisionConfiguration.init(configuration:))
+            self.dolbyVisionRenderingPolicy = rendition.dolbyVisionRenderingPolicy.rawValue
+            self.videoColorInformation = rendition.videoColorInformation
+            self.hlsBaseLayerCodec = rendition.hlsBaseLayerCodec
             self.dimensionsWidth = rendition.dimensions.map { Double($0.width) }
             self.dimensionsHeight = rendition.dimensions.map { Double($0.height) }
+            self.frameRate = rendition.frameRate
         }
 
         func makeRendition() -> HLSRendition? {
@@ -4730,7 +5801,13 @@ private actor HLSRenditionCache {
                 baseMediaDecodeTimeOffsetTicks: baseMediaDecodeTimeOffsetTicks,
                 dynamicRange: BiliVideoDynamicRange(rawValue: dynamicRange) ?? .sdr,
                 dolbyVisionConfiguration: dolbyVisionConfiguration?.makeConfiguration(),
-                dimensions: dimensions
+                dolbyVisionRenderingPolicy: dolbyVisionRenderingPolicy
+                    .flatMap(DolbyVisionRenderingPolicy.init(rawValue:))?
+                    .playablePolicy ?? .compatibleHLG,
+                videoColorInformation: videoColorInformation,
+                hlsBaseLayerCodec: hlsBaseLayerCodec,
+                dimensions: dimensions,
+                frameRate: frameRate
             )
         }
     }
@@ -4969,17 +6046,158 @@ private actor LocalHLSBridgeInstanceCache {
     static let shared = LocalHLSBridgeInstanceCache()
 
     enum State: String, Sendable {
+        case hit
+        case pending
         case miss
     }
 
+    private let ttl: TimeInterval = 45
+    private let maxCount = 3
+    private var cache: [String: Entry] = [:]
+    private var pendingBuilds: [String: PendingBuild] = [:]
+
     func cachedOrBuild(
-        for _: String,
+        for key: String,
+        storesForReuse: Bool,
         builder: @escaping @Sendable () async throws -> LocalHLSBridge
     ) async throws -> (bridge: LocalHLSBridge, state: State) {
-        (try await builder(), .miss)
+        trimExpired()
+
+        if storesForReuse {
+            if let entry = cache[key] {
+                cache[key] = Entry(bridge: entry.bridge, date: Date())
+                return (entry.bridge, .hit)
+            }
+
+            if let pendingBuild = pendingBuilds[key] {
+                do {
+                    let bridge = try await pendingBuild.task.value
+                    if pendingBuilds[key]?.id == pendingBuild.id {
+                        pendingBuilds[key] = nil
+                        if pendingBuild.storesForReuse {
+                            cache[key] = Entry(bridge: bridge, date: Date())
+                            trimIfNeeded()
+                        }
+                    }
+                    return (bridge, .pending)
+                } catch {
+                    if pendingBuilds[key]?.id == pendingBuild.id {
+                        pendingBuilds[key] = nil
+                    }
+                    throw error
+                }
+            }
+
+            let pendingBuild = PendingBuild(
+                storesForReuse: true,
+                task: Task.detached(priority: .userInitiated) {
+                    try await builder()
+                }
+            )
+            pendingBuilds[key] = pendingBuild
+            do {
+                let bridge = try await pendingBuild.task.value
+                if pendingBuilds[key]?.id == pendingBuild.id {
+                    pendingBuilds[key] = nil
+                    cache[key] = Entry(bridge: bridge, date: Date())
+                    trimIfNeeded()
+                }
+                return (bridge, .miss)
+            } catch {
+                if pendingBuilds[key]?.id == pendingBuild.id {
+                    pendingBuilds[key] = nil
+                }
+                throw error
+            }
+        }
+
+        if let entry = cache.removeValue(forKey: key) {
+            return (entry.bridge, .hit)
+        }
+
+        if let pendingBuild = pendingBuilds[key] {
+            if pendingBuild.storesForReuse {
+                pendingBuilds[key] = nil
+            }
+            do {
+                let bridge = try await pendingBuild.task.value
+                if !pendingBuild.storesForReuse,
+                   pendingBuilds[key]?.id == pendingBuild.id {
+                    pendingBuilds[key] = nil
+                }
+                return (bridge, .pending)
+            } catch {
+                if !pendingBuild.storesForReuse,
+                   pendingBuilds[key]?.id == pendingBuild.id {
+                    pendingBuilds[key] = nil
+                }
+                throw error
+            }
+        }
+
+        let pendingBuild = PendingBuild(
+            storesForReuse: false,
+            task: Task.detached(priority: .userInitiated) {
+                try await builder()
+            }
+        )
+        pendingBuilds[key] = pendingBuild
+        do {
+            let bridge = try await pendingBuild.task.value
+            if pendingBuilds[key]?.id == pendingBuild.id {
+                pendingBuilds[key] = nil
+            }
+            return (bridge, .miss)
+        } catch {
+            if pendingBuilds[key]?.id == pendingBuild.id {
+                pendingBuilds[key] = nil
+            }
+            throw error
+        }
     }
 
-    func removeAll() {}
+    func removeAll() {
+        pendingBuilds.values.forEach { $0.task.cancel() }
+        pendingBuilds.removeAll()
+        cache.values.forEach { $0.bridge.stop() }
+        cache.removeAll()
+    }
+
+    private func trimExpired() {
+        let expiry = Date().addingTimeInterval(-ttl)
+        let expiredKeys = cache
+            .filter { $0.value.date < expiry }
+            .map(\.key)
+        for key in expiredKeys {
+            cache.removeValue(forKey: key)?.bridge.stop()
+        }
+    }
+
+    private func trimIfNeeded() {
+        trimExpired()
+        guard cache.count > maxCount else { return }
+        let keptKeys = Set(
+            cache
+                .sorted { $0.value.date > $1.value.date }
+                .prefix(maxCount)
+                .map(\.key)
+        )
+        let removedKeys = cache.keys.filter { !keptKeys.contains($0) }
+        for key in removedKeys {
+            cache.removeValue(forKey: key)?.bridge.stop()
+        }
+    }
+
+    private struct Entry {
+        let bridge: LocalHLSBridge
+        let date: Date
+    }
+
+    private struct PendingBuild {
+        let id = UUID()
+        let storesForReuse: Bool
+        let task: Task<LocalHLSBridge, Error>
+    }
 }
 
 private actor HLSSourcePreferenceCache {
@@ -5444,16 +6662,23 @@ private final class LocalHLSProxyServer: @unchecked Sendable {
 
     let baseURL: URL
 
-    private let headers: [String: String]
+    nonisolated(unsafe) private var headers: [String: String]
     nonisolated(unsafe) private var metricsID: String?
     private let listener: NWListener
     private let queue: DispatchQueue
+    private let failureStore = HLSProxyFailureStore()
+    nonisolated(unsafe) private var remoteFailureHandler: HLSRemoteFailureHandler?
     nonisolated(unsafe) private var routes: [String: HLSProxyRoute] = [:]
     nonisolated(unsafe) private var activeConnections: [ObjectIdentifier: NWConnection] = [:]
     nonisolated(unsafe) private var isStarted = false
     nonisolated(unsafe) private var isClosed = false
 
-    nonisolated private init(port: UInt16, headers: [String: String], metricsID: String?) throws {
+    nonisolated private init(
+        port: UInt16,
+        headers: [String: String],
+        metricsID: String?,
+        onRemoteFailure: HLSRemoteFailureHandler?
+    ) throws {
         guard let endpointPort = NWEndpoint.Port(rawValue: port),
               let baseURL = URL(string: "http://127.0.0.1:\(port)")
         else {
@@ -5462,7 +6687,11 @@ private final class LocalHLSProxyServer: @unchecked Sendable {
         self.baseURL = baseURL
         self.headers = headers
         self.metricsID = metricsID
-        self.listener = try NWListener(using: .tcp, on: endpointPort)
+        self.remoteFailureHandler = onRemoteFailure
+        self.listener = try NWListener(
+            using: HLSLoopbackEndpointPolicy.tcpListenerParameters(),
+            on: endpointPort
+        )
         self.queue = DispatchQueue(label: "cc.bili.local-hls.\(port)", qos: .userInitiated)
     }
 
@@ -5483,12 +6712,21 @@ private final class LocalHLSProxyServer: @unchecked Sendable {
         }
     }
 
-    nonisolated static func make(headers: [String: String], metricsID: String? = nil) throws -> LocalHLSProxyServer {
+    nonisolated static func make(
+        headers: [String: String],
+        metricsID: String? = nil,
+        onRemoteFailure: HLSRemoteFailureHandler? = nil
+    ) throws -> LocalHLSProxyServer {
         var lastError: Error?
         for _ in 0..<24 {
             let port = UInt16.random(in: 49152...61000)
             do {
-                return try LocalHLSProxyServer(port: port, headers: headers, metricsID: metricsID)
+                return try LocalHLSProxyServer(
+                    port: port,
+                    headers: headers,
+                    metricsID: metricsID,
+                    onRemoteFailure: onRemoteFailure
+                )
             } catch {
                 lastError = error
             }
@@ -5505,6 +6743,29 @@ private final class LocalHLSProxyServer: @unchecked Sendable {
     nonisolated func updateMetricsID(_ metricsID: String?) {
         queue.async { [weak self] in
             self?.metricsID = metricsID
+        }
+    }
+
+    nonisolated func updateHeaders(_ headers: [String: String]) {
+        queue.async { [weak self] in
+            self?.headers = headers
+        }
+    }
+
+    nonisolated func updateRemoteFailureHandler(_ handler: HLSRemoteFailureHandler?) {
+        queue.async { [weak self] in
+            self?.remoteFailureHandler = handler
+        }
+    }
+
+    nonisolated func recentRemoteFailureReason() -> HLSBridgeFailureReason? {
+        failureStore.recentReason()
+    }
+
+    nonisolated private func notifyRemoteFailure(_ reason: HLSBridgeFailureReason) {
+        guard let remoteFailureHandler else { return }
+        Task { @MainActor in
+            remoteFailureHandler(reason)
         }
     }
 
@@ -5548,6 +6809,13 @@ private final class LocalHLSProxyServer: @unchecked Sendable {
 
     nonisolated private func handleConnection(_ connection: NWConnection) {
         guard !isClosed else {
+            connection.cancel()
+            return
+        }
+        guard HLSLoopbackEndpointPolicy.allows(connection.endpoint) else {
+            PlayerMetricsLog.logger.error(
+                "hlsProxyRejectedNonLoopback endpoint=\(String(describing: connection.endpoint), privacy: .private)"
+            )
             connection.cancel()
             return
         }
@@ -5779,6 +7047,9 @@ private final class LocalHLSProxyServer: @unchecked Sendable {
             }
         } catch {
             let proxyFailure = HLSBridgeRemoteFailure.proxyHTTPStatus(for: error)
+            let failureReason = HLSBridgeRemoteFailure.reason(for: error)
+            failureStore.record(failureReason)
+            notifyRemoteFailure(failureReason)
             PlayerMetricsLog.logger.error(
                 "hlsProxyRemoteFetchFailed path=\(request.path, privacy: .public) range=\(fetchRange.start, privacy: .public)-\(fetchRange.endInclusive, privacy: .public) status=\(proxyFailure.statusCode, privacy: .public) url=\(url.absoluteString, privacy: .private) error=\(error.localizedDescription, privacy: .public)"
             )
@@ -6135,21 +7406,14 @@ private final class LocalHLSProxyServer: @unchecked Sendable {
         totalLength: Int64,
         servedRange: HTTPByteRange?
     ) -> Data {
-        var headers = [
-            "Content-Type": contentType,
-            "Content-Length": "\(responseLength)",
-            "Accept-Ranges": "bytes",
-            "Cache-Control": "public, max-age=3600",
-            "Connection": "close"
-        ]
-        let statusLine: String
-        if let servedRange {
-            statusLine = "HTTP/1.1 206 Partial Content"
-            headers["Content-Range"] = "bytes \(servedRange.start)-\(servedRange.endInclusive)/\(totalLength)"
-        } else {
-            statusLine = "HTTP/1.1 200 OK"
-        }
-        return Self.responseHeaderData(statusLine: statusLine, headers: headers)
+        HLSProxyHTTPResponseBuilder.dataResponse(
+            contentType: contentType,
+            request: request,
+            responseLength: responseLength,
+            totalLength: totalLength,
+            servedRange: servedRange,
+            closesConnection: true
+        ).headerData
     }
 
     nonisolated private func sendData(
@@ -6162,23 +7426,17 @@ private final class LocalHLSProxyServer: @unchecked Sendable {
         closesConnection: Bool = true
     ) {
         let body = request.method == "HEAD" ? Data() : data
-        var headers = [
-            "Content-Type": contentType,
-            "Content-Length": "\(data.count)",
-            "Accept-Ranges": "bytes",
-            "Cache-Control": request.path.hasSuffix(".m3u8") ? "no-cache" : "public, max-age=3600",
-            "Connection": closesConnection ? "close" : "keep-alive"
-        ]
-        let statusLine: String
-        if let servedRange, let totalLength {
-            statusLine = "HTTP/1.1 206 Partial Content"
-            headers["Content-Range"] = "bytes \(servedRange.start)-\(servedRange.endInclusive)/\(totalLength)"
-        } else {
-            statusLine = "HTTP/1.1 200 OK"
-        }
+        let response = HLSProxyHTTPResponseBuilder.dataResponse(
+            contentType: contentType,
+            request: request,
+            responseLength: Int64(data.count),
+            totalLength: totalLength,
+            servedRange: servedRange,
+            closesConnection: closesConnection
+        )
         sendResponse(
-            statusLine: statusLine,
-            headers: headers,
+            statusLine: response.statusLine,
+            headers: response.headers,
             body: body,
             to: connection,
             closesConnection: closesConnection
@@ -6186,15 +7444,11 @@ private final class LocalHLSProxyServer: @unchecked Sendable {
     }
 
     nonisolated private func sendError(_ statusCode: Int, reason: String, to connection: NWConnection) {
-        let body = Data(reason.utf8)
+        let errorResponse = HLSProxyHTTPResponseBuilder.errorResponse(statusCode: statusCode, reason: reason)
         sendResponse(
-            statusLine: "HTTP/1.1 \(statusCode) \(reason)",
-            headers: [
-                "Content-Type": "text/plain; charset=utf-8",
-                "Content-Length": "\(body.count)",
-                "Connection": "close"
-            ],
-            body: body,
+            statusLine: errorResponse.response.statusLine,
+            headers: errorResponse.response.headers,
+            body: errorResponse.body,
             to: connection
         )
     }
@@ -6207,21 +7461,15 @@ private final class LocalHLSProxyServer: @unchecked Sendable {
         servedRange: HTTPByteRange?,
         to connection: NWConnection
     ) async throws {
-        var headers = [
-            "Content-Type": contentType,
-            "Content-Length": "\(responseLength)",
-            "Accept-Ranges": "bytes",
-            "Cache-Control": request.path.hasSuffix(".m3u8") ? "no-cache" : "public, max-age=3600",
-            "Connection": "close"
-        ]
-        let statusLine: String
-        if let servedRange {
-            statusLine = "HTTP/1.1 206 Partial Content"
-            headers["Content-Range"] = "bytes \(servedRange.start)-\(servedRange.endInclusive)/\(totalLength)"
-        } else {
-            statusLine = "HTTP/1.1 200 OK"
-        }
-        try await sendContent(Self.responseHeaderData(statusLine: statusLine, headers: headers), to: connection)
+        let response = HLSProxyHTTPResponseBuilder.dataResponse(
+            contentType: contentType,
+            request: request,
+            responseLength: responseLength,
+            totalLength: totalLength,
+            servedRange: servedRange,
+            closesConnection: true
+        )
+        try await sendContent(response.headerData, to: connection)
     }
 
     nonisolated private func sendResponse(
@@ -6231,7 +7479,7 @@ private final class LocalHLSProxyServer: @unchecked Sendable {
         to connection: NWConnection,
         closesConnection: Bool = true
     ) {
-        var response = Self.responseHeaderData(statusLine: statusLine, headers: headers)
+        var response = HLSProxyHTTPResponse(statusLine: statusLine, headers: headers).headerData
         response.append(body)
         connection.send(content: response, completion: .contentProcessed { [weak self] _ in
             guard !closesConnection, let self else {
@@ -6261,15 +7509,6 @@ private final class LocalHLSProxyServer: @unchecked Sendable {
                 }
             })
         }
-    }
-
-    nonisolated private static func responseHeaderData(
-        statusLine: String,
-        headers: [String: String]
-    ) -> Data {
-        let headerText = ([statusLine] + headers.map { "\($0.key): \($0.value)" })
-            .joined(separator: "\r\n") + "\r\n\r\n"
-        return Data(headerText.utf8)
     }
 
 }

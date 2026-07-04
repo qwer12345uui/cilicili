@@ -246,7 +246,13 @@ final class DanmakuAnimationOverlayView: UIView {
         let fontWeight: DanmakuFontWeightOption
     }
 
+    private struct TimeBucket {
+        let index: Int
+        var items: [DanmakuItem]
+    }
+
     private var items: [DanmakuItem] = []
+    private var timeBuckets: [TimeBucket] = []
     private var settings: DanmakuSettings = .default
     private var currentTime: TimeInterval = 0
     private var isPlaying = false
@@ -256,7 +262,8 @@ final class DanmakuAnimationOverlayView: UIView {
     private(set) var isLoadShedding = false
     private var topInset: CGFloat = 0
     private var bottomInset: CGFloat = 0
-    private var nextItemIndex = 0
+    private var nextBucketIndex = 0
+    private var nextBucketItemIndex = 0
     private var anchorPlaybackTime: TimeInterval = 0
     private var anchorHostTime = CACurrentMediaTime()
     private var displayLink: CADisplayLink?
@@ -339,6 +346,9 @@ final class DanmakuAnimationOverlayView: UIView {
             || normalizedSettings.fontWeight != settings.fontWeight
         let didChangeInsets = abs(newTopInset - topInset) > 0.5 || abs(newBottomInset - bottomInset) > 0.5
         items = newItems
+        if didChangeItems {
+            rebuildTimeBuckets()
+        }
         lastItemsRevision = newItemsRevision
         currentTime = sanitizedTime
         isPlaying = newIsPlaying
@@ -358,7 +368,7 @@ final class DanmakuAnimationOverlayView: UIView {
         if !currentShouldRender {
             cancelLayoutSettling()
             clearActiveLabels()
-            nextItemIndex = firstItemIndex(after: sanitizedTime)
+            setNextSpawnPosition(after: sanitizedTime)
             syncPlaybackAnchor(to: sanitizedTime)
             stopDisplayLink()
             updateAnimationPauseState()
@@ -379,7 +389,7 @@ final class DanmakuAnimationOverlayView: UIView {
             if activeEntries.isEmpty {
                 rebuildVisibleItems(at: sanitizedTime, animated: newIsPlaying)
             } else {
-                nextItemIndex = firstItemIndex(after: sanitizedTime)
+                setNextSpawnPosition(after: sanitizedTime)
             }
         }
 
@@ -403,7 +413,7 @@ final class DanmakuAnimationOverlayView: UIView {
         currentTime = sanitizedTime
 
         guard shouldRenderDanmaku else {
-            nextItemIndex = firstItemIndex(after: sanitizedTime)
+            setNextSpawnPosition(after: sanitizedTime)
             syncPlaybackAnchor(to: sanitizedTime)
             stopDisplayLink()
             updateAnimationPauseState()
@@ -564,7 +574,7 @@ final class DanmakuAnimationOverlayView: UIView {
         let startIndex = firstItemIndex(atOrAfter: replayStart)
         let endIndex = firstItemIndex(after: playbackTime)
         guard startIndex < endIndex else {
-            nextItemIndex = endIndex
+            setNextSpawnPosition(after: playbackTime)
             return
         }
 
@@ -582,7 +592,7 @@ final class DanmakuAnimationOverlayView: UIView {
         for item in visibleItems {
             spawn(item, at: playbackTime, animated: animated)
         }
-        nextItemIndex = endIndex
+        setNextSpawnPosition(after: playbackTime)
     }
 
     private func rebuildVisibleItemsAfterLayoutChange(
@@ -703,29 +713,57 @@ final class DanmakuAnimationOverlayView: UIView {
             }
         }
 
-        nextItemIndex = firstItemIndex(after: playbackTime)
+        setNextSpawnPosition(after: playbackTime)
     }
 
     private func spawnDueItems(at playbackTime: TimeInterval) {
         skipExpiredItems(at: playbackTime)
         var spawnedCount = 0
         let spawnLimit = maxSpawnPerTick
-        while nextItemIndex < items.count,
-              items[nextItemIndex].time <= playbackTime,
+        let currentBucket = timeBucketIndex(for: playbackTime)
+        while nextBucketIndex < timeBuckets.count,
+              timeBuckets[nextBucketIndex].index <= currentBucket,
               spawnedCount < spawnLimit {
-            let item = items[nextItemIndex]
-            nextItemIndex += 1
-            let age = playbackTime - item.time
-            guard age >= 0, age < displayDuration(for: item) else { continue }
-            spawn(item, at: playbackTime, animated: true)
-            spawnedCount += 1
+            let bucket = timeBuckets[nextBucketIndex]
+            if isBucketTooStale(bucket.index, at: playbackTime) {
+                advanceToNextBucket()
+                continue
+            }
+
+            let bucketItems = bucket.items
+            while nextBucketItemIndex < bucketItems.count, spawnedCount < spawnLimit {
+                let item = bucketItems[nextBucketItemIndex]
+                nextBucketItemIndex += 1
+                let age = playbackTime - item.time
+                guard age >= -Self.timeBucketDuration, age < displayDuration(for: item) else { continue }
+                spawn(item, at: playbackTime, animated: true)
+                spawnedCount += 1
+            }
+
+            if nextBucketItemIndex >= bucketItems.count {
+                advanceToNextBucket()
+            }
         }
     }
 
     private func skipExpiredItems(at playbackTime: TimeInterval) {
         let maximumDuration = maximumDisplayDuration()
-        while nextItemIndex < items.count, playbackTime - items[nextItemIndex].time > maximumDuration {
-            nextItemIndex += 1
+        while nextBucketIndex < timeBuckets.count {
+            let bucket = timeBuckets[nextBucketIndex]
+            guard bucketEndTime(for: bucket.index) >= playbackTime - maximumDuration else {
+                advanceToNextBucket()
+                continue
+            }
+
+            while nextBucketItemIndex < bucket.items.count,
+                  playbackTime - bucket.items[nextBucketItemIndex].time > maximumDuration {
+                nextBucketItemIndex += 1
+            }
+            if nextBucketItemIndex >= bucket.items.count {
+                advanceToNextBucket()
+                continue
+            }
+            return
         }
     }
 
@@ -1200,11 +1238,11 @@ final class DanmakuAnimationOverlayView: UIView {
 
     private static let layoutSettlingRebuildDelays: [UInt64] = [
         0,
-        50_000_000,
         120_000_000,
-        220_000_000,
-        360_000_000
+        280_000_000
     ]
+
+    private static let timeBucketDuration: TimeInterval = 0.1
 
     private func fontSize(for item: DanmakuItem) -> CGFloat {
         let compactScale = bounds.width > 640 ? 0.86 : 0.70
@@ -1212,6 +1250,91 @@ final class DanmakuAnimationOverlayView: UIView {
         let minimumSize: CGFloat = bounds.width > 640 ? 15 : 13
         let scaledSize = CGFloat(item.fontSize) * compactScale * CGFloat(settings.fontScale)
         return min(max(scaledSize, minimumSize * 0.9), maximumSize * 1.35)
+    }
+
+    private func rebuildTimeBuckets() {
+        timeBuckets.removeAll(keepingCapacity: true)
+        timeBuckets.reserveCapacity(min(items.count, 600))
+        for item in items {
+            let bucketIndex = timeBucketIndex(for: item.time)
+            if let lastIndex = timeBuckets.indices.last,
+               timeBuckets[lastIndex].index == bucketIndex {
+                timeBuckets[lastIndex].items.append(item)
+            } else {
+                timeBuckets.append(TimeBucket(index: bucketIndex, items: [item]))
+            }
+        }
+        nextBucketIndex = 0
+        nextBucketItemIndex = 0
+    }
+
+    private func setNextSpawnPosition(after playbackTime: TimeInterval) {
+        guard !timeBuckets.isEmpty else {
+            nextBucketIndex = 0
+            nextBucketItemIndex = 0
+            return
+        }
+
+        let nextItemIndex = firstItemIndex(after: playbackTime)
+        guard nextItemIndex < items.count else {
+            nextBucketIndex = timeBuckets.count
+            nextBucketItemIndex = 0
+            return
+        }
+
+        let bucketIndex = timeBucketIndex(for: items[nextItemIndex].time)
+        nextBucketIndex = firstTimeBucketIndex(atOrAfter: bucketIndex)
+        guard nextBucketIndex < timeBuckets.count else {
+            nextBucketItemIndex = 0
+            return
+        }
+
+        let bucketItems = timeBuckets[nextBucketIndex].items
+        nextBucketItemIndex = bucketItems.firstIndex { $0.time > playbackTime } ?? bucketItems.count
+        if nextBucketItemIndex >= bucketItems.count {
+            advanceToNextBucket()
+        }
+    }
+
+    private func advanceToNextBucket() {
+        nextBucketIndex += 1
+        nextBucketItemIndex = 0
+    }
+
+    private func isBucketTooStale(_ bucketIndex: Int, at playbackTime: TimeInterval) -> Bool {
+        playbackTime - bucketEndTime(for: bucketIndex) > maximumBucketSpawnDelay
+    }
+
+    private var maximumBucketSpawnDelay: TimeInterval {
+        if isLoadShedding {
+            return 0.22
+        }
+        if playbackRate > 1.15 || PlaybackEnvironment.current.isThermallyElevated {
+            return 0.32
+        }
+        return 0.48
+    }
+
+    private func timeBucketIndex(for time: TimeInterval) -> Int {
+        Int((max(0, time) / Self.timeBucketDuration).rounded(.down))
+    }
+
+    private func bucketEndTime(for bucketIndex: Int) -> TimeInterval {
+        TimeInterval(bucketIndex + 1) * Self.timeBucketDuration
+    }
+
+    private func firstTimeBucketIndex(atOrAfter bucketIndex: Int) -> Int {
+        var lower = 0
+        var upper = timeBuckets.count
+        while lower < upper {
+            let middle = (lower + upper) / 2
+            if timeBuckets[middle].index < bucketIndex {
+                lower = middle + 1
+            } else {
+                upper = middle
+            }
+        }
+        return lower
     }
 
     private func firstItemIndex(atOrAfter time: TimeInterval) -> Int {

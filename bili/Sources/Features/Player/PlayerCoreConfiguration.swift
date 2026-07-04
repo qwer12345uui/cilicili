@@ -3,51 +3,8 @@ import Foundation
 
 typealias DashStream = DASHStream
 
-enum PlayerKernelType: String, CaseIterable, Identifiable, Codable, Sendable {
-    case ksPlayer
-    case avPlayer
-
-    nonisolated static let storageKey = PlayerRenderingEnginePreference.storageKey
-    nonisolated static let defaultValue: PlayerKernelType = .avPlayer
-
-    nonisolated var id: String { rawValue }
-
-    nonisolated var title: String {
-        switch self {
-        case .ksPlayer:
-            return "KSPlayer"
-        case .avPlayer:
-            return "AVPlayer"
-        }
-    }
-
-    nonisolated var normalizedForFormalPlayback: PlayerKernelType {
-        switch self {
-        case .ksPlayer, .avPlayer:
-            return .avPlayer
-        }
-    }
-
-    nonisolated var renderingEnginePreference: PlayerRenderingEnginePreference {
-        .avPlayer
-    }
-
-    nonisolated init(preference _: PlayerRenderingEnginePreference) {
-        self = .avPlayer
-    }
-
-    nonisolated static func stored(in userDefaults: UserDefaults = .standard) -> PlayerKernelType {
-        if let rawValue = userDefaults.string(forKey: storageKey),
-           let kernel = PlayerKernelType(rawValue: rawValue) {
-            return kernel.normalizedForFormalPlayback
-        }
-        return defaultValue
-    }
-}
-
 enum VideoCodecPreference: String, CaseIterable, Identifiable, Codable, Sendable {
     case auto
-    case forceAV1
     case forceHEVC
     case forceH264
 
@@ -59,7 +16,7 @@ enum VideoCodecPreference: String, CaseIterable, Identifiable, Codable, Sendable
 
     nonisolated var title: String {
         switch self {
-        case .auto, .forceAV1:
+        case .auto:
             return "自动（HEVC 优先）"
         case .forceHEVC:
             return "仅 HEVC"
@@ -70,7 +27,7 @@ enum VideoCodecPreference: String, CaseIterable, Identifiable, Codable, Sendable
 
     nonisolated var detail: String {
         switch self {
-        case .auto, .forceAV1:
+        case .auto:
             return "按 HEVC、H.264 的顺序选择可硬解视频流。"
         case .forceHEVC:
             return "只请求和选择 HEVC；不可用时提示播放失败。"
@@ -81,7 +38,7 @@ enum VideoCodecPreference: String, CaseIterable, Identifiable, Codable, Sendable
 
     nonisolated var codecOrder: [VideoCodecFamily] {
         switch self {
-        case .auto, .forceAV1:
+        case .auto:
             return [.hevc, .h264, .unknown]
         case .forceHEVC:
             return [.hevc]
@@ -92,7 +49,7 @@ enum VideoCodecPreference: String, CaseIterable, Identifiable, Codable, Sendable
 
     nonisolated var forcedCodecFamily: VideoCodecFamily? {
         switch self {
-        case .auto, .forceAV1:
+        case .auto:
             return nil
         case .forceHEVC:
             return .hevc
@@ -103,7 +60,7 @@ enum VideoCodecPreference: String, CaseIterable, Identifiable, Codable, Sendable
 
     nonisolated var forcedUnavailableMessage: String? {
         switch self {
-        case .auto, .forceAV1:
+        case .auto:
             return nil
         case .forceHEVC:
             return "当前视频没有可硬解 HEVC 播放地址，可在设置中切换为自动或 H.264。"
@@ -112,14 +69,15 @@ enum VideoCodecPreference: String, CaseIterable, Identifiable, Codable, Sendable
         }
     }
 
-    nonisolated var normalizedForPlayback: VideoCodecPreference {
-        self == .forceAV1 ? .auto : self
-    }
-
     nonisolated static func stored(in userDefaults: UserDefaults = .standard) -> VideoCodecPreference {
-        if let rawValue = userDefaults.string(forKey: storageKey),
-           let preference = VideoCodecPreference(rawValue: rawValue) {
-            return preference.normalizedForPlayback
+        if let rawValue = userDefaults.string(forKey: storageKey) {
+            if rawValue == "forceAV1" {
+                userDefaults.set(defaultValue.rawValue, forKey: storageKey)
+                return defaultValue
+            }
+            if let preference = VideoCodecPreference(rawValue: rawValue) {
+                return preference
+            }
         }
         return defaultValue
     }
@@ -145,52 +103,10 @@ enum VideoCodecFamily: Int, CaseIterable, Sendable {
     }
 }
 
-nonisolated enum PlayerKernelPlaybackSupport {
-    static func preferredDirectKernel(
-        for _: DashStream,
-        requestedKernel _: PlayerKernelType
-    ) -> PlayerKernelType {
-        .avPlayer
-    }
-
-    static func prefersHardwareDecodedPlayback(
-        for stream: DashStream,
-        on kernel: PlayerKernelType
-    ) -> Bool {
-        guard stream.isHardwareDecodingCompatibleVideo else { return false }
-
-        switch preferredDirectKernel(for: stream, requestedKernel: kernel) {
-        case .avPlayer, .ksPlayer:
-            return true
-        }
-    }
-
-    static func shouldRejectDirectPlayback(
-        of stream: DashStream,
-        on kernel: PlayerKernelType
-    ) -> Bool {
-        switch kernel {
-        case .avPlayer, .ksPlayer:
-            return false
-        }
-    }
-
-    static func shouldRequireHardwareDecode(
-        for stream: DashStream,
-        on kernel: PlayerKernelType
-    ) -> Bool {
-        switch kernel {
-        case .avPlayer, .ksPlayer:
-            return false
-        }
-    }
-}
-
 nonisolated enum DashStreamDispatcher {
     static func selectBestStream(
         from streams: [DashStream],
-        preference: VideoCodecPreference,
-        kernel: PlayerKernelType = PlayerKernelType.stored()
+        preference: VideoCodecPreference
     ) -> DashStream? {
         let playableStreams = streams.enumerated()
             .filter { _, stream in
@@ -207,7 +123,6 @@ nonisolated enum DashStreamDispatcher {
         let streams = playableStreams.map(\.element)
         let codecOrder = effectiveCodecOrder(
             for: preference,
-            kernel: kernel,
             streams: streams
         )
         return playableStreams
@@ -215,13 +130,11 @@ nonisolated enum DashStreamDispatcher {
                 rankingTuple(
                     for: lhs.element,
                     originalIndex: lhs.offset,
-                    codecOrder: codecOrder,
-                    kernel: kernel
+                    codecOrder: codecOrder
                 ) < rankingTuple(
                     for: rhs.element,
                     originalIndex: rhs.offset,
-                    codecOrder: codecOrder,
-                    kernel: kernel
+                    codecOrder: codecOrder
                 )
             }?
             .element
@@ -229,7 +142,6 @@ nonisolated enum DashStreamDispatcher {
 
     private static func effectiveCodecOrder(
         for preference: VideoCodecPreference,
-        kernel _: PlayerKernelType,
         streams _: [DashStream] = []
     ) -> [VideoCodecFamily] {
         return preference.codecOrder
@@ -238,17 +150,14 @@ nonisolated enum DashStreamDispatcher {
     private static func rankingTuple(
         for stream: DashStream,
         originalIndex: Int,
-        codecOrder: [VideoCodecFamily],
-        kernel: PlayerKernelType
+        codecOrder: [VideoCodecFamily]
     ) -> StreamRankingTuple {
         let family = stream.videoCodecFamily
         let codecIndex = codecOrder.firstIndex(of: family) ?? codecOrder.count
         return StreamRankingTuple(
             codecIndex: codecIndex,
-            hardwarePenalty: PlayerKernelPlaybackSupport.prefersHardwareDecodedPlayback(
-                for: stream,
-                on: kernel
-            ) ? 0 : 1,
+            dolbyPenalty: stream.isDolbyVisionVideoCodec ? 1 : 0,
+            hardwarePenalty: stream.isHardwareDecodingCompatibleVideo ? 0 : 1,
             negativeBandwidth: -(stream.bandwidth ?? 0),
             originalIndex: originalIndex
         )
@@ -258,6 +167,7 @@ nonisolated enum DashStreamDispatcher {
 
 nonisolated private struct StreamRankingTuple: Comparable {
     let codecIndex: Int
+    let dolbyPenalty: Int
     let hardwarePenalty: Int
     let negativeBandwidth: Int
     let originalIndex: Int
@@ -266,6 +176,9 @@ nonisolated private struct StreamRankingTuple: Comparable {
         if lhs.codecIndex != rhs.codecIndex {
             return lhs.codecIndex < rhs.codecIndex
         }
+        if lhs.dolbyPenalty != rhs.dolbyPenalty {
+            return lhs.dolbyPenalty < rhs.dolbyPenalty
+        }
         if lhs.hardwarePenalty != rhs.hardwarePenalty {
             return lhs.hardwarePenalty < rhs.hardwarePenalty
         }
@@ -273,6 +186,110 @@ nonisolated private struct StreamRankingTuple: Comparable {
             return lhs.negativeBandwidth < rhs.negativeBandwidth
         }
         return lhs.originalIndex < rhs.originalIndex
+    }
+}
+
+enum PlaybackHardwareDecodePolicy {
+    nonisolated static let storageKey = "cc.bili.playback.forceHardwareDecode.v1"
+    nonisolated static let defaultValue = false
+
+    nonisolated static func stored(in userDefaults: UserDefaults = .standard) -> Bool {
+        userDefaults.object(forKey: storageKey) as? Bool ?? defaultValue
+    }
+}
+
+enum PlaybackAudioURLPolicy {
+    nonisolated static let storageKey = "cc.bili.playback.prefersBackupAudioURL.v1"
+    nonisolated static let defaultValue = false
+
+    nonisolated static func stored(in userDefaults: UserDefaults = .standard) -> Bool {
+        userDefaults.object(forKey: storageKey) as? Bool ?? defaultValue
+    }
+}
+
+nonisolated enum DolbyVisionRenderingPolicy: String, CaseIterable, Identifiable, Codable, Sendable {
+    case compatibleHLG
+    case metadataPassthrough
+    case appleNativeP8HLS
+    case protectedHLG
+    /// Deprecated: Bilibili Profile 8.4 fMP4 streams fail AVPlayer startup when
+    /// we advertise them as native `dvh1` HLS tracks.
+    case fullEffect
+    case supplementalHLS
+
+    nonisolated static let storageKey = "cc.bili.playback.dolbyVisionRenderingPolicy.v1"
+    nonisolated static let defaultValue: DolbyVisionRenderingPolicy = .compatibleHLG
+    nonisolated static let allCases: [DolbyVisionRenderingPolicy] = [
+        .compatibleHLG,
+        .appleNativeP8HLS
+    ]
+
+    nonisolated var id: String { rawValue }
+
+    nonisolated var playablePolicy: DolbyVisionRenderingPolicy {
+        switch self {
+        case .compatibleHLG, .appleNativeP8HLS:
+            return self
+        case .metadataPassthrough, .protectedHLG, .fullEffect, .supplementalHLS:
+            return .compatibleHLG
+        }
+    }
+
+    nonisolated var hlsBridgePolicy: DolbyVisionRenderingPolicy {
+        switch playablePolicy {
+        case .appleNativeP8HLS:
+            return .compatibleHLG
+        case .compatibleHLG:
+            return .compatibleHLG
+        case .metadataPassthrough, .protectedHLG, .fullEffect, .supplementalHLS:
+            return .compatibleHLG
+        }
+    }
+
+    nonisolated var title: String {
+        switch self {
+        case .compatibleHLG:
+            return "兼容基层防过曝"
+        case .metadataPassthrough:
+            return "已停用：杜比元数据直通"
+        case .appleNativeP8HLS:
+            return "原生 HDR 视频层（实验）"
+        case .protectedHLG:
+            return "已停用：杜比标识 + 过曝保护"
+        case .fullEffect:
+            return "已停用：原生杜比主轨"
+        case .supplementalHLS:
+            return "已停用：完整杜比视界实验"
+        }
+    }
+
+    nonisolated var detail: String {
+        switch self {
+        case .compatibleHLG:
+            return "AVPlayer 只播放 Dolby Vision 的兼容基层，避免 B 站 Profile 8.4 触发过曝。"
+        case .metadataPassthrough:
+            return "该路线即使按色彩盒声明 HLG，AVPlayer 仍会因 B 站 Profile 8.4 元数据过曝，已自动迁移到兼容基层。"
+        case .appleNativeP8HLS:
+            return "底层 HLS 仍使用兼容基层，另挂一个静音 AVPlayerLayer 直连原始杜比/HDR 视频流，模拟 PiliPlus 的 iOS 原生显示链路。"
+        case .protectedHLG:
+            return "该路线仍可能让 AVPlayer 套用错误杜比映射，已自动迁移到兼容基层。"
+        case .fullEffect:
+            return "该路线会让 B 站 Profile 8.4 流不可播放，已自动迁移到兼容基层。"
+        case .supplementalHLS:
+            return "该路线会保留 Dolby Vision 补充标识并可能过曝，已自动迁移到兼容基层。"
+        }
+    }
+
+    nonisolated static func stored(in userDefaults: UserDefaults = .standard) -> DolbyVisionRenderingPolicy {
+        guard let rawValue = userDefaults.string(forKey: storageKey),
+              let policy = DolbyVisionRenderingPolicy(rawValue: rawValue)
+        else { return defaultValue }
+        let playablePolicy = policy.playablePolicy
+        if playablePolicy != policy {
+            userDefaults.set(DolbyVisionRenderingPolicy.compatibleHLG.rawValue, forKey: storageKey)
+            return .compatibleHLG
+        }
+        return playablePolicy
     }
 }
 
@@ -325,37 +342,46 @@ extension DASHStream {
 final class PlayerSettings: ObservableObject {
     static let shared = PlayerSettings()
 
-    @Published private(set) var preferredKernel: PlayerKernelType
     @Published private(set) var videoCodecPreference: VideoCodecPreference
+    @Published private(set) var forceHardwareDecodeEnabled: Bool
+    @Published private(set) var dolbyVisionRenderingPolicy: DolbyVisionRenderingPolicy
 
     private let userDefaults: UserDefaults
 
     init(userDefaults: UserDefaults = .standard) {
         self.userDefaults = userDefaults
-        self.preferredKernel = PlayerKernelType.stored(in: userDefaults)
         self.videoCodecPreference = VideoCodecPreference.stored(in: userDefaults)
-    }
-
-    func setPreferredKernel(_ kernel: PlayerKernelType) {
-        let normalizedKernel = kernel.normalizedForFormalPlayback
-        guard preferredKernel != normalizedKernel
-            || userDefaults.string(forKey: PlayerKernelType.storageKey) != normalizedKernel.rawValue
-        else { return }
-        preferredKernel = normalizedKernel
-        userDefaults.set(normalizedKernel.rawValue, forKey: PlayerKernelType.storageKey)
+        self.forceHardwareDecodeEnabled = PlaybackHardwareDecodePolicy.stored(in: userDefaults)
+        self.dolbyVisionRenderingPolicy = DolbyVisionRenderingPolicy.stored(in: userDefaults)
     }
 
     func setVideoCodecPreference(_ preference: VideoCodecPreference) {
-        let normalizedPreference = preference.normalizedForPlayback
-        guard videoCodecPreference != normalizedPreference
-            || userDefaults.string(forKey: VideoCodecPreference.storageKey) != normalizedPreference.rawValue
+        guard videoCodecPreference != preference
+            || userDefaults.string(forKey: VideoCodecPreference.storageKey) != preference.rawValue
         else { return }
-        videoCodecPreference = normalizedPreference
-        userDefaults.set(normalizedPreference.rawValue, forKey: VideoCodecPreference.storageKey)
+        videoCodecPreference = preference
+        userDefaults.set(preference.rawValue, forKey: VideoCodecPreference.storageKey)
+    }
+
+    func setForceHardwareDecodeEnabled(_ isEnabled: Bool) {
+        guard forceHardwareDecodeEnabled != isEnabled
+            || PlaybackHardwareDecodePolicy.stored(in: userDefaults) != isEnabled
+        else { return }
+        forceHardwareDecodeEnabled = isEnabled
+        userDefaults.set(isEnabled, forKey: PlaybackHardwareDecodePolicy.storageKey)
+    }
+
+    func setDolbyVisionRenderingPolicy(_ policy: DolbyVisionRenderingPolicy) {
+        guard dolbyVisionRenderingPolicy != policy
+            || DolbyVisionRenderingPolicy.stored(in: userDefaults) != policy
+        else { return }
+        dolbyVisionRenderingPolicy = policy
+        userDefaults.set(policy.rawValue, forKey: DolbyVisionRenderingPolicy.storageKey)
     }
 
     func reload() {
-        preferredKernel = PlayerKernelType.stored(in: userDefaults)
         videoCodecPreference = VideoCodecPreference.stored(in: userDefaults)
+        forceHardwareDecodeEnabled = PlaybackHardwareDecodePolicy.stored(in: userDefaults)
+        dolbyVisionRenderingPolicy = DolbyVisionRenderingPolicy.stored(in: userDefaults)
     }
 }

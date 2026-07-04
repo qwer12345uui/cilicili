@@ -38,6 +38,8 @@ if [[ ! -d "$APP_PATH" ]]; then
   exit 1
 fi
 
+zsh "$ROOT_DIR/Scripts/remove-empty-frameworks.sh" "$APP_PATH"
+
 echo "Packaging IPA ..."
 PAYLOAD_DIR="$EXPORT_DIR/Payload"
 rm -rf "$PAYLOAD_DIR" "$IPA_PATH"

@@ -1,43 +1,17 @@
 import SwiftUI
 
-enum VideoCoverOverlayStyle: String, CaseIterable, Identifiable {
-    case gradient
-    case durationBackground
+enum VideoCoverBadgeShadow {
+    static let storageKey = "cc.bili.display.videoCoverBadgeShadowOpacity.v1"
+    static let defaultOpacity = 0.20
+    static let opacityRange: ClosedRange<Double> = 0...1
 
-    static let storageKey = "cc.bili.display.videoCoverOverlayStyle.v1"
-    static let defaultStyle: VideoCoverOverlayStyle = .gradient
-    static let badgeBackgroundOpacity = 0.36
-    static let badgeBorderOpacity = 0.14
-
-    var id: String { rawValue }
-
-    var title: String {
-        switch self {
-        case .gradient:
-            return "封面渐变遮罩"
-        case .durationBackground:
-            return "仅时长底色"
-        }
-    }
-
-    var subtitle: String {
-        switch self {
-        case .gradient:
-            return "封面底部加黑色渐变，时长保持玻璃样式"
-        case .durationBackground:
-            return "不遮住封面，只给时长加半透黑底"
-        }
-    }
-
-    static func normalized(rawValue: String?) -> VideoCoverOverlayStyle {
-        guard let rawValue,
-              let style = VideoCoverOverlayStyle(rawValue: rawValue)
-        else { return defaultStyle }
-        return style
+    static func normalized(_ opacity: Double) -> Double {
+        min(max(opacity, opacityRange.lowerBound), opacityRange.upperBound)
     }
 }
 
 struct VideoCoverGlassBadge<Content: View>: View {
+    @AppStorage(VideoCoverBadgeShadow.storageKey) private var shadowOpacity = VideoCoverBadgeShadow.defaultOpacity
     let content: Content
 
     init(@ViewBuilder content: () -> Content) {
@@ -47,17 +21,15 @@ struct VideoCoverGlassBadge<Content: View>: View {
     var body: some View {
         content
             .font(.caption2.weight(.semibold))
-            .foregroundStyle(.primary)
+            .foregroundStyle(.white)
+            .videoCoverBadgeForegroundShadow(opacity: shadowOpacity)
             .lineLimit(1)
             .truncationMode(.tail)
             .minimumScaleFactor(0.86)
             .allowsTightening(true)
             .padding(.horizontal, 6)
             .padding(.vertical, 4)
-            .glassEffect(
-                .regular,
-                in: .capsule
-            )
+            .biliRegularGlassEffect(in: Capsule())
             .fixedSize(horizontal: true, vertical: false)
             .frame(maxWidth: 146, alignment: .leading)
             .clipped()
@@ -65,7 +37,7 @@ struct VideoCoverGlassBadge<Content: View>: View {
 }
 
 struct VideoCoverDurationBadge: View {
-    @AppStorage(VideoCoverOverlayStyle.storageKey) private var overlayStyleRawValue = VideoCoverOverlayStyle.defaultStyle.rawValue
+    @AppStorage(VideoCoverBadgeShadow.storageKey) private var shadowOpacity = VideoCoverBadgeShadow.defaultOpacity
     let duration: String
     private let maxWidth: CGFloat
 
@@ -79,25 +51,23 @@ struct VideoCoverDurationBadge: View {
             .font(.system(size: 11, weight: .semibold))
             .monospacedDigit()
             .foregroundStyle(.white)
+            .videoCoverBadgeForegroundShadow(opacity: shadowOpacity)
             .lineLimit(1)
             .truncationMode(.tail)
             .minimumScaleFactor(0.86)
             .allowsTightening(true)
             .padding(.horizontal, 6)
             .padding(.vertical, 4)
-            .modifier(VideoCoverBadgeBackground(style: overlayStyle, shape: Capsule()))
+            .modifier(VideoCoverBadgeBackground(shape: Capsule()))
             .fixedSize(horizontal: true, vertical: false)
             .frame(maxWidth: maxWidth, alignment: .trailing)
             .clipped()
             .accessibilityLabel("视频时长 \(duration)")
     }
-
-    private var overlayStyle: VideoCoverOverlayStyle {
-        VideoCoverOverlayStyle.normalized(rawValue: overlayStyleRawValue)
-    }
 }
 
 struct VideoCoverViewCountBadge: View {
+    @AppStorage(VideoCoverBadgeShadow.storageKey) private var shadowOpacity = VideoCoverBadgeShadow.defaultOpacity
     let viewText: String
 
     init(_ viewText: String) {
@@ -108,17 +78,15 @@ struct VideoCoverViewCountBadge: View {
         Label(viewText, systemImage: "play.fill")
             .font(.caption2.weight(.semibold))
             .labelStyle(.titleAndIcon)
-            .foregroundStyle(.primary)
+            .foregroundStyle(.white)
+            .videoCoverBadgeForegroundShadow(opacity: shadowOpacity)
             .lineLimit(1)
             .truncationMode(.tail)
             .minimumScaleFactor(0.86)
             .allowsTightening(true)
             .padding(.horizontal, 6)
             .padding(.vertical, 4)
-            .glassEffect(
-                .regular,
-                in: .capsule
-            )
+            .biliRegularGlassEffect(in: Capsule())
             .fixedSize(horizontal: true, vertical: false)
             .frame(maxWidth: 112, alignment: .leading)
             .clipped()
@@ -127,7 +95,7 @@ struct VideoCoverViewCountBadge: View {
 }
 
 struct VideoCoverPlayBadge: View {
-    @AppStorage(VideoCoverOverlayStyle.storageKey) private var overlayStyleRawValue = VideoCoverOverlayStyle.defaultStyle.rawValue
+    @AppStorage(VideoCoverBadgeShadow.storageKey) private var shadowOpacity = VideoCoverBadgeShadow.defaultOpacity
     var size: CGFloat = 40
     var iconSize: CGFloat = 15
 
@@ -136,66 +104,54 @@ struct VideoCoverPlayBadge: View {
             Image(systemName: "play.fill")
                 .font(.system(size: iconSize, weight: .bold))
                 .foregroundStyle(.white)
+                .videoCoverBadgeForegroundShadow(opacity: shadowOpacity)
                 .offset(x: 1)
                 .frame(width: size, height: size)
-                .modifier(VideoCoverBadgeBackground(style: overlayStyle, shape: Circle()))
+                .modifier(VideoCoverBadgeBackground(shape: Circle()))
                 .videoCoverControlShadow()
                 .accessibilityHidden(true)
         }
     }
-
-    private var overlayStyle: VideoCoverOverlayStyle {
-        VideoCoverOverlayStyle.normalized(rawValue: overlayStyleRawValue)
-    }
 }
 
 struct VideoCoverBottomScrim: View {
-    @AppStorage(VideoCoverOverlayStyle.storageKey) private var overlayStyleRawValue = VideoCoverOverlayStyle.defaultStyle.rawValue
     var opacity: Double = 0.20
     var heightFraction: CGFloat = 1.0 / 4.0
 
     var body: some View {
-        Group {
-            if overlayStyle == .gradient {
-                GeometryReader { proxy in
-                    LinearGradient(
-                        colors: [
-                            .clear,
-                            .black.opacity(opacity)
-                        ],
-                        startPoint: .top,
-                        endPoint: .bottom
-                    )
-                    .frame(height: max(proxy.size.height * min(max(heightFraction, 0), 1), 0))
-                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
-                }
-            }
+        GeometryReader { proxy in
+            LinearGradient(
+                colors: [
+                    .clear,
+                    .black.opacity(opacity)
+                ],
+                startPoint: .top,
+                endPoint: .bottom
+            )
+            .frame(height: max(proxy.size.height * min(max(heightFraction, 0), 1), 0))
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
         }
         .allowsHitTesting(false)
         .accessibilityHidden(true)
     }
-
-    private var overlayStyle: VideoCoverOverlayStyle {
-        VideoCoverOverlayStyle.normalized(rawValue: overlayStyleRawValue)
-    }
 }
 
 private struct VideoCoverBadgeBackground<BadgeShape: InsettableShape>: ViewModifier {
-    let style: VideoCoverOverlayStyle
     let shape: BadgeShape
 
     func body(content: Content) -> some View {
-        switch style {
-        case .gradient:
-            content.biliPlayerClearGlass(interactive: false, in: shape)
-        case .durationBackground:
-            content
-                .background(.black.opacity(VideoCoverOverlayStyle.badgeBackgroundOpacity), in: shape)
-                .overlay {
-                    shape
-                        .strokeBorder(.white.opacity(VideoCoverOverlayStyle.badgeBorderOpacity), lineWidth: 0.6)
-                }
-        }
+        content.biliPlayerClearGlass(interactive: false, in: shape)
+    }
+}
+
+extension View {
+    func videoCoverBadgeForegroundShadow(opacity: Double) -> some View {
+        shadow(
+            color: .black.opacity(VideoCoverBadgeShadow.normalized(opacity)),
+            radius: 2.5,
+            x: 0,
+            y: 1
+        )
     }
 }
 

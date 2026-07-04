@@ -2,6 +2,7 @@ import SwiftUI
 import UIKit
 
 struct BiliPlayerControlsOverlayLayer: View {
+    @AppStorage(LibraryStore.playerControlEdgeScrimEnabledKey) private var isEdgeScrimEnabled = true
     let state: BiliPlayerSurfaceChromeState
     let playbackControls: AnyView
 
@@ -12,6 +13,12 @@ struct BiliPlayerControlsOverlayLayer: View {
         let bottomInset = max(safeAreaInsets.bottom, state.contentInsets.bottom)
         let trailingInset = max(safeAreaInsets.trailing, state.contentInsets.trailing)
         ZStack(alignment: .bottom) {
+            if isEdgeScrimEnabled, state.showsActivePlaybackControls {
+                PlayerControlEdgeScrimLayer(contentInsets: state.contentInsets)
+                    .transition(.opacity)
+                    .zIndex(1)
+            }
+
             if state.showsActivePlaybackControls, let topLeadingControlsAccessory = state.topLeadingControlsAccessory {
                 topLeadingControlsAccessory
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
@@ -59,6 +66,44 @@ struct BiliPlayerControlsOverlayLayer: View {
 
     private var bottomControlsPadding: CGFloat {
         usesFullscreenChromeSpacing ? 14 : 8
+    }
+}
+
+private struct PlayerControlEdgeScrimLayer: View {
+    let contentInsets: EdgeInsets
+
+    var body: some View {
+        GeometryReader { proxy in
+            let visibleWidth = max(1, proxy.size.width - contentInsets.leading - contentInsets.trailing)
+            let visibleHeight = max(1, proxy.size.height - contentInsets.top - contentInsets.bottom)
+            let height = min(max(visibleHeight * 0.22, 56), 150)
+
+            VStack(spacing: 0) {
+                LinearGradient(
+                    colors: [.black.opacity(0.20), .clear],
+                    startPoint: .top,
+                    endPoint: .bottom
+                )
+                .frame(width: visibleWidth, height: height)
+                .frame(maxWidth: .infinity, alignment: .top)
+
+                Spacer(minLength: 0)
+
+                LinearGradient(
+                    colors: [.clear, .black.opacity(0.20)],
+                    startPoint: .top,
+                    endPoint: .bottom
+                )
+                .frame(width: visibleWidth, height: height)
+                .frame(maxWidth: .infinity, alignment: .bottom)
+            }
+            .padding(.top, contentInsets.top)
+            .padding(.bottom, contentInsets.bottom)
+            .padding(.leading, contentInsets.leading)
+            .padding(.trailing, contentInsets.trailing)
+        }
+        .allowsHitTesting(false)
+        .accessibilityHidden(true)
     }
 }
 

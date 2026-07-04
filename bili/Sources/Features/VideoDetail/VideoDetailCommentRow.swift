@@ -46,5 +46,6 @@ struct CommentRow: View, Equatable {
             }
         }
         .padding(.vertical, 8)
+        .commentCopyContextMenu(text: comment.content?.message, title: "复制评论")
     }
 }

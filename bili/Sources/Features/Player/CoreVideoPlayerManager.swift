@@ -23,7 +23,6 @@ struct VideoPlayerProgress: Equatable, Sendable {
 
 @MainActor
 protocol VideoPlayerProtocol: AnyObject {
-    var kernelType: PlayerKernelType { get }
     var state: VideoPlayerState { get }
     var diagnostics: PlayerEngineDiagnostics { get }
     var onStateChange: (@MainActor (VideoPlayerState) -> Void)? { get set }
@@ -47,7 +46,6 @@ class RenderingEngineVideoPlayerAdapter: VideoPlayerProtocol {
     private var preparedSource: PlayerStreamSource?
     private(set) var state: VideoPlayerState = .idle
 
-    let kernelType: PlayerKernelType
     var onStateChange: (@MainActor (VideoPlayerState) -> Void)?
     var onProgressUpdate: (@MainActor (VideoPlayerProgress) -> Void)?
     var onFirstFrame: (@MainActor (TimeInterval) -> Void)?
@@ -56,8 +54,7 @@ class RenderingEngineVideoPlayerAdapter: VideoPlayerProtocol {
         engine.diagnostics
     }
 
-    init(kernelType: PlayerKernelType, engine: PlayerRenderingEngine) {
-        self.kernelType = kernelType
+    init(engine: PlayerRenderingEngine) {
         self.engine = engine
         bindEngine()
     }
@@ -202,52 +199,28 @@ class RenderingEngineVideoPlayerAdapter: VideoPlayerProtocol {
 @MainActor
 final class AVPlayerAdapter: RenderingEngineVideoPlayerAdapter {
     init() {
-        super.init(kernelType: .avPlayer, engine: AVPlayerHLSBridgeEngine())
+        super.init(engine: AVPlayerHLSBridgeEngine())
     }
 }
 
 @MainActor
 final class CoreVideoPlayerManager {
-    static let shared = CoreVideoPlayerManager(settings: .shared)
+    static let shared = CoreVideoPlayerManager()
 
-    private let settings: PlayerSettings
     private var activePlayer: VideoPlayerProtocol?
 
-    convenience init() {
-        self.init(settings: .shared)
-    }
-
-    init(settings: PlayerSettings) {
-        self.settings = settings
-    }
-
     func makePlayer() -> VideoPlayerProtocol {
-        makePlayer(kernel: settings.preferredKernel)
-    }
-
-    func makePlayer(kernel: PlayerKernelType) -> VideoPlayerProtocol {
-        switch normalizedKernel(kernel) {
-        case .ksPlayer, .avPlayer:
-            return AVPlayerAdapter()
-        }
+        AVPlayerAdapter()
     }
 
     func makeRenderingEngine() -> PlayerRenderingEngine {
-        makeRenderingEngine(kernel: settings.preferredKernel)
-    }
-
-    func makeRenderingEngine(kernel: PlayerKernelType) -> PlayerRenderingEngine {
-        switch normalizedKernel(kernel) {
-        case .ksPlayer, .avPlayer:
-            return AVPlayerHLSBridgeEngine()
-        }
+        AVPlayerHLSBridgeEngine()
     }
 
     func installPlayer(
-        kernel: PlayerKernelType? = nil,
         on surface: UIView? = nil
     ) -> VideoPlayerProtocol {
-        let player = makePlayer(kernel: kernel ?? settings.preferredKernel)
+        let player = makePlayer()
         if let surface {
             activePlayer?.detachSurface(surface)
             player.attachSurface(surface)
@@ -257,48 +230,13 @@ final class CoreVideoPlayerManager {
         return player
     }
 
-    func switchKernel(
-        to kernel: PlayerKernelType,
-        source: PlayerStreamSource,
-        surface: UIView?,
-        shouldResumePlayback: Bool,
-        resumeTime: TimeInterval? = nil
-    ) async throws -> VideoPlayerProtocol {
-        let previousPlayer = activePlayer
-        let player = makePlayer(kernel: normalizedKernel(kernel))
-        let nextSource = resumeTime.map(source.withResumeTime) ?? source
-        do {
-            try await player.prepare(source: nextSource)
-        } catch {
-            player.stop()
-            throw error
-        }
-
-        if let surface {
-            previousPlayer?.detachSurface(surface)
-            player.attachSurface(surface)
-        }
-        previousPlayer?.stop()
-        activePlayer = player
-        if shouldResumePlayback {
-            player.play()
-        }
-        return player
-    }
-
-    private func normalizedKernel(_ kernel: PlayerKernelType) -> PlayerKernelType {
-        kernel.normalizedForFormalPlayback
-    }
-
     nonisolated static func selectBestStream(
         from streams: [DashStream],
-        preference: VideoCodecPreference,
-        kernel: PlayerKernelType = PlayerKernelType.stored()
+        preference: VideoCodecPreference
     ) -> DashStream? {
         DashStreamDispatcher.selectBestStream(
             from: streams,
-            preference: preference,
-            kernel: kernel
+            preference: preference
         )
     }
 }

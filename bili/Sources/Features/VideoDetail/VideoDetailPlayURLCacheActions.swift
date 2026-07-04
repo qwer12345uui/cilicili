@@ -8,6 +8,15 @@ extension VideoDetailViewModel {
     ) async -> VideoDetailPlayURLCacheResolution {
         var deferredPlayableFallback: VideoDetailPlayURLFallback?
 
+        if let resolution = await resolvePendingCachedPlayURLForStartup(
+            cid: cid,
+            page: page,
+            mode: mode,
+            deferredFallback: &deferredPlayableFallback
+        ) {
+            return resolution
+        }
+
         if let resolution = await resolvePlayableCachedPlayURLForStartup(
             cid: cid,
             page: page,
@@ -18,15 +27,6 @@ extension VideoDetailViewModel {
         }
 
         if let resolution = await resolveStoredCachedPlayURLForStartup(
-            cid: cid,
-            page: page,
-            mode: mode,
-            deferredFallback: &deferredPlayableFallback
-        ) {
-            return resolution
-        }
-
-        if let resolution = await resolvePendingCachedPlayURLForStartup(
             cid: cid,
             page: page,
             mode: mode,

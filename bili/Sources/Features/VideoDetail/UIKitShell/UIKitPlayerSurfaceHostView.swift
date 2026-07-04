@@ -10,7 +10,7 @@ import UIKit
 @MainActor
 final class UIKitPlayerSurfaceHostView: UIView {
     private var viewModel: PlayerStateViewModel
-    private let isPictureInPictureEnabled: Bool
+    private var isPictureInPictureEnabled: Bool
     private let hostingController: UIHostingController<AnyView>
 
     init(viewModel: PlayerStateViewModel, isPictureInPictureEnabled: Bool = false) {
@@ -65,6 +65,19 @@ final class UIKitPlayerSurfaceHostView: UIView {
         hostingController.rootView = Self.makeSurfaceRoot(
             viewModel: playerViewModel,
             isPictureInPictureEnabled: isPictureInPictureEnabled
+        )
+    }
+
+    func setPictureInPictureEnabled(_ isEnabled: Bool) {
+        guard isPictureInPictureEnabled != isEnabled else {
+            viewModel.setPictureInPictureEnabled(isEnabled)
+            return
+        }
+        isPictureInPictureEnabled = isEnabled
+        viewModel.setPictureInPictureEnabled(isEnabled)
+        hostingController.rootView = Self.makeSurfaceRoot(
+            viewModel: viewModel,
+            isPictureInPictureEnabled: isEnabled
         )
     }
 

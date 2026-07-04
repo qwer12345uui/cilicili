@@ -16,7 +16,14 @@ struct MinePlaybackToolsSection: View {
                 get: { libraryStore.playerPerformanceOverlayEnabled },
                 set: { libraryStore.setPlayerPerformanceOverlayEnabled($0) }
             )) {
-                Label("播放性能浮层", systemImage: "waveform.path.ecg.rectangle")
+                Label("播放性能浮窗", systemImage: "waveform.path.ecg.rectangle")
+            }
+
+            Toggle(isOn: Binding(
+                get: { libraryStore.playerControlEdgeScrimEnabled },
+                set: { libraryStore.setPlayerControlEdgeScrimEnabled($0) }
+            )) {
+                Label("播放控件边缘遮罩", systemImage: "rectangle.topthird.inset.filled")
             }
 
             Toggle(isOn: Binding(

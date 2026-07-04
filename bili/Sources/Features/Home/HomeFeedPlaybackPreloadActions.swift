@@ -19,7 +19,7 @@ extension HomeFeedMediaPreloadCoordinator {
             return
         }
 
-        let preferredQuality = libraryStore.preferredVideoQuality
+        let preferredQuality = libraryStore.effectivePreferredVideoQuality
         let cdnPreference = libraryStore.effectivePlaybackCDNPreference
         playbackPreloadTask = Task(priority: .utility) { [api, cdnPreference] in
             let startupDelay = max(0.05, min(initialDelay, 0.24))

@@ -311,6 +311,8 @@ sign_and_install() {
   app="$out_dir/$(basename "$extracted_app")"
   ditto "$extracted_app" "$app"
 
+  zsh "$ROOT_DIR/Scripts/remove-empty-frameworks.sh" "$app"
+
   decode_profile "$PROFILE_PATH" "$profile_plist"
   install_profile "$PROFILE_PATH" "$profile_plist"
   plutil -extract Entitlements xml1 -o "$entitlements" "$profile_plist"

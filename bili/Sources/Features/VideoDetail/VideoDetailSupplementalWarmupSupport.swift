@@ -20,7 +20,7 @@ extension VideoDetailViewModel {
     func likelySupplementalWarmupVariant() -> PlayVariant? {
         let playableVariants = playVariants.filter(\.isPlayable)
         var preferredWarmupQualities = [Int]()
-        if let preferredQuality = libraryStore.preferredVideoQuality {
+        if let preferredQuality = libraryStore.effectivePreferredVideoQuality {
             preferredWarmupQualities.append(preferredQuality)
         }
         preferredWarmupQualities += [116, 112, 120, 80, 74]

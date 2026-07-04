@@ -74,6 +74,47 @@ final class ResourceLoadingServicesTests: XCTestCase {
         XCTAssertNil(loginInvalidatedCached)
     }
 
+    func testPlayURLMediaExpirationUsesEarliestMediaURLDeadline() throws {
+        let storedAt = Date(timeIntervalSince1970: 1_700_000_000)
+        let videoDeadline = Int(storedAt.timeIntervalSince1970 + 600)
+        let audioDeadline = String(Int(storedAt.timeIntervalSince1970 + 3_600), radix: 16)
+        let json = """
+        {
+            "quality": 80,
+            "dash": {
+                "video": [
+                    {
+                        "id": 80,
+                        "baseUrl": "https://upos.example.test/video.m4s?deadline=\(videoDeadline)",
+                        "backupUrl": ["https://backup.example.test/video.m4s?wstime=\(audioDeadline)"],
+                        "bandwidth": 1800000,
+                        "codecs": "hev1.1.6.L120.90",
+                        "codecid": 12
+                    }
+                ],
+                "audio": [
+                    {
+                        "id": 30280,
+                        "baseUrl": "https://upos.example.test/audio.m4s?wstime=\(audioDeadline)",
+                        "bandwidth": 128000,
+                        "codecs": "mp4a.40.2"
+                    }
+                ]
+            }
+        }
+        """
+        let data = try JSONDecoder().decode(PlayURLData.self, from: Data(json.utf8))
+
+        let expiresAt = PlayURLMediaExpiration.expirationDate(for: data, storedAt: storedAt, fallbackTTL: 7_200)
+
+        XCTAssertTrue(PlayURLMediaExpiration.usesMediaURLExpiration(for: data))
+        XCTAssertEqual(
+            expiresAt.timeIntervalSince1970,
+            TimeInterval(videoDeadline) - PlayURLMediaExpiration.safetyMargin,
+            accuracy: 0.001
+        )
+    }
+
     func testPlayVariantsExposeAdvertisedLockedQualities() throws {
         let json = """
         {
@@ -118,24 +159,297 @@ final class ResourceLoadingServicesTests: XCTestCase {
         }
         """
         let data = try JSONDecoder().decode(PlayURLData.self, from: Data(json.utf8))
-        let variants = data.playVariants
+        let variants = data.playVariants(cdnPreference: .automatic, codecPreference: .auto)
         let highFrameVariant = try XCTUnwrap(variants.first { $0.quality == 116 })
         let playableVariant = try XCTUnwrap(variants.first { $0.quality == 112 })
         let lockedVariant = try XCTUnwrap(variants.first { $0.quality == 129 })
 
         XCTAssertTrue(highFrameVariant.isPlayable)
-        XCTAssertTrue(highFrameVariant.qualityMenuTitle.contains("流畅优先"))
-        XCTAssertTrue(highFrameVariant.qualityMenuTitle.contains("帧率 60fps"))
+        XCTAssertEqual(highFrameVariant.qualityMenuTitle, "1080P 高帧率")
+        XCTAssertTrue(highFrameVariant.subtitle.contains("60fps"))
         XCTAssertTrue(playableVariant.isPlayable)
-        XCTAssertTrue(playableVariant.qualityMenuTitle.contains("细节优先"))
-        XCTAssertTrue(playableVariant.qualityMenuTitle.contains("画质 1920x1080"))
-        XCTAssertTrue(playableVariant.qualityMenuTitle.contains("帧率 30fps"))
-        XCTAssertTrue(playableVariant.qualityMenuTitle.contains("码率 2.6 Mbps"))
-        XCTAssertTrue(playableVariant.qualityMenuTitle.contains("编码 AVC"))
+        XCTAssertEqual(playableVariant.qualityMenuTitle, "1080P 高码率")
+        XCTAssertTrue(playableVariant.subtitle.contains("1920x1080"))
+        XCTAssertTrue(playableVariant.subtitle.contains("30fps"))
+        XCTAssertTrue(playableVariant.subtitle.contains("2.6 Mbps"))
+        XCTAssertTrue(playableVariant.subtitle.contains("AVC"))
         XCTAssertFalse(lockedVariant.isPlayable)
         XCTAssertEqual(lockedVariant.title, "HDR Vivid")
         XCTAssertTrue(lockedVariant.isHDR)
         XCTAssertTrue(lockedVariant.qualityMenuTitle.contains("需要登录或权限"))
+    }
+
+    func testDashAudioMergesDolbyAndPrefersAACForPlayback() throws {
+        let json = """
+        {
+            "quality": 126,
+            "accept_quality": [126],
+            "accept_description": ["杜比视界"],
+            "dash": {
+                "video": [
+                    {
+                        "id": 126,
+                        "baseUrl": "https://example.com/dolby-video.m4s",
+                        "bandwidth": 8000000,
+                        "codecs": "dvh1.08.06",
+                        "width": 3840,
+                        "height": 2160,
+                        "frameRate": "30"
+                    }
+                ],
+                "audio": [
+                    {
+                        "id": 30280,
+                        "baseUrl": "https://example.com/audio-aac.m4s",
+                        "bandwidth": 128000,
+                        "codecs": "mp4a.40.2"
+                    }
+                ],
+                "dolby": {
+                    "audio": [
+                        {
+                            "id": 30250,
+                            "baseUrl": "https://example.com/audio-dolby.m4s",
+                            "bandwidth": 448000,
+                            "codecs": "ec-3"
+                        }
+                    ]
+                }
+            }
+        }
+        """
+
+        let data = try JSONDecoder().decode(PlayURLData.self, from: Data(json.utf8))
+        XCTAssertEqual(data.dash?.audio?.count, 2)
+        XCTAssertEqual(data.dash?.bestAudioStream?.codecs, "mp4a.40.2")
+        XCTAssertTrue(data.rawPlayURLSummary.contains("dolbyAudio=1"))
+    }
+
+    func testHardwareDecodePreferenceFallsBackToProgressiveWhenNoHardwareVariantExists() throws {
+        let data = try playablePlayURLData(quality: 80)
+
+        let defaultVariants = data.playVariants(
+            cdnPreference: .automatic,
+            codecPreference: .auto,
+            requiresHardwareDecode: false
+        )
+        let forcedVariants = data.playVariants(
+            cdnPreference: .automatic,
+            codecPreference: .auto,
+            requiresHardwareDecode: true
+        )
+
+        XCTAssertTrue(defaultVariants.contains(where: \.isPlayable))
+        XCTAssertFalse(defaultVariants.contains(where: \.isHardwareDecodingCompatible))
+        XCTAssertTrue(forcedVariants.contains(where: \.isPlayable))
+        XCTAssertTrue(forcedVariants.contains(where: \.isProgressiveFastStart))
+        XCTAssertFalse(forcedVariants.contains(where: \.isHardwareDecodingCompatible))
+    }
+
+    func testHardwareDecodePreferenceKeepsHardwareDashBeforeProgressiveFallback() throws {
+        let json = """
+        {
+            "durl": [
+                {
+                    "url": "https://example.com/video-progressive.mp4"
+                }
+            ],
+            "quality": 80,
+            "accept_quality": [80],
+            "accept_description": ["1080P"],
+            "dash": {
+                "video": [
+                    {
+                        "id": 80,
+                        "baseUrl": "https://upos.example.test/video-avc.m4s",
+                        "bandwidth": 1800000,
+                        "codecs": "avc1.640028",
+                        "codecid": 7
+                    }
+                ],
+                "audio": [
+                    {
+                        "id": 30280,
+                        "baseUrl": "https://upos.example.test/audio-aac.m4s",
+                        "bandwidth": 128000,
+                        "codecs": "mp4a.40.2"
+                    }
+                ]
+            }
+        }
+        """
+        let data = try JSONDecoder().decode(PlayURLData.self, from: Data(json.utf8))
+
+        let variants = data.playVariants(
+            cdnPreference: .automatic,
+            codecPreference: .auto,
+            requiresHardwareDecode: true
+        )
+
+        XCTAssertTrue(variants.contains(where: \.isHardwareDecodingCompatible))
+        XCTAssertFalse(variants.contains(where: \.isProgressiveFastStart))
+    }
+
+    func testDashPlaybackFixturePreservesSegmentBaseBackupAndCodecPriority() throws {
+        let json = """
+        {
+            "quality": 80,
+            "accept_quality": [80],
+            "accept_description": ["1080P"],
+            "dash": {
+                "video": [
+                    {
+                        "id": 80,
+                        "baseUrl": "https://upos.example.test/video-hevc.m4s",
+                        "backupUrl": ["https://backup.example.test/video-hevc.m4s"],
+                        "bandwidth": 1800000,
+                        "codecs": "hev1.1.6.L120.90",
+                        "codecid": 12,
+                        "width": 1920,
+                        "height": 1080,
+                        "frameRate": "30000/1001",
+                        "mimeType": "video/mp4",
+                        "SegmentBase": {
+                            "Initialization": "0-999",
+                            "indexRange": "1000-1499"
+                        }
+                    },
+                    {
+                        "id": 80,
+                        "baseUrl": "https://upos.example.test/video-avc.m4s",
+                        "backupUrl": ["https://backup.example.test/video-avc.m4s"],
+                        "bandwidth": 2400000,
+                        "codecs": "avc1.640028",
+                        "codecid": 7,
+                        "width": 1920,
+                        "height": 1080,
+                        "frameRate": "30",
+                        "mimeType": "video/mp4",
+                        "SegmentBase": {
+                            "Initialization": "0-899",
+                            "indexRange": "900-1299"
+                        }
+                    }
+                ],
+                "audio": [
+                    {
+                        "id": 30280,
+                        "baseUrl": "https://upos.example.test/audio-aac.m4s",
+                        "backupUrl": ["https://backup.example.test/audio-aac.m4s"],
+                        "bandwidth": 128000,
+                        "codecs": "mp4a.40.2",
+                        "mimeType": "audio/mp4",
+                        "SegmentBase": {
+                            "Initialization": "0-299",
+                            "indexRange": "300-599"
+                        }
+                    }
+                ]
+            }
+        }
+        """
+
+        let data = try JSONDecoder().decode(PlayURLData.self, from: Data(json.utf8))
+        let variant = try XCTUnwrap(data.playVariants(cdnPreference: .automatic, codecPreference: .auto).first)
+        let videoStream = try XCTUnwrap(variant.videoStream)
+        let audioStream = try XCTUnwrap(variant.audioStream)
+
+        XCTAssertEqual(videoStream.videoCodecFamily, .hevc)
+        XCTAssertEqual(variant.videoURL?.absoluteString, "https://upos.example.test/video-hevc.m4s")
+        XCTAssertEqual(videoStream.backupPlayURLs.map(\.absoluteString), ["https://backup.example.test/video-hevc.m4s"])
+        XCTAssertEqual(videoStream.segmentBase?.initializationByteRange, HTTPByteRange(start: 0, endInclusive: 999))
+        XCTAssertEqual(videoStream.segmentBase?.indexByteRange, HTTPByteRange(start: 1_000, endInclusive: 1_499))
+        XCTAssertEqual(videoStream.displayFrameRate, "30")
+        XCTAssertEqual(audioStream.codecs, "mp4a.40.2")
+        XCTAssertEqual(audioStream.backupPlayURLs.map(\.absoluteString), ["https://backup.example.test/audio-aac.m4s"])
+        XCTAssertEqual(audioStream.segmentBase?.initializationByteRange, HTTPByteRange(start: 0, endInclusive: 299))
+        XCTAssertEqual(audioStream.segmentBase?.indexByteRange, HTTPByteRange(start: 300, endInclusive: 599))
+    }
+
+    func testDolbyVisionVariantCanUseDolbyAudioWhenAACIsAbsent() throws {
+        let json = """
+        {
+            "quality": 126,
+            "accept_quality": [126],
+            "accept_description": ["杜比视界"],
+            "dash": {
+                "video": [
+                    {
+                        "id": 126,
+                        "baseUrl": "https://example.com/dolby-video.m4s",
+                        "bandwidth": 8000000,
+                        "codecs": "dvh1.08.06",
+                        "width": 3840,
+                        "height": 2160,
+                        "frameRate": "30"
+                    }
+                ],
+                "dolby": {
+                    "audio": [
+                        {
+                            "id": 30250,
+                            "baseUrl": "https://example.com/audio-dolby.m4s",
+                            "bandwidth": 448000,
+                            "codecs": "ec-3"
+                        }
+                    ]
+                }
+            }
+        }
+        """
+
+        let data = try JSONDecoder().decode(PlayURLData.self, from: Data(json.utf8))
+        let variant = try XCTUnwrap(data.playVariants(cdnPreference: .automatic, codecPreference: .auto).first)
+
+        XCTAssertTrue(data.hasMediaPayloadQuality(126))
+        XCTAssertEqual(variant.dynamicRange, .dolbyVision)
+        XCTAssertEqual(variant.audioURL?.absoluteString, "https://example.com/audio-dolby.m4s")
+        XCTAssertEqual(variant.audioStream?.codecs, "ec-3")
+        XCTAssertTrue(variant.audioStream?.isHardwareDecodingCompatibleAudio == true)
+    }
+
+    func testDashMergesNestedDolbyVideoPayload() throws {
+        let json = """
+        {
+            "quality": 126,
+            "accept_quality": [126],
+            "accept_description": ["杜比视界"],
+            "dash": {
+                "audio": [
+                    {
+                        "id": 30280,
+                        "baseUrl": "https://example.com/audio-aac.m4s",
+                        "bandwidth": 128000,
+                        "codecs": "mp4a.40.2"
+                    }
+                ],
+                "dolby": {
+                    "video": [
+                        {
+                            "id": 126,
+                            "baseUrl": "https://example.com/dolby-video.m4s",
+                            "bandwidth": 8000000,
+                            "codecs": "dvh1.05.06",
+                            "width": 3840,
+                            "height": 2160,
+                            "frameRate": "30"
+                        }
+                    ]
+                }
+            }
+        }
+        """
+
+        let data = try JSONDecoder().decode(PlayURLData.self, from: Data(json.utf8))
+        let variant = try XCTUnwrap(
+            data.playVariants(cdnPreference: .automatic, codecPreference: .auto).first { $0.quality == 126 }
+        )
+
+        XCTAssertTrue(data.hasMediaPayloadQuality(126))
+        XCTAssertEqual(data.dash?.video?.first?.codecs, "dvh1.05.06")
+        XCTAssertEqual(variant.videoURL?.absoluteString, "https://example.com/dolby-video.m4s")
+        XCTAssertEqual(variant.dynamicRange, .dolbyVision)
+        XCTAssertEqual(variant.codec, "Dolby Vision")
     }
 
     func testRelatedPlaybackPrefetchPolicyAllowsOnlyWifiHealthyPlayback() {
@@ -205,7 +519,7 @@ final class ResourceLoadingServicesTests: XCTestCase {
 
         let playbackSession = BiliURLSessionFactory.makePlaybackResourceSession()
         XCTAssertEqual(playbackSession.configuration.requestCachePolicy, .reloadIgnoringLocalCacheData)
-        XCTAssertEqual(playbackSession.configuration.httpMaximumConnectionsPerHost, 4)
+        XCTAssertEqual(playbackSession.configuration.httpMaximumConnectionsPerHost, 6)
         XCTAssertNil(playbackSession.configuration.urlCache)
 
         let apiHeaders = BiliURLSessionFactory.apiHeaders(

@@ -25,6 +25,7 @@ final class VideoDetailShellSurfaceHost: UIView {
     private let state: State
     private let surfaceHostView: UIKitPlayerSurfaceHostView
     private let overlayHostingController: UIHostingController<PlayerOverlayHostRoot>
+    private var cancellables = Set<AnyCancellable>()
 
     init(
         playerViewModel: PlayerStateViewModel,
@@ -76,6 +77,15 @@ final class VideoDetailShellSurfaceHost: UIView {
             overlayHostingController.view.topAnchor.constraint(equalTo: topAnchor),
             overlayHostingController.view.bottomAnchor.constraint(equalTo: bottomAnchor),
         ])
+
+        dependencies.libraryStore.$pictureInPictureEnabled
+            .removeDuplicates()
+            .sink { [weak self] isEnabled in
+                Task { @MainActor [weak self] in
+                    self?.surfaceHostView.setPictureInPictureEnabled(isEnabled)
+                }
+            }
+            .store(in: &cancellables)
     }
 
     @available(*, unavailable)
@@ -284,10 +294,16 @@ private struct SurfaceOnlyPlayerOverlayRoot: View {
 
                     persistentMoreControlsButton(contentInsets: videoInsets)
 
+                    if libraryStore.playerPerformanceOverlayEnabled {
+                        performanceOverlay(contentInsets: videoInsets, in: proxy.size)
+                            .zIndex(8)
+                    }
+
                     if isLandscape, isMoreControlsPresented {
                         SurfaceOnlyLandscapeMoreControlsOverlay(
                             detailViewModel: detailViewModel,
                             viewModel: viewModel,
+                            libraryStore: libraryStore,
                             qualityStore: detailViewModel.playbackRenderStore.qualityControlStore,
                             selectPlayVariant: { detailViewModel.selectPlayVariant($0) },
                             onToggleDanmaku: onToggleDanmaku,
@@ -400,9 +416,9 @@ private struct SurfaceOnlyPlayerOverlayRoot: View {
             speedBoostModel: speedBoostModel,
             playbackProgressCoordinator: playbackProgressCoordinator,
             progressReporter: progressReporter,
-            historyVideo: nil,
-            historyCID: nil,
-            historyDuration: nil,
+            historyVideo: detailViewModel.detail,
+            historyCID: detailViewModel.selectedCID ?? detailViewModel.detail.cid,
+            historyDuration: detailViewModel.detail.duration.map(TimeInterval.init),
             configuration: configuration,
             isPictureInPictureEnabled: libraryStore.pictureInPictureEnabled,
             videoGravity: .resizeAspect,
@@ -460,6 +476,36 @@ private struct SurfaceOnlyPlayerOverlayRoot: View {
         .opacity(playbackControlsVisibility.opacity)
         .allowsHitTesting(playbackControlsVisibility.acceptsHitTesting)
         .zIndex(4)
+    }
+
+    private func performanceOverlay(contentInsets: EdgeInsets, in size: CGSize) -> some View {
+        let safeAreaInsets = fullscreenSafeAreaInsets()
+        let topInset = max(safeAreaInsets.top, contentInsets.top)
+        let leadingInset = max(safeAreaInsets.left, contentInsets.leading)
+        let trailingInset = max(safeAreaInsets.right, contentInsets.trailing)
+        let bottomInset = max(safeAreaInsets.bottom, contentInsets.bottom)
+        let horizontalPadding = horizontalControlsPadding
+        let availableWidth = max(1, size.width - leadingInset - trailingInset - horizontalPadding * 2)
+        let availableHeight = max(1, size.height - topInset - bottomInset - topControlsPadding - 14)
+        let panelWidth = min(isLandscape ? 340 : 320, max(260, availableWidth))
+        let maximumHeight = min(isLandscape ? 420 : 360, max(180, availableHeight))
+
+        return VStack {
+            HStack {
+                VideoDetailPerformanceOverlayContainer(
+                    store: detailViewModel.networkDiagnosticsRenderStore,
+                    panelWidth: panelWidth,
+                    maximumHeight: maximumHeight
+                )
+                .padding(.top, topControlsPadding + topInset)
+                .padding(.leading, horizontalPadding + leadingInset)
+
+                Spacer(minLength: 0)
+            }
+
+            Spacer(minLength: 0)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
     }
 
     private func visibleVideoInsets(in size: CGSize) -> EdgeInsets {
@@ -534,7 +580,8 @@ private struct SurfaceOnlyPlayerOverlayRoot: View {
             rotationSnapshotOpacity: 0,
             seekSnapshotOpacity: seekTransitionSnapshotModel.opacity,
             constrainsRotationSnapshotToVideoAspect: false,
-            showsPlayerLoadingChrome: renderState.showsPlayerLoadingChrome,
+            showsPlayerLoadingChrome: renderState.showsPlayerLoadingChrome
+                && !detailViewModel.isSwitchingPlayQuality,
             isBuffering: context.surfaceState.isBuffering,
             showsInlineLoadingProgress: renderState.showsInlineLoadingProgress,
             isUserSeeking: context.surfaceState.isUserSeeking,
@@ -595,6 +642,7 @@ private struct SurfaceOnlyMoreControlsSheet: View {
         SurfaceOnlyMoreControlsNavigationContent(
             detailViewModel: detailViewModel,
             viewModel: viewModel,
+            libraryStore: detailViewModel.libraryStore,
             qualityStore: qualityStore,
             selectPlayVariant: selectPlayVariant,
             onToggleDanmaku: onToggleDanmaku,
@@ -608,6 +656,7 @@ private struct SurfaceOnlyMoreControlsSheet: View {
 private struct SurfaceOnlyMoreControlsNavigationContent: View {
     @ObservedObject var detailViewModel: VideoDetailViewModel
     @ObservedObject var viewModel: PlayerStateViewModel
+    @ObservedObject var libraryStore: LibraryStore
     @ObservedObject var qualityStore: VideoDetailQualityControlRenderStore
     let selectPlayVariant: (PlayVariant) -> Void
     let onToggleDanmaku: () -> Void
@@ -656,11 +705,51 @@ private struct SurfaceOnlyMoreControlsNavigationContent: View {
                     }
                 }
 
+                Toggle(isOn: Binding(
+                    get: { libraryStore.pictureInPictureEnabled },
+                    set: { libraryStore.setPictureInPictureEnabled($0) }
+                )) {
+                    Label("画中画播放", systemImage: "pip")
+                }
+
+                Toggle(isOn: Binding(
+                    get: { libraryStore.playerPerformanceOverlayEnabled },
+                    set: { libraryStore.setPlayerPerformanceOverlayEnabled($0) }
+                )) {
+                    Label("播放性能浮窗", systemImage: "waveform.path.ecg.rectangle")
+                }
+
+                Toggle(isOn: Binding(
+                    get: { libraryStore.playerControlEdgeScrimEnabled },
+                    set: { libraryStore.setPlayerControlEdgeScrimEnabled($0) }
+                )) {
+                    Label("播放控件边缘遮罩", systemImage: "rectangle.topthird.inset.filled")
+                }
+
                 Label("视频格式：\(videoFormatTitle)", systemImage: "film")
                     .foregroundStyle(.secondary)
 
                 Label("解码：\(decodeTitle)", systemImage: "cpu")
                     .foregroundStyle(.secondary)
+
+                Toggle(isOn: Binding(
+                    get: { libraryStore.forceHardwareDecodeEnabled },
+                    set: { libraryStore.setForceHardwareDecodeEnabled($0) }
+                )) {
+                    Label("硬解优先", systemImage: "cpu")
+                }
+
+                Picker(selection: Binding(
+                    get: { libraryStore.dolbyVisionRenderingPolicy },
+                    set: { libraryStore.setDolbyVisionRenderingPolicy($0) }
+                )) {
+                    ForEach(DolbyVisionRenderingPolicy.allCases) { policy in
+                        Text(policy.title).tag(policy)
+                    }
+                } label: {
+                    Label("杜比视界渲染", systemImage: "sparkles.tv")
+                }
+                .pickerStyle(.navigationLink)
             }
             .foregroundStyle(.primary)
             .navigationTitle("播放设置")
@@ -675,6 +764,7 @@ private struct SurfaceOnlyMoreControlsNavigationContent: View {
     private var videoFormatTitle: String {
         SurfaceOnlyPlaybackFormatText.videoFormatTitle(for: viewModel.engineDiagnostics)
     }
+
 }
 
 private enum SurfaceOnlyPlaybackFormatText {
@@ -738,6 +828,7 @@ private enum SurfaceOnlyPlaybackFormatText {
 private struct SurfaceOnlyLandscapeMoreControlsOverlay: View {
     @ObservedObject var detailViewModel: VideoDetailViewModel
     @ObservedObject var viewModel: PlayerStateViewModel
+    @ObservedObject var libraryStore: LibraryStore
     @ObservedObject var qualityStore: VideoDetailQualityControlRenderStore
     let selectPlayVariant: (PlayVariant) -> Void
     let onToggleDanmaku: () -> Void
@@ -780,6 +871,7 @@ private struct SurfaceOnlyLandscapeMoreControlsOverlay: View {
                 page: $page,
                 detailViewModel: detailViewModel,
                 viewModel: viewModel,
+                libraryStore: libraryStore,
                 qualityStore: qualityStore,
                 selectPlayVariant: selectPlayVariant,
                 onToggleDanmaku: onToggleDanmaku,
@@ -910,6 +1002,7 @@ private struct SurfaceOnlyLandscapeMoreContent: View {
     @Binding var page: SurfaceOnlyLandscapeMoreControlsPage
     @ObservedObject var detailViewModel: VideoDetailViewModel
     @ObservedObject var viewModel: PlayerStateViewModel
+    @ObservedObject var libraryStore: LibraryStore
     @ObservedObject var qualityStore: VideoDetailQualityControlRenderStore
     let selectPlayVariant: (PlayVariant) -> Void
     let onToggleDanmaku: () -> Void
@@ -970,6 +1063,42 @@ private struct SurfaceOnlyLandscapeMoreContent: View {
                     ) {
                         page = .rate
                     }
+
+                    Divider().padding(.leading, 44)
+
+                    SurfaceOnlyLandscapeToggleRow(
+                        title: "画中画播放",
+                        systemImage: "pip",
+                        accessory: pictureInPictureAccessory,
+                        isOn: Binding(
+                            get: { libraryStore.pictureInPictureEnabled },
+                            set: { libraryStore.setPictureInPictureEnabled($0) }
+                        )
+                    )
+
+                    Divider().padding(.leading, 44)
+
+                    SurfaceOnlyLandscapeToggleRow(
+                        title: "播放性能浮窗",
+                        systemImage: "waveform.path.ecg.rectangle",
+                        accessory: performanceOverlayAccessory,
+                        isOn: Binding(
+                            get: { libraryStore.playerPerformanceOverlayEnabled },
+                            set: { libraryStore.setPlayerPerformanceOverlayEnabled($0) }
+                        )
+                    )
+
+                    Divider().padding(.leading, 44)
+
+                    SurfaceOnlyLandscapeToggleRow(
+                        title: "播放控件边缘遮罩",
+                        systemImage: "rectangle.topthird.inset.filled",
+                        accessory: controlEdgeScrimAccessory,
+                        isOn: Binding(
+                            get: { libraryStore.playerControlEdgeScrimEnabled },
+                            set: { libraryStore.setPlayerControlEdgeScrimEnabled($0) }
+                        )
+                    )
                 }
                 .surfaceOnlyLandscapeGlassGroup()
 
@@ -998,18 +1127,17 @@ private struct SurfaceOnlyLandscapeMoreContent: View {
         ScrollView {
             VStack(spacing: 10) {
                 if qualityStore.isSwitchingPlayQuality {
-                    SurfaceOnlyLandscapeInfoRow(
-                        title: "正在切换清晰度",
-                        systemImage: "arrow.triangle.2.circlepath",
-                        value: nil
-                    )
-                    .surfaceOnlyLandscapeGlassGroup()
+                    SurfaceOnlyQualitySwitchingIndicator()
+                        .padding(.vertical, 7)
+                        .frame(maxWidth: .infinity)
+                        .surfaceOnlyLandscapeGlassGroup()
                 }
 
                 VStack(spacing: 0) {
                     ForEach(Array(qualityStore.qualityMenuItems.enumerated()), id: \.element.id) { index, item in
                         SurfaceOnlyLandscapeMenuRow(
                             title: item.title,
+                            subtitle: item.subtitle,
                             systemImage: item.systemImage,
                             accessory: nil,
                             showsChevron: false
@@ -1062,17 +1190,28 @@ private struct SurfaceOnlyLandscapeMoreContent: View {
     private var videoFormatTitle: String {
         SurfaceOnlyPlaybackFormatText.videoFormatTitle(for: viewModel.engineDiagnostics)
     }
+
+    private var pictureInPictureAccessory: String? {
+        return libraryStore.pictureInPictureEnabled ? "已开启" : "已关闭"
+    }
+
+    private var performanceOverlayAccessory: String? {
+        return libraryStore.playerPerformanceOverlayEnabled ? "已开启" : "已关闭"
+    }
+
+    private var controlEdgeScrimAccessory: String? {
+        return libraryStore.playerControlEdgeScrimEnabled ? "已开启" : "已关闭"
+    }
 }
 
-private struct SurfaceOnlyLandscapeMenuRow: View {
+private struct SurfaceOnlyLandscapeToggleRow: View {
     let title: String
     let systemImage: String
     let accessory: String?
-    let showsChevron: Bool
-    let action: () -> Void
+    @Binding var isOn: Bool
 
     var body: some View {
-        Button(action: action) {
+        Toggle(isOn: $isOn) {
             HStack(spacing: 12) {
                 Image(systemName: systemImage)
                     .font(.system(size: 16, weight: .semibold))
@@ -1083,6 +1222,70 @@ private struct SurfaceOnlyLandscapeMenuRow: View {
                     .font(.subheadline)
                     .foregroundStyle(.primary)
                     .lineLimit(1)
+
+                Spacer(minLength: 8)
+
+                if let accessory {
+                    Text(accessory)
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+            }
+            .frame(minHeight: 44)
+            .padding(.leading, 12)
+        }
+        .toggleStyle(.switch)
+        .padding(.trailing, 12)
+        .contentShape(Rectangle())
+    }
+}
+
+private struct SurfaceOnlyLandscapeMenuRow: View {
+    let title: String
+    let subtitle: String?
+    let systemImage: String
+    let accessory: String?
+    let showsChevron: Bool
+    let action: () -> Void
+
+    init(
+        title: String,
+        subtitle: String? = nil,
+        systemImage: String,
+        accessory: String?,
+        showsChevron: Bool,
+        action: @escaping () -> Void
+    ) {
+        self.title = title
+        self.subtitle = subtitle
+        self.systemImage = systemImage
+        self.accessory = accessory
+        self.showsChevron = showsChevron
+        self.action = action
+    }
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 12) {
+                Image(systemName: systemImage)
+                    .font(.system(size: 16, weight: .semibold))
+                    .foregroundStyle(.secondary)
+                    .frame(width: 22)
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(title)
+                        .font(.subheadline)
+                        .foregroundStyle(.primary)
+                        .lineLimit(1)
+
+                    if let subtitle, !subtitle.isEmpty {
+                        Text(subtitle)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                    }
+                }
 
                 Spacer(minLength: 8)
 
@@ -1147,8 +1350,11 @@ private struct SurfaceOnlyQualityChoicesPage: View {
     var body: some View {
         List {
             if qualityStore.isSwitchingPlayQuality {
-                Label("正在切换清晰度", systemImage: "arrow.triangle.2.circlepath")
-                    .foregroundStyle(.secondary)
+                SurfaceOnlyQualitySwitchingIndicator()
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 6)
+                    .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16))
+                    .listRowBackground(Color.clear)
             }
 
             ForEach(qualityStore.qualityMenuItems) { item in
@@ -1156,7 +1362,18 @@ private struct SurfaceOnlyQualityChoicesPage: View {
                     selectPlayVariant(item.variant)
                     closeSheet()
                 } label: {
-                    Label(item.title, systemImage: item.systemImage)
+                    Label {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(item.title)
+                            if let subtitle = item.subtitle, !subtitle.isEmpty {
+                                Text(subtitle)
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                    } icon: {
+                        Image(systemName: item.systemImage)
+                    }
                 }
                 .disabled(item.isDisabled)
             }
@@ -1164,6 +1381,13 @@ private struct SurfaceOnlyQualityChoicesPage: View {
         .foregroundStyle(.primary)
         .navigationTitle("清晰度")
         .navigationBarTitleDisplayMode(.inline)
+    }
+}
+
+private struct SurfaceOnlyQualitySwitchingIndicator: View {
+    var body: some View {
+        PlayerInlineLoadingIndicator(message: "正在切换清晰度")
+            .accessibilityLabel("正在切换清晰度")
     }
 }
 
@@ -1241,27 +1465,21 @@ private struct SurfaceOnlyDanmakuSettingsPage: View {
 private extension View {
     @ViewBuilder
     func surfaceOnlyLandscapeGlassPanel<S: Shape>(in shape: S) -> some View {
-        if #available(iOS 26, *) {
-            self
-                .background(Color(.systemBackground).opacity(0.22), in: shape)
-                .glassEffect(.regular.tint(Color(.systemBackground).opacity(0.18)), in: shape)
-        } else {
-            self
-                .background(.ultraThinMaterial, in: shape)
-        }
+        self
+            .background(Color(.systemBackground).opacity(0.22), in: shape)
+            .biliGlassEffect(
+                tint: Color(.systemBackground).opacity(0.18),
+                interactive: false,
+                in: shape
+            )
     }
 
     @ViewBuilder
     func surfaceOnlyLandscapeGlassGroup() -> some View {
         let shape = RoundedRectangle(cornerRadius: 14, style: .continuous)
-        if #available(iOS 26, *) {
-            self
-                .background(Color(.secondarySystemGroupedBackground).opacity(0.34), in: shape)
-                .glassEffect(.clear, in: shape)
-        } else {
-            self
-                .background(.thinMaterial, in: shape)
-        }
+        self
+            .background(Color(.secondarySystemGroupedBackground).opacity(0.34), in: shape)
+            .biliPlayerClearGlass(interactive: false, in: shape)
     }
 }
 

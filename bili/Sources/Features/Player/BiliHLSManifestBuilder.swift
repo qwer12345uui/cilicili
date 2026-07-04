@@ -33,7 +33,8 @@ enum BiliHLSManifestBuilder {
     static func make(
         source: PlayerStreamSource,
         shouldValidateHardwareDecoding: Bool = true,
-        includesAlternateVideoRenditions: Bool = true
+        includesAlternateVideoRenditions: Bool = true,
+        onRemoteFailure: HLSRemoteFailureHandler? = nil
     ) async throws -> BiliHLSPlaybackManifest {
         guard let videoURL = source.videoURL else {
             PlayerMetricsLog.logger.error("hlsManifestRejected reason=missingVideoURL")
@@ -75,13 +76,17 @@ enum BiliHLSManifestBuilder {
                 videoTracks: [primaryVideoTrack] + alternateVideoTracks,
                 audioTrack: HLSBridgeTrack(
                     url: audioURL,
-                    fallbackURLs: source.audioStream?.backupPlayURLs(cdnPreference: source.cdnPreference) ?? [],
+                    fallbackURLs: source.audioStream?.fallbackPlayURLs(
+                        cdnPreference: source.cdnPreference,
+                        selectedURL: audioURL
+                    ) ?? [],
                     stream: source.audioStream,
                     mediaType: .audio
                 ),
                 durationHint: source.durationHint,
                 headers: headers,
-                metricsID: source.metricsID
+                metricsID: source.metricsID,
+                onRemoteFailure: onRemoteFailure
             )
         } catch {
             PlayerMetricsLog.logger.error(
@@ -99,14 +104,18 @@ enum BiliHLSManifestBuilder {
         )
     }
 
-    static func httpHeaders(referer: String) -> [String: String] {
-        [
+    static func httpHeaders(referer: String, cookieHeader: String? = nil) -> [String: String] {
+        var headers = [
             "User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 26_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.0 Mobile/15E148 Safari/604.1",
             "Referer": referer,
             "Origin": "https://www.bilibili.com",
             "Accept": "*/*",
             "Accept-Language": "zh-CN,zh;q=0.9"
         ]
+        if let cookieHeader, !cookieHeader.isEmpty {
+            headers["Cookie"] = cookieHeader
+        }
+        return headers
     }
 
     private static func makeProgressiveManifest(

@@ -16,6 +16,12 @@ extension VideoDetailViewModel {
         guard !recentSeekWarmupKeys.contains(key), seekWarmupTasks[key] == nil else {
             return false
         }
+        if !seekWarmupTasks.isEmpty {
+            seekWarmupTasks.values.forEach { $0.cancel() }
+            seekWarmupTasks.removeAll()
+            seekWarmupTokens.removeAll()
+            seekWarmupTaskOrder.removeAll()
+        }
         while seekWarmupTaskOrder.count >= Self.maxInFlightSeekWarmups,
             let evictedKey = seekWarmupTaskOrder.first {
             seekWarmupTaskOrder.removeFirst()

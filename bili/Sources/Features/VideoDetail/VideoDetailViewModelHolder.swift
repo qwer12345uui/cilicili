@@ -10,6 +10,7 @@ final class VideoDetailViewModelHolder: ObservableObject {
         seedVideo: VideoItem,
         api: BiliAPIClient,
         libraryStore: LibraryStore,
+        sessionStore: SessionStore,
         sponsorBlockService: SponsorBlockService
     ) {
         guard viewModel == nil else { return }
@@ -18,6 +19,7 @@ final class VideoDetailViewModelHolder: ObservableObject {
                 seedVideo: seedVideo,
                 api: api,
                 libraryStore: libraryStore,
+                sessionStore: sessionStore,
                 sponsorBlockService: sponsorBlockService
             )
         )
@@ -31,12 +33,14 @@ final class VideoDetailViewModelHolder: ObservableObject {
         seedVideo: VideoItem,
         api: BiliAPIClient,
         libraryStore: LibraryStore,
+        sessionStore: SessionStore,
         sponsorBlockService: SponsorBlockService
     ) -> VideoDetailViewModel {
         VideoDetailViewModel(
             seedVideo: seedVideo,
             api: api,
             libraryStore: libraryStore,
+            sessionStore: sessionStore,
             sponsorBlockService: sponsorBlockService
         )
     }

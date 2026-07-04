@@ -214,10 +214,18 @@ enum PlayerPerformanceOverlayFormatting {
         return "\(codec) \(resolution) \(frameRate) \(probe)"
     }
 
-    static func performanceCopyText(metricsID: String, session: PlayerPerformanceSession?) -> String {
-        PlayerPerformanceCopyTextFormatter.performanceCopyText(
+    @MainActor
+    static func performanceCopyText(
+        metricsID: String,
+        session: PlayerPerformanceSession?,
+        diagnosticsStore: VideoDetailNetworkDiagnosticsRenderStore,
+        playerViewModel: PlayerStateViewModel?
+    ) -> String {
+        PlayerPerformanceOverlayDiagnosticsCopyTextFormatter.text(
             metricsID: metricsID,
-            session: session
+            session: session,
+            diagnosticsStore: diagnosticsStore,
+            playerViewModel: playerViewModel
         )
     }
 

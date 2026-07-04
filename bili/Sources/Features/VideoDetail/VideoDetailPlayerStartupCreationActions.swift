@@ -19,7 +19,12 @@ extension VideoDetailViewModel {
             startupResumePolicy: resumeTime > 0.25 ? .immediate : .deferred,
             dynamicRange: variant.dynamicRange,
             cdnPreference: libraryStore.effectivePlaybackCDNPreference,
-            metricsID: detail.bvid
+            metricsID: detail.bvid,
+            httpHeaders: BiliHLSManifestBuilder.httpHeaders(
+                referer: "https://www.bilibili.com/video/\(detail.bvid)",
+                cookieHeader: sessionStore.cookieHeader()
+            ),
+            artworkURL: playbackTransitionCoverURL()
         )
     }
 

@@ -78,20 +78,21 @@ extension VideoDetailViewModel {
         let resumeTime = currentPlaybackResumeTime()
         let shouldResumePlayback = currentPlaybackIntent()
         let playbackRate = stablePlayerViewModel?.playbackRate ?? .x10
-        PlayerMetricsLog.logger.error(
-            "playbackFallback from=\(failedVariant.quality, privacy: .public) to=\(fallbackVariant.quality, privacy: .public) error=\(message, privacy: .public)"
+        let fallbackContext = VideoDetailPlaybackFallbackContext(
+            failedVariant: failedVariant,
+            fallbackVariant: fallbackVariant
         )
-        playbackFallbackMessage = failedVariant.dynamicRange == .dolbyVision
-            ? "杜比视界当前不可播放，已切换到 \(fallbackVariant.title)"
-            : "当前线路播放失败，已切换到 \(fallbackVariant.title)"
+        PlayerMetricsLog.logger.error(
+            "playbackFallback \(fallbackContext.logDescription, privacy: .public) error=\(message, privacy: .public)"
+        )
+        playbackFallbackMessage = fallbackContext.userMessage
         recordPlaybackRecoveryStage(
             "fallbackApplied",
             status: "done",
             attempt: playbackRecoveryAttemptCount,
             failedVariant: failedVariant,
             reason: reason,
-            extraParts: [
-                "fallbackQ=\(fallbackVariant.quality)",
+            extraParts: fallbackContext.metricParts + [
                 "resume=\(String(format: "%.2fs", resumeTime))",
                 "autoplay=\(shouldResumePlayback)"
             ]

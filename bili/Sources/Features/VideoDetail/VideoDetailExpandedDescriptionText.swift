@@ -12,6 +12,7 @@ struct VideoDetailExpandedDescriptionText: View {
         )
         .fixedSize(horizontal: false, vertical: true)
         .frame(maxWidth: .infinity, alignment: .leading)
+        .commentCopyContextMenu(text: descriptionText, title: "复制简介")
         .transition(.opacity.combined(with: .move(edge: .top)))
     }
 }

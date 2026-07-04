@@ -62,5 +62,6 @@ struct CommentReplyDetailRow: View {
             }
         }
         .padding(.vertical, 9)
+        .commentCopyContextMenu(text: reply.content?.message, title: "复制回复")
     }
 }

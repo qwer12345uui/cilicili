@@ -4,7 +4,6 @@ import Combine
 @MainActor
 final class VideoDetailPlaybackRenderStore: ObservableObject {
     @Published private var snapshot = VideoDetailPlaybackRenderSnapshot()
-    let playerSurfaceStore = VideoDetailPlayerSurfaceRenderStore()
     let qualityControlStore = VideoDetailQualityControlRenderStore()
     let placeholderStore = VideoDetailPlayerPlaceholderRenderStore()
     let pageSelectorStore = VideoDetailPageSelectorRenderStore()
@@ -35,7 +34,6 @@ final class VideoDetailPlaybackRenderStore: ObservableObject {
 
     private var derivedStoreDispatcher: VideoDetailPlaybackDerivedStoreDispatcher {
         VideoDetailPlaybackDerivedStoreDispatcher(
-            playerSurfaceStore: playerSurfaceStore,
             qualityControlStore: qualityControlStore,
             placeholderStore: placeholderStore,
             pageSelectorStore: pageSelectorStore

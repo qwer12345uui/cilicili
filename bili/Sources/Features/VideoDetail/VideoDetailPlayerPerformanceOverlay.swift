@@ -8,7 +8,7 @@ struct VideoDetailPerformanceOverlayContainer: View {
 
     var body: some View {
         PlayerPerformanceOverlay(
-            metricsID: store.metricsID,
+            diagnosticsStore: store,
             playerViewModel: store.playerViewModel,
             panelWidth: panelWidth,
             maximumHeight: maximumHeight
@@ -18,23 +18,23 @@ struct VideoDetailPerformanceOverlayContainer: View {
 
 struct PlayerPerformanceOverlay: View {
     @StateObject private var sessionObserver: PlayerPerformanceSessionObserver
-    let metricsID: String
+    @ObservedObject var diagnosticsStore: VideoDetailNetworkDiagnosticsRenderStore
     let playerViewModel: PlayerStateViewModel?
     let panelWidth: CGFloat
     let maximumHeight: CGFloat
 
     init(
-        metricsID: String,
+        diagnosticsStore: VideoDetailNetworkDiagnosticsRenderStore,
         playerViewModel: PlayerStateViewModel?,
         panelWidth: CGFloat = 300,
         maximumHeight: CGFloat = 420
     ) {
-        self.metricsID = metricsID
+        self.diagnosticsStore = diagnosticsStore
         self.playerViewModel = playerViewModel
         self.panelWidth = panelWidth
         self.maximumHeight = maximumHeight
         _sessionObserver = StateObject(
-            wrappedValue: PlayerPerformanceSessionObserver(metricsID: metricsID)
+            wrappedValue: PlayerPerformanceSessionObserver(metricsID: diagnosticsStore.metricsID)
         )
     }
 
@@ -44,14 +44,15 @@ struct PlayerPerformanceOverlay: View {
 
     var body: some View {
         PlayerPerformanceOverlayContent(
-            metricsID: metricsID,
+            diagnosticsStore: diagnosticsStore,
+            metricsID: diagnosticsStore.metricsID,
             session: session,
             playerViewModel: playerViewModel,
             panelWidth: panelWidth,
             maximumHeight: maximumHeight
         )
         .playerPerformanceOverlayLifecycle(
-            metricsID: metricsID,
+            metricsID: diagnosticsStore.metricsID,
             sessionObserver: sessionObserver
         )
     }

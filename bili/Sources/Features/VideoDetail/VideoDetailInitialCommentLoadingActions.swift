@@ -2,11 +2,13 @@ import Foundation
 
 extension VideoDetailViewModel {
     func loadInitialCommentsIfNeeded() async {
+        guard !detail.isPGCEpisode else { return }
         guard comments.isEmpty, !commentState.isLoading else { return }
         await loadInitialComments()
     }
 
     func beginInitialCommentsLoadIfNeeded(waitForPlaybackStart: Bool = true) {
+        guard !detail.isPGCEpisode else { return }
         guard detail.aid != nil else {
             if comments.isEmpty, !commentState.isLoading {
                 commentState = .idle
@@ -40,6 +42,7 @@ extension VideoDetailViewModel {
     }
 
     func loadInitialComments() async {
+        guard !detail.isPGCEpisode else { return }
         guard detail.aid != nil else {
             if comments.isEmpty {
                 commentState = .idle

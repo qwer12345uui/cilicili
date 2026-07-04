@@ -70,9 +70,7 @@ struct BiliPlayerLifecycleActionBuilder {
         guard !viewModel.isTerminated else { return }
         if phase == .active {
             guard allowsPlaybackActivation else { return }
-            viewModel.recoverPlaybackAfterTransientSystemOverlayIfNeeded()
-            viewModel.recoverPlaybackAfterAppResume()
-            restoreInlinePlaybackFromPictureInPictureIfNeeded()
+            handleActivePlaybackRecovery()
         } else if phase == .inactive {
             guard allowsPlaybackActivation else { return }
             viewModel.preservePlaybackThroughTransientSystemOverlay()
@@ -98,9 +96,7 @@ struct BiliPlayerLifecycleActionBuilder {
     private func handleDidBecomeActive() {
         guard !viewModel.isTerminated else { return }
         guard allowsPlaybackActivation else { return }
-        viewModel.recoverPlaybackAfterTransientSystemOverlayIfNeeded()
-        viewModel.recoverPlaybackAfterAppResume()
-        restoreInlinePlaybackFromPictureInPictureIfNeeded()
+        handleActivePlaybackRecovery()
     }
 
     private func handleDisappear() {
@@ -199,6 +195,23 @@ struct BiliPlayerLifecycleActionBuilder {
                     ?? viewModel.makeCurrentVideoFrameTransitionSnapshot()
             }
         )
+    }
+
+    private func handleActivePlaybackRecovery() {
+        let shouldHandlePictureInPicture = isPictureInPictureEnabled
+        let canActivatePlayback = allowsPlaybackActivation
+        Task { @MainActor [viewModel] in
+            guard !viewModel.isTerminated else { return }
+            guard canActivatePlayback else { return }
+            if shouldHandlePictureInPicture {
+                let didRestorePictureInPicture = await viewModel.restoreInlinePlaybackFromPictureInPictureIfNeeded()
+                if didRestorePictureInPicture || viewModel.isPictureInPictureActive {
+                    return
+                }
+            }
+            viewModel.recoverPlaybackAfterTransientSystemOverlayIfNeeded()
+            viewModel.recoverPlaybackAfterAppResume()
+        }
     }
 
     private func restoreInlinePlaybackFromPictureInPictureIfNeeded() {

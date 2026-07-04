@@ -110,6 +110,17 @@ nonisolated struct LiveDanmakuClientContext: Sendable {
     let headers: [String: String]
 }
 
+nonisolated struct AccountHistoryCursor: Equatable {
+    let max: Int
+    let viewAt: Int
+}
+
+nonisolated struct AccountVideoEntryPage {
+    let entries: [AccountVideoEntry]
+    let hasMore: Bool
+    let nextHistoryCursor: AccountHistoryCursor?
+}
+
 nonisolated final class BiliAPIClient {
     private let baseURL = URL(string: "https://api.bilibili.com")!
     private let appURL = URL(string: "https://app.bilibili.com")!
@@ -129,6 +140,16 @@ nonisolated final class BiliAPIClient {
     private let playURLCache: PlayURLCache
     private let state = BiliAPIClientState()
     private static let uploaderLogger = Logger(subsystem: "cc.bili", category: "Uploader")
+    private static let historyLogger = Logger(subsystem: "cc.bili", category: "History")
+
+    nonisolated static func requiresAutomaticCodecNegotiation(requestedQuality: Int) -> Bool {
+        switch requestedQuality {
+        case 125, 126, 129:
+            return true
+        default:
+            return false
+        }
+    }
 
     private struct RequestSnapshot: Sendable {
         let cookieHeader: String
@@ -139,9 +160,18 @@ nonisolated final class BiliAPIClient {
         let csrfToken: String?
         let currentUserMID: Int?
         let preferredVideoQuality: Int?
+        let cellularPreferredVideoQuality: Int?
         let playbackStreamSourcePreference: PlaybackStreamSourcePreference
         let homeRecommendFeedSourcePreference: HomeRecommendFeedSourcePreference
         let guestModeEnabled: Bool
+
+        var effectivePreferredVideoQuality: Int? {
+            LibraryStore.effectivePreferredVideoQuality(
+                preferred: preferredVideoQuality,
+                cellular: cellularPreferredVideoQuality,
+                networkClass: PlaybackEnvironment.current.networkClass
+            )
+        }
     }
 
     init(
@@ -171,6 +201,7 @@ nonisolated final class BiliAPIClient {
             csrfToken: sessionStore.csrfToken(),
             currentUserMID: sessionStore.user?.mid,
             preferredVideoQuality: libraryStore.preferredVideoQuality,
+            cellularPreferredVideoQuality: libraryStore.cellularPreferredVideoQuality,
             playbackStreamSourcePreference: libraryStore.playbackStreamSourcePreference,
             homeRecommendFeedSourcePreference: libraryStore.homeRecommendFeedSourcePreference,
             guestModeEnabled: libraryStore.guestModeEnabled
@@ -189,7 +220,7 @@ nonisolated final class BiliAPIClient {
 
     private func preferredVideoQuality() async -> Int? {
         let snapshot = await requestSnapshot()
-        return snapshot.preferredVideoQuality
+        return snapshot.effectivePreferredVideoQuality
     }
 
     private func playbackStreamSourcePreference() async -> PlaybackStreamSourcePreference {
@@ -1543,20 +1574,48 @@ nonisolated final class BiliAPIClient {
     }
 
     func fetchAccountHistory(page: Int = 1, pageSize: Int = 20) async throws -> [AccountVideoEntry] {
+        if page <= 1 {
+            return try await fetchAccountHistoryPage(pageSize: pageSize).entries
+        }
+        var cursor: AccountHistoryCursor?
+        var entries: [AccountVideoEntry] = []
+        for _ in 1...page {
+            let page = try await fetchAccountHistoryPage(cursor: cursor, pageSize: pageSize)
+            entries = page.entries
+            cursor = page.nextHistoryCursor
+            if !page.hasMore {
+                break
+            }
+        }
+        return entries
+    }
+
+    func fetchAccountHistoryPage(
+        cursor: AccountHistoryCursor? = nil,
+        pageSize: Int = 20
+    ) async throws -> AccountVideoEntryPage {
         guard await isLoggedIn() else { throw BiliAPIError.missingSESSDATA }
+        let previousCursor = cursor
         let response: BiliResponse<DynamicJSONValue> = try await get(
             base: baseURL,
             path: "/x/web-interface/history/cursor",
             query: [
                 "type": "archive",
                 "ps": String(pageSize),
-                "max": "0",
-                "view_at": "0",
-                "business": "archive"
+                "max": String(cursor?.max ?? 0),
+                "view_at": String(cursor?.viewAt ?? 0)
             ]
         )
         guard response.code == 0 else { throw BiliAPIError.api(code: response.code, message: response.displayMessage) }
-        return response.payload?.accountVideoEntries ?? []
+        let entries = response.payload?.accountVideoEntries ?? []
+        let payloadCursor = Self.accountHistoryCursor(from: response.payload)
+        let nextCursor = Self.accountHistoryCursor(fromLastEntryIn: entries) ?? payloadCursor
+        let cursorCanAdvance = nextCursor.map { $0 != previousCursor && $0.viewAt > 0 } ?? false
+        return AccountVideoEntryPage(
+            entries: entries,
+            hasMore: !entries.isEmpty && cursorCanAdvance,
+            nextHistoryCursor: nextCursor
+        )
     }
 
     func fetchVideoHistoryProgress(aid: Int) async throws -> VideoHistoryProgress {
@@ -1617,6 +1676,10 @@ nonisolated final class BiliAPIClient {
     }
 
     func fetchFavoriteFolderVideos(folderID: Int, page: Int = 1, pageSize: Int = 20) async throws -> [AccountVideoEntry] {
+        try await fetchFavoriteFolderVideoPage(folderID: folderID, page: page, pageSize: pageSize).entries
+    }
+
+    func fetchFavoriteFolderVideoPage(folderID: Int, page: Int = 1, pageSize: Int = 20) async throws -> AccountVideoEntryPage {
         guard await isLoggedIn() else { throw BiliAPIError.missingSESSDATA }
         let response: BiliResponse<DynamicJSONValue> = try await get(
             base: baseURL,
@@ -1633,14 +1696,184 @@ nonisolated final class BiliAPIClient {
             ]
         )
         guard response.code == 0 else { throw BiliAPIError.api(code: response.code, message: response.displayMessage) }
-        return response.payload?.accountVideoEntries ?? []
+        let entries = response.payload?.accountVideoEntries ?? []
+        return AccountVideoEntryPage(
+            entries: entries,
+            hasMore: Self.hasMoreFlag(in: response.payload) ?? (entries.count >= pageSize),
+            nextHistoryCursor: nil
+        )
     }
 
-    func reportVideoHistory(aid: Int, cid: Int?, progress: TimeInterval, duration: TimeInterval?) async throws {
-        let csrf = try await requireCSRF()
+    private static func accountHistoryCursor(from payload: DynamicJSONValue?) -> AccountHistoryCursor? {
+        guard let object = dynamicObject(payload),
+              let cursor = dynamicObject(object["cursor"])
+        else { return nil }
+        guard let max = dynamicInt(cursor["max"]),
+              let viewAt = dynamicInt(cursor["view_at"]) ?? dynamicInt(cursor["viewAt"])
+        else { return nil }
+        return AccountHistoryCursor(
+            max: max,
+            viewAt: viewAt
+        )
+    }
+
+    private static func accountHistoryCursor(
+        fromLastEntryIn entries: [AccountVideoEntry]
+    ) -> AccountHistoryCursor? {
+        guard let last = entries.last,
+              let aid = last.aid,
+              aid > 0
+        else { return nil }
+        let viewAt = Int(last.savedAt.timeIntervalSince1970)
+        guard viewAt > 0 else { return nil }
+        return AccountHistoryCursor(
+            max: aid,
+            viewAt: viewAt
+        )
+    }
+
+    private static func hasMoreFlag(in payload: DynamicJSONValue?) -> Bool? {
+        guard let object = dynamicObject(payload) else { return nil }
+        for key in ["has_more", "hasMore", "more"] {
+            if let value = dynamicBool(object[key]) {
+                return value
+            }
+        }
+        if let cursor = dynamicObject(object["cursor"]) {
+            for key in ["has_more", "hasMore", "more"] {
+                if let value = dynamicBool(cursor[key]) {
+                    return value
+                }
+            }
+        }
+        return nil
+    }
+
+    private static func dynamicObject(_ value: DynamicJSONValue?) -> [String: DynamicJSONValue]? {
+        guard let value else { return nil }
+        guard case .object(let object) = value else { return nil }
+        return object
+    }
+
+    private static func dynamicInt(_ value: DynamicJSONValue?) -> Int? {
+        guard let value else { return nil }
+        switch value {
+        case .number(let raw), .string(let raw):
+            return Int(raw) ?? Double(raw).map(Int.init)
+        case .bool(let value):
+            return value ? 1 : 0
+        case .array, .object, .null:
+            return nil
+        }
+    }
+
+    private static func dynamicBool(_ value: DynamicJSONValue?) -> Bool? {
+        guard let value else { return nil }
+        switch value {
+        case .bool(let value):
+            return value
+        case .number(let raw), .string(let raw):
+            let normalized = raw.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+            if ["1", "true", "yes"].contains(normalized) { return true }
+            if ["0", "false", "no"].contains(normalized) { return false }
+            return nil
+        case .array, .object, .null:
+            return nil
+        }
+    }
+
+    private static func dynamicString(_ value: DynamicJSONValue?) -> String? {
+        guard let value else { return nil }
+        switch value {
+        case .number(let raw), .string(let raw):
+            let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+            return trimmed.isEmpty ? nil : trimmed
+        case .bool(let value):
+            return value ? "1" : "0"
+        case .array, .object, .null:
+            return nil
+        }
+    }
+
+    func reportVideoHistory(
+        aid: Int?,
+        cid: Int?,
+        progress: TimeInterval,
+        duration: TimeInterval?,
+        bvid: String? = nil
+    ) async throws {
+        let snapshot = await requestSnapshot()
+        var webError: Error?
+        if let csrf = snapshot.csrfToken, !csrf.isEmpty, snapshot.isLoggedIn {
+            do {
+                try await reportVideoHeartbeatWithWeb(
+                    aid: aid,
+                    bvid: bvid,
+                    cid: cid,
+                    progress: progress,
+                    csrf: csrf
+                )
+                return
+            } catch is CancellationError {
+                throw CancellationError()
+            } catch {
+                webError = error
+                Self.historyLogger.error("historyReport webFailed fallback=history aid=\(aid ?? 0, privacy: .public) error=\(error.localizedDescription, privacy: .public)")
+                if let aid, aid > 0 {
+                    do {
+                        try await reportVideoHistoryWithWeb(
+                            aid: aid,
+                            cid: cid,
+                            progress: progress,
+                            duration: duration,
+                            csrf: csrf
+                        )
+                        return
+                    } catch is CancellationError {
+                        throw CancellationError()
+                    } catch {
+                        webError = error
+                    }
+                }
+            }
+        }
+
+        if let aid, aid > 0, let accessKey = snapshot.appAccessKey, !accessKey.isEmpty {
+            do {
+                try await reportVideoHistoryWithAppAccessKey(
+                    aid: aid,
+                    cid: cid,
+                    progress: progress,
+                    duration: duration,
+                    accessKey: accessKey,
+                    cookieHeader: snapshot.cookieHeader
+                )
+                return
+            } catch is CancellationError {
+                throw CancellationError()
+            } catch {
+                Self.historyLogger.error("historyReport appFailed aid=\(aid, privacy: .public) error=\(error.localizedDescription, privacy: .public)")
+                throw error
+            }
+        }
+
+        if let webError {
+            throw webError
+        }
+        throw BiliAPIError.missingSESSDATA
+    }
+
+    private func reportVideoHistoryWithWeb(
+        aid: Int,
+        cid: Int?,
+        progress: TimeInterval,
+        duration: TimeInterval?,
+        csrf: String
+    ) async throws {
         var body = [
             "aid": String(aid),
             "progress": String(max(0, Int(progress))),
+            "type": "3",
             "csrf": csrf,
             "gaia_source": "web_normal",
             "ga": "1"
@@ -1654,7 +1887,85 @@ nonisolated final class BiliAPIClient {
         let response: BiliResponse<EmptyBiliPayload> = try await postForm(
             base: baseURL,
             path: "/x/v2/history/report",
-            body: body
+            body: body,
+            userAgent: Self.webUserAgent
+        )
+        guard response.code == 0 else { throw BiliAPIError.api(code: response.code, message: response.displayMessage) }
+    }
+
+    private func reportVideoHeartbeatWithWeb(
+        aid: Int?,
+        bvid: String?,
+        cid: Int?,
+        progress: TimeInterval,
+        csrf: String
+    ) async throws {
+        let normalizedBVID = bvid?.trimmingCharacters(in: .whitespacesAndNewlines)
+        var body = [
+            "played_time": String(max(0, Int(progress))),
+            "type": "3",
+            "csrf": csrf
+        ]
+        if let normalizedBVID, !normalizedBVID.isEmpty {
+            body["bvid"] = normalizedBVID
+        } else if let aid, aid > 0 {
+            body["aid"] = String(aid)
+        } else {
+            throw BiliAPIError.missingPayload
+        }
+        if let cid, cid > 0 {
+            body["cid"] = String(cid)
+        }
+        let referer: String
+        if let normalizedBVID, !normalizedBVID.isEmpty {
+            referer = "https://www.bilibili.com/video/\(normalizedBVID)"
+        } else if let aid, aid > 0 {
+            referer = "https://www.bilibili.com/video/av\(aid)"
+        } else {
+            referer = "https://www.bilibili.com"
+        }
+        let response: BiliResponse<EmptyBiliPayload> = try await postForm(
+            base: baseURL,
+            path: "/x/click-interface/web/heartbeat",
+            body: body,
+            referer: referer,
+            userAgent: Self.webUserAgent
+        )
+        guard response.code == 0 else { throw BiliAPIError.api(code: response.code, message: response.displayMessage) }
+    }
+
+    private func reportVideoHistoryWithAppAccessKey(
+        aid: Int,
+        cid: Int?,
+        progress: TimeInterval,
+        duration: TimeInterval?,
+        accessKey: String,
+        cookieHeader: String
+    ) async throws {
+        let profile = BiliAppSigner.Profile.androidLogin
+        let headerContext = Self.piliPodStyleAppRecommendHeaders(
+            cookieHeader: cookieHeader,
+            profile: profile
+        )
+        var fields = [
+            "access_key": accessKey,
+            "aid": String(aid),
+            "progress": String(max(0, Int(progress))),
+            "type": "3",
+            "gaia_source": "app_normal"
+        ]
+        if let cid, cid > 0 {
+            fields["cid"] = String(cid)
+        }
+        if let duration, duration > 0 {
+            fields["duration"] = String(Int(duration))
+        }
+        let response: BiliResponse<EmptyBiliPayload> = try await postSignedAPIForm(
+            path: "/x/v2/history/report",
+            fields: fields,
+            profile: profile,
+            cookieHeader: cookieHeader,
+            additionalHeaders: headerContext.headers
         )
         guard response.code == 0 else { throw BiliAPIError.api(code: response.code, message: response.displayMessage) }
     }
@@ -1759,6 +2070,25 @@ nonisolated final class BiliAPIClient {
         try await fetchUploaderVideoPage(mid: mid, page: page).videos
     }
 
+    func fetchPgcSeasonInfo(seasonID: Int, epID: Int? = nil) async throws -> PgcSeasonInfo {
+        var query = ["season_id": String(seasonID)]
+        if let epID {
+            query["ep_id"] = String(epID)
+        }
+        let response: BiliResponse<PgcSeasonInfo> = try await get(
+            base: baseURL,
+            path: "/pgc/view/web/season",
+            query: query,
+            referer: "https://www.bilibili.com/bangumi/play/ss\(seasonID)",
+            responseCachePolicy: .detail
+        )
+        guard response.code == 0 else {
+            throw BiliAPIError.api(code: response.code, message: response.displayMessage)
+        }
+        guard let info = response.payload else { throw BiliAPIError.missingPayload }
+        return info
+    }
+
     func fetchPlayURL(
         bvid: String,
         cid: Int,
@@ -1769,7 +2099,7 @@ nonisolated final class BiliAPIClient {
         preferProgressiveFastStart: Bool = false
     ) async throws -> PlayURLData {
         let snapshot = await requestSnapshot()
-        let requestedQuality = preferredQuality ?? snapshot.preferredVideoQuality ?? qn
+        let requestedQuality = preferredQuality ?? snapshot.effectivePreferredVideoQuality ?? qn
         let key = PlayURLCacheKey(
             bvid: bvid,
             cid: cid,
@@ -1809,6 +2139,59 @@ nonisolated final class BiliAPIClient {
         return data
     }
 
+    func fetchPgcPlayURL(
+        bvid: String,
+        cid: Int,
+        seasonID: Int?,
+        epID: Int?,
+        qn: Int = 112,
+        preferredQuality: Int? = nil
+    ) async throws -> PlayURLData {
+        let snapshot = await requestSnapshot()
+        let requestedQuality = preferredQuality ?? snapshot.effectivePreferredVideoQuality ?? qn
+        let streamSource = snapshot.playbackStreamSourcePreference
+        let keys = try await fetchWBIKeys(priority: .userInitiated)
+        let referer: String
+        if let epID {
+            referer = "https://www.bilibili.com/bangumi/play/ep\(epID)"
+        } else if let seasonID {
+            referer = "https://www.bilibili.com/bangumi/play/ss\(seasonID)"
+        } else {
+            referer = "https://www.bilibili.com/bangumi/play/"
+        }
+        var lastError: Error?
+        for codecPreference in PlayURLCodecPreference.extendedPlaybackOrder(requestedQuality: requestedQuality) {
+            do {
+                var query = pgcPlayURLQuery(
+                    bvid: bvid,
+                    cid: cid,
+                    seasonID: seasonID,
+                    epID: epID,
+                    qn: requestedQuality,
+                    streamSource: streamSource,
+                    codecPreference: codecPreference
+                )
+                query = WBISigner.sign(query, keys: keys)
+                let response: BiliResponse<PgcPlayURLResult> = try await get(
+                    base: baseURL,
+                    path: "/pgc/player/web/v2/playurl",
+                    query: query,
+                    referer: referer,
+                    userAgent: userAgent(for: streamSource),
+                    cookieHeader: snapshot.cookieHeader,
+                    priority: URLSessionTask.highPriority
+                )
+                let data = try requirePgcPlayURLData(response, requirePlayablePayload: true)
+                return try requireRequestedQualityIfNeeded(data, requestedQuality: requestedQuality)
+            } catch {
+                guard !Task.isCancelled else { throw error }
+                lastError = error
+                guard shouldTryAlternatePlayURLCodec(after: error) else { break }
+            }
+        }
+        throw lastError ?? BiliAPIError.emptyPlayURL
+    }
+
     func clearCachedPlayURLFailures(bvid: String) async {
         await state.clearPlayURLFailuresAndTasks(containing: bvid)
     }
@@ -1842,7 +2225,7 @@ nonisolated final class BiliAPIClient {
         let snapshot = await requestSnapshot()
         let anonymousCookieHeader = snapshot.anonymousCookieHeader
         let playCookieHeader = snapshot.cookieHeader
-        let requestedQuality = preferredQuality ?? snapshot.preferredVideoQuality ?? qn
+        let requestedQuality = preferredQuality ?? snapshot.effectivePreferredVideoQuality ?? qn
         let streamSource = snapshot.playbackStreamSourcePreference
         let query = playURLQuery(bvid: bvid, cid: cid, qn: requestedQuality, streamSource: streamSource)
         let playURLUserAgent = userAgent(for: streamSource)
@@ -1886,8 +2269,13 @@ nonisolated final class BiliAPIClient {
             }
             logPlayURLStage("wbiPrimary", bvid: bvid, cid: cid, start: wbiStageStart, data: playable)
             guard supplementsQualities else {
-                logPlayURLStage("completeWBIPrimary", bvid: bvid, cid: cid, start: requestStart, data: playable)
-                return playable
+                if shouldAcceptPlayURLData(playable, requestedQuality: requestedQuality) {
+                    logPlayURLStage("completeWBIPrimary", bvid: bvid, cid: cid, start: requestStart, data: playable)
+                    return playable
+                }
+                logPreferredQualityMiss(stage: "wbiPrimary", bvid: bvid, cid: cid, requestedQuality: requestedQuality, data: playable)
+                bestPlayableData = playable
+                throw BiliAPIError.emptyPlayURL
             }
             let supplemented = await supplementPlayableQualities(
                 playable,
@@ -1898,14 +2286,17 @@ nonisolated final class BiliAPIClient {
                 streamSource: streamSource
             )
             logPlayURLStage("wbiPrimarySupplemented", bvid: bvid, cid: cid, start: wbiStageStart, data: supplemented)
-            if supplemented.highestPlayableQuality > playable.highestPlayableQuality {
+            if shouldAcceptPlayURLData(supplemented, requestedQuality: requestedQuality),
+               supplemented.highestPlayableQuality > playable.highestPlayableQuality {
                 logPlayURLStage("completeWBIPrimarySupplemented", bvid: bvid, cid: cid, start: requestStart, data: supplemented)
                 return supplemented
             }
-            if playable.highestPlayableQuality >= 80 {
+            if shouldAcceptPlayURLData(supplemented, requestedQuality: requestedQuality),
+               playable.highestPlayableQuality >= 80 {
                 logPlayURLStage("completeWBIPrimaryPlayable", bvid: bvid, cid: cid, start: requestStart, data: supplemented)
                 return supplemented
             }
+            logPreferredQualityMiss(stage: "wbiPrimary", bvid: bvid, cid: cid, requestedQuality: requestedQuality, data: supplemented)
             bestPlayableData = supplemented
         } catch {
             lastError = error
@@ -1933,8 +2324,13 @@ nonisolated final class BiliAPIClient {
             }
             logPlayURLStage("legacyPrimary", bvid: bvid, cid: cid, start: legacyStageStart, data: playable)
             guard supplementsQualities else {
-                logPlayURLStage("completeLegacyPrimary", bvid: bvid, cid: cid, start: requestStart, data: playable)
-                return playable
+                if shouldAcceptPlayURLData(playable, requestedQuality: requestedQuality) {
+                    logPlayURLStage("completeLegacyPrimary", bvid: bvid, cid: cid, start: requestStart, data: playable)
+                    return playable
+                }
+                logPreferredQualityMiss(stage: "legacyPrimary", bvid: bvid, cid: cid, requestedQuality: requestedQuality, data: playable)
+                bestPlayableData = preferredPlayURLCandidate(bestPlayableData, playable, requestedQuality: requestedQuality)
+                throw BiliAPIError.emptyPlayURL
             }
             let supplemented = await supplementPlayableQualities(
                 playable,
@@ -1948,10 +2344,12 @@ nonisolated final class BiliAPIClient {
             if supplemented.highestPlayableQuality > (bestPlayableData?.highestPlayableQuality ?? 0) {
                 bestPlayableData = supplemented
             }
-            if supplemented.highestPlayableQuality >= 80 {
+            if shouldAcceptPlayURLData(supplemented, requestedQuality: requestedQuality),
+               supplemented.highestPlayableQuality >= 80 {
                 logPlayURLStage("completeLegacySupplemented", bvid: bvid, cid: cid, start: requestStart, data: supplemented)
                 return supplemented
             }
+            logPreferredQualityMiss(stage: "legacyPrimary", bvid: bvid, cid: cid, requestedQuality: requestedQuality, data: supplemented)
         } catch {
             lastError = error
         }
@@ -2064,7 +2462,7 @@ nonisolated final class BiliAPIClient {
         let stageStart = CACurrentMediaTime()
         let referer = "https://www.bilibili.com/video/\(bvid)"
         let snapshot = await requestSnapshot()
-        let requestedQuality = preferredQuality ?? snapshot.preferredVideoQuality ?? 112
+        let requestedQuality = preferredQuality ?? snapshot.effectivePreferredVideoQuality ?? 112
         let streamSource = snapshot.playbackStreamSourcePreference
         let data = try await runCachedPlayURLStage(
             "webpagePlayInfo",
@@ -2089,17 +2487,11 @@ nonisolated final class BiliAPIClient {
         bvid: String,
         cid: Int,
         page: Int? = nil,
-        preferredQuality: Int? = nil,
-        startupQualityCeiling: Int? = nil
+        preferredQuality: Int? = nil
     ) async throws -> PlayURLData {
         let snapshot = await requestSnapshot()
-        let environment = PlaybackEnvironment.current
-        let configuredQuality = preferredQuality ?? snapshot.preferredVideoQuality
-        let requestedQuality = startupRequestedQuality(
-            configuredQuality: configuredQuality,
-            startupQualityCeiling: startupQualityCeiling,
-            environment: environment
-        )
+        let configuredQuality = preferredQuality ?? snapshot.effectivePreferredVideoQuality
+        let requestedQuality = startupRequestedQuality(configuredQuality: configuredQuality)
         let key = PlayURLCacheKey(
             bvid: bvid,
             cid: cid,
@@ -2131,8 +2523,7 @@ nonisolated final class BiliAPIClient {
             bvid: bvid,
             cid: cid,
             page: page,
-            preferredQuality: preferredQuality,
-            startupQualityCeiling: startupQualityCeiling
+            preferredQuality: preferredQuality
         )
         await playURLCache.store(data, for: key, scope: scope)
         return data
@@ -2141,17 +2532,11 @@ nonisolated final class BiliAPIClient {
     func hasCachedStartupPlayURL(
         bvid: String,
         cid: Int,
-        preferredQuality: Int? = nil,
-        startupQualityCeiling: Int? = nil
+        preferredQuality: Int? = nil
     ) async -> Bool {
         let snapshot = await requestSnapshot()
-        let environment = PlaybackEnvironment.current
-        let configuredQuality = preferredQuality ?? snapshot.preferredVideoQuality
-        let requestedQuality = startupRequestedQuality(
-            configuredQuality: configuredQuality,
-            startupQualityCeiling: startupQualityCeiling,
-            environment: environment
-        )
+        let configuredQuality = preferredQuality ?? snapshot.effectivePreferredVideoQuality
+        let requestedQuality = startupRequestedQuality(configuredQuality: configuredQuality)
         let key = PlayURLCacheKey(
             bvid: bvid,
             cid: cid,
@@ -2179,17 +2564,11 @@ nonisolated final class BiliAPIClient {
         bvid: String,
         cid: Int,
         page: Int? = nil,
-        preferredQuality: Int? = nil,
-        startupQualityCeiling: Int? = nil
+        preferredQuality: Int? = nil
     ) async throws -> PlayURLData {
-        let environment = PlaybackEnvironment.current
         let storedPreferredQuality = await preferredVideoQuality()
         let configuredQuality = preferredQuality ?? storedPreferredQuality
-        let requestedQuality = startupRequestedQuality(
-            configuredQuality: configuredQuality,
-            startupQualityCeiling: startupQualityCeiling,
-            environment: environment
-        )
+        let requestedQuality = startupRequestedQuality(configuredQuality: configuredQuality)
         let honorsConfiguredQuality = configuredQuality != nil && configuredQuality == requestedQuality
         let allowsUsableFallback = false
         var bestStartupData: PlayURLData?
@@ -2240,14 +2619,8 @@ nonisolated final class BiliAPIClient {
         return bestStartupData
     }
 
-    private nonisolated func startupRequestedQuality(
-        configuredQuality: Int?,
-        startupQualityCeiling: Int?,
-        environment: PlaybackEnvironment
-    ) -> Int {
-        let requestedQuality = configuredQuality ?? LibraryStore.defaultPreferredVideoQuality
-        guard let startupQualityCeiling else { return requestedQuality }
-        return min(requestedQuality, startupQualityCeiling)
+    private nonisolated func startupRequestedQuality(configuredQuality: Int?) -> Int {
+        configuredQuality ?? LibraryStore.defaultPreferredVideoQuality
     }
 
     private func fetchRacedStartupPlayURL(
@@ -2261,7 +2634,6 @@ nonisolated final class BiliAPIClient {
         let shouldRaceWBI = await shouldAttemptStartupWBI()
         let playbackEnvironment = PlaybackEnvironment.current
         let startupGrace = playbackEnvironment.preferredPlayURLStartupGrace
-        let usableStartupQuality = min(requestedQuality, playbackEnvironment.fastStartQuality)
         var bestStartupData: PlayURLData?
         var lastError: Error?
 
@@ -2369,7 +2741,7 @@ nonisolated final class BiliAPIClient {
                         data: data
                     )
                     if allowsUsableFallback,
-                       data.highestPlayableQuality >= usableStartupQuality || data.hasPlayableStreamPayload {
+                       data.hasPlayableQuality(requestedQuality) {
                         logPlayURLStage(
                             "startupRaceUsableFallback.\(attempt.stage)",
                             bvid: bvid,
@@ -2450,6 +2822,25 @@ nonisolated final class BiliAPIClient {
         return rhs.highestPlayableQuality > lhs.highestPlayableQuality ? rhs : lhs
     }
 
+    private nonisolated func shouldAcceptPlayURLData(_ data: PlayURLData, requestedQuality: Int) -> Bool {
+        guard Self.requiresAutomaticCodecNegotiation(requestedQuality: requestedQuality) else { return true }
+        return data.hasMediaPayloadQuality(requestedQuality)
+    }
+
+    private nonisolated func preferredPlayURLCandidate(
+        _ lhs: PlayURLData?,
+        _ rhs: PlayURLData,
+        requestedQuality: Int
+    ) -> PlayURLData {
+        guard let lhs else { return rhs }
+        let lhsMatches = shouldAcceptPlayURLData(lhs, requestedQuality: requestedQuality)
+        let rhsMatches = shouldAcceptPlayURLData(rhs, requestedQuality: requestedQuality)
+        if lhsMatches != rhsMatches {
+            return rhsMatches ? rhs : lhs
+        }
+        return rhs.highestPlayableQuality > lhs.highestPlayableQuality ? rhs : lhs
+    }
+
     private nonisolated static func playURLCachePlatform(
         _ basePlatform: String,
         requestedQuality: Int?,
@@ -2461,7 +2852,9 @@ nonisolated final class BiliAPIClient {
 
     private nonisolated static func playURLCodecCachePolicyToken(requestedQuality: Int?) -> String {
         let preference = VideoCodecPreference.stored()
-        let policy = requestedQuality == 126 ? "dolbyHEVCFirstNoAV1V1" : "hevcFirstNoAV1V1"
+        let policy = requestedQuality.map { Self.requiresAutomaticCodecNegotiation(requestedQuality: $0) } == true
+            ? "hdrAutoStrictNoAV1V1"
+            : "hevcFirstNoAV1V1"
         return "codec-\(preference.rawValue)-\(policy)"
     }
 
@@ -2485,7 +2878,7 @@ nonisolated final class BiliAPIClient {
         let stageStart = CACurrentMediaTime()
         let referer = "https://www.bilibili.com/video/\(bvid)"
         let snapshot = await requestSnapshot()
-        let requestedQuality = preferredQuality ?? snapshot.preferredVideoQuality ?? 112
+        let requestedQuality = preferredQuality ?? snapshot.effectivePreferredVideoQuality ?? 112
         let streamSource = snapshot.playbackStreamSourcePreference
         let query = playURLQuery(bvid: bvid, cid: cid, qn: requestedQuality, streamSource: streamSource)
         let data = try await runCachedPlayURLStage(
@@ -2520,7 +2913,7 @@ nonisolated final class BiliAPIClient {
         let stageStart = CACurrentMediaTime()
         let referer = "https://www.bilibili.com/video/\(bvid)"
         let snapshot = await requestSnapshot()
-        let requestedQuality = preferredQuality ?? snapshot.preferredVideoQuality ?? 112
+        let requestedQuality = preferredQuality ?? snapshot.effectivePreferredVideoQuality ?? 112
         let streamSource = snapshot.playbackStreamSourcePreference
         let authCookieHeader = snapshot.cookieHeader
         let anonymousCookieHeader = snapshot.anonymousCookieHeader
@@ -2671,10 +3064,13 @@ nonisolated final class BiliAPIClient {
 
         private static func playbackOrder(
             for preference: VideoCodecPreference,
-            requestedQuality _: Int?
+            requestedQuality: Int?
         ) -> [PlayURLCodecPreference] {
+            if requestedQuality.map({ BiliAPIClient.requiresAutomaticCodecNegotiation(requestedQuality: $0) }) == true {
+                return [.automatic]
+            }
             switch preference {
-            case .auto, .forceAV1:
+            case .auto:
                 return [.hevc, .avc, .automatic]
             case .forceHEVC:
                 return [.hevc]
@@ -2683,7 +3079,8 @@ nonisolated final class BiliAPIClient {
             }
         }
 
-        var videoCodecid: String? {
+        func videoCodecid(requestedQuality: Int) -> String? {
+            guard !BiliAPIClient.requiresAutomaticCodecNegotiation(requestedQuality: requestedQuality) else { return nil }
             switch self {
             case .hevc:
                 return "12"
@@ -2725,7 +3122,45 @@ nonisolated final class BiliAPIClient {
             "otype": "json",
             "try_look": "1"
         ]
-        if let videoCodecid = codecPreference.videoCodecid {
+        if let videoCodecid = codecPreference.videoCodecid(requestedQuality: qn) {
+            query["video_codecid"] = videoCodecid
+        }
+        return query
+    }
+
+    private func pgcPlayURLQuery(
+        bvid: String,
+        cid: Int,
+        seasonID: Int?,
+        epID: Int?,
+        qn: Int,
+        streamSource: PlaybackStreamSourcePreference,
+        codecPreference: PlayURLCodecPreference = .hevc
+    ) -> [String: String] {
+        var query = [
+            "cid": String(cid),
+            "qn": String(qn),
+            "fnval": "4048",
+            "fnver": "0",
+            "fourk": "1",
+            "platform": streamSource.playURLPlatform,
+            "high_quality": "1",
+            "otype": "json",
+            "try_look": "1",
+            "gaia_source": "pre-load",
+            "isGaiaAvoided": "true",
+            "web_location": "1315873"
+        ]
+        if bvid.hasPrefix("BV") {
+            query["bvid"] = bvid
+        }
+        if let seasonID {
+            query["season_id"] = String(seasonID)
+        }
+        if let epID {
+            query["ep_id"] = String(epID)
+        }
+        if let videoCodecid = codecPreference.videoCodecid(requestedQuality: qn) {
             query["video_codecid"] = videoCodecid
         }
         return query
@@ -2782,7 +3217,8 @@ nonisolated final class BiliAPIClient {
                         cookieHeader: cookieHeader,
                         priority: priority
                     )
-                    return try requirePlayURLData(response, requirePlayablePayload: true)
+                    let data = try requirePlayURLData(response, requirePlayablePayload: true)
+                    return try requireRequestedQualityIfNeeded(data, requestedQuality: requestedQuality)
                 }
                 if codecPreference != .hevc {
                     logPlayURLStage(stage, bvid: bvid, cid: cid, start: CACurrentMediaTime(), data: data)
@@ -2795,6 +3231,16 @@ nonisolated final class BiliAPIClient {
             }
         }
         throw lastError ?? BiliAPIError.emptyPlayURL
+    }
+
+    private func requireRequestedQualityIfNeeded(
+        _ data: PlayURLData,
+        requestedQuality: Int
+    ) throws -> PlayURLData {
+        guard Self.requiresAutomaticCodecNegotiation(requestedQuality: requestedQuality),
+              !data.hasMediaPayloadQuality(requestedQuality)
+        else { return data }
+        throw BiliAPIError.emptyPlayURL
     }
 
     private func shouldTryAlternatePlayURLCodec(after error: Error) -> Bool {
@@ -4543,6 +4989,25 @@ nonisolated final class BiliAPIClient {
             if data.hasAnyPlayURLPayload {
                 throw BiliAPIError.unsupportedHardwarePlayback(
                     "播放接口已返回地址，但没有可用的 HEVC/AAC 硬解组合（\(data.rawPlayURLSummary)）"
+                )
+            }
+            throw BiliAPIError.emptyPlayURL
+        }
+        return data
+    }
+
+    private func requirePgcPlayURLData(_ response: BiliResponse<PgcPlayURLResult>, requirePlayablePayload: Bool = false) throws -> PlayURLData {
+        guard response.code == 0 else {
+            throw BiliAPIError.api(code: response.code, message: response.displayMessage)
+        }
+        guard let data = response.payload?.videoInfo else { throw BiliAPIError.missingPayload }
+        if let code = data.code, code != 0 {
+            throw BiliAPIError.api(code: code, message: data.message)
+        }
+        if requirePlayablePayload, data.playVariants.isEmpty {
+            if data.hasAnyPlayURLPayload {
+                throw BiliAPIError.unsupportedHardwarePlayback(
+                    "番剧播放接口已返回地址，但没有可用的 HEVC/AAC 硬解组合（\(data.rawPlayURLSummary)）"
                 )
             }
             throw BiliAPIError.emptyPlayURL

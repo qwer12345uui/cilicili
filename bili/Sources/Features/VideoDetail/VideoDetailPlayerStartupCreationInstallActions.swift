@@ -19,7 +19,7 @@ extension VideoDetailViewModel {
             )
         }
 
-        let alternateVideoRenditions = hlsAlternateVideoRenditions(for: variant)
+        let alternateVideoRenditions: [PlayerVideoRenditionSource] = []
         recordHLSVideoVariantPlan(
             startupVariant: variant,
             alternateVideoRenditions: alternateVideoRenditions

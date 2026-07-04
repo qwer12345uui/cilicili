@@ -91,32 +91,43 @@ final class LibraryStore: ObservableObject {
     @Published private(set) var appTintColorHex: String
     @Published private(set) var defaultPlaybackRate: Double
     @Published private(set) var preferredVideoQuality: Int?
+    @Published private(set) var cellularPreferredVideoQuality: Int?
     @Published private(set) var playbackAutoOptimizationMode: PlaybackAutoOptimizationMode
     @Published private(set) var playbackStreamSourcePreference: PlaybackStreamSourcePreference
-    @Published private(set) var playerRenderingEnginePreference: PlayerRenderingEnginePreference
     @Published private(set) var videoCodecPreference: VideoCodecPreference
+    @Published private(set) var forceHardwareDecodeEnabled: Bool
+    @Published private(set) var dolbyVisionRenderingPolicy: DolbyVisionRenderingPolicy
     @Published private(set) var playbackCDNPreference: PlaybackCDNPreference
     @Published private(set) var playbackCustomCDNHost: String?
     @Published private(set) var playbackCDNProbeRefreshPolicy: PlaybackCDNProbeRefreshPolicy
     @Published private(set) var playbackCDNProbeRefreshIntervalMinutes: Int
     @Published private(set) var playbackNetworkAddressFamilyPreference: PlaybackNetworkAddressFamilyPreference
+    @Published private(set) var prefersBackupAudioURL: Bool
     @Published private(set) var playbackCDNProbeSnapshot: PlaybackCDNProbeSnapshot?
     @Published private(set) var blocksAdDynamics: Bool
     @Published private(set) var blocksGoodsDynamics: Bool
     @Published private(set) var blocksGoodsComments: Bool
     @Published private(set) var blockedDynamicKeywords: [String]
+    @Published private(set) var recommendMinimumDurationSeconds: Int
+    @Published private(set) var recommendMinimumViewCount: Int
+    @Published private(set) var recommendMinimumLikeRatioPercent: Int
+    @Published private(set) var blockedRecommendKeywords: [String]
+    @Published private(set) var appliesRecommendFiltersToRelatedVideos: Bool
     @Published private(set) var danmakuEnabled: Bool
     @Published private(set) var danmakuSettings: DanmakuSettings
     @Published private(set) var sponsorBlockEnabled: Bool
     @Published private(set) var pictureInPictureEnabled: Bool
     @Published private(set) var playerPerformanceOverlayEnabled: Bool
+    @Published private(set) var playerControlEdgeScrimEnabled: Bool
     @Published private(set) var showsVideoDetailNetworkDiagnosticsButton: Bool
     @Published private(set) var showsVideoDetailPinnedProgressBar: Bool
     @Published private(set) var incognitoModeEnabled: Bool
     @Published private(set) var guestModeEnabled: Bool
     @Published private(set) var minimizesTabBarOnScroll: Bool
     @Published private(set) var scrollEdgeEffectPreference: AppScrollEdgeEffectPreference
-    @Published private(set) var videoCoverOverlayStyle: VideoCoverOverlayStyle
+    @Published private(set) var liquidGlassStylePreference: AppLiquidGlassStylePreference
+    @Published private(set) var remoteImageQualityPreference: RemoteImageQualityPreference
+    @Published private(set) var videoCoverBadgeShadowOpacity: Double
     @Published private(set) var force120HzScrollingEnabled: Bool
     @Published private(set) var visibleRootTabs: [AppTab]
     @Published private(set) var homeRefreshTriggerDistance: Double
@@ -131,33 +142,44 @@ final class LibraryStore: ObservableObject {
     private static let appTintColorDefaultToneMigrationKey = "cc.bili.appearance.tintColorDefaultToneMigration.v2"
     private static let defaultPlaybackRateKey = "cc.bili.playback.defaultPlaybackRate.v1"
     private static let preferredVideoQualityKey = "cc.bili.playback.preferredVideoQuality.v1"
+    private static let cellularPreferredVideoQualityKey = "cc.bili.playback.cellularPreferredVideoQuality.v1"
     private static let playbackAutoOptimizationModeKey = "cc.bili.playback.autoOptimizationMode.v1"
     private static let playbackStreamSourcePreferenceKey = "cc.bili.playback.streamSourcePreference.v1"
-    private static let playerRenderingEnginePreferenceKey = PlayerRenderingEnginePreference.storageKey
     private static let videoCodecPreferenceKey = VideoCodecPreference.storageKey
+    private static let forceHardwareDecodeKey = PlaybackHardwareDecodePolicy.storageKey
+    private static let dolbyVisionRenderingPolicyKey = DolbyVisionRenderingPolicy.storageKey
     private static let playbackCDNPreferenceKey = "cc.bili.playback.cdnPreference.v1"
     private static let playbackCustomCDNHostKey = PlaybackCDNPreference.customHostStorageKey
     private static let playbackCDNProbeRefreshPolicyKey = "cc.bili.playback.cdnProbeRefreshPolicy.v1"
     private static let playbackCDNProbeRefreshIntervalMinutesKey = "cc.bili.playback.cdnProbeRefreshIntervalMinutes.v1"
     private static let playbackNetworkAddressFamilyPreferenceKey = "cc.bili.playback.networkAddressFamilyPreference.v1"
+    private static let prefersBackupAudioURLKey = PlaybackAudioURLPolicy.storageKey
     private static let playbackCDNProbeSnapshotKey = "cc.bili.playback.cdnProbeSnapshot.v1"
     private static let playbackCDNProbeSnapshotsByContextKey = "cc.bili.playback.cdnProbeSnapshotsByContext.v1"
     private static let blocksAdDynamicsKey = "cc.bili.content.blocksAdDynamics.v1"
     private static let blocksGoodsDynamicsKey = "cc.bili.content.blocksGoodsDynamics.v1"
     private static let blocksGoodsCommentsKey = "cc.bili.content.blocksGoodsComments.v1"
     private static let blockedDynamicKeywordsKey = "cc.bili.content.blockedDynamicKeywords.v1"
+    private static let recommendMinimumDurationSecondsKey = "cc.bili.content.recommendMinimumDurationSeconds.v1"
+    private static let recommendMinimumViewCountKey = "cc.bili.content.recommendMinimumViewCount.v1"
+    private static let recommendMinimumLikeRatioPercentKey = "cc.bili.content.recommendMinimumLikeRatioPercent.v1"
+    private static let blockedRecommendKeywordsKey = "cc.bili.content.blockedRecommendKeywords.v1"
+    private static let appliesRecommendFiltersToRelatedVideosKey = "cc.bili.content.appliesRecommendFiltersToRelatedVideos.v1"
     private static let danmakuEnabledKey = "cc.bili.playback.danmakuEnabled.v1"
     private static let danmakuSettingsKey = "cc.bili.playback.danmakuSettings.v1"
     private static let sponsorBlockEnabledKey = "cc.bili.playback.sponsorBlockEnabled.v1"
     private static let pictureInPictureEnabledKey = "cc.bili.playback.pictureInPictureEnabled.v1"
     private static let playerPerformanceOverlayEnabledKey = "cc.bili.playback.performanceOverlayEnabled.v1"
+    nonisolated static let playerControlEdgeScrimEnabledKey = "cc.bili.playback.controlEdgeScrimEnabled.v1"
     private static let showsVideoDetailNetworkDiagnosticsButtonKey = "cc.bili.videoDetail.showsNetworkDiagnosticsButton.v1"
     private static let showsVideoDetailPinnedProgressBarKey = "cc.bili.videoDetail.showsPinnedProgressBar.v1"
     private static let incognitoModeEnabledKey = "cc.bili.privacy.incognitoModeEnabled.v1"
     private static let guestModeEnabledKey = "cc.bili.privacy.guestModeEnabled.v1"
     private static let minimizesTabBarOnScrollKey = "cc.bili.display.minimizesTabBarOnScroll.v1"
     private static let scrollEdgeEffectPreferenceKey = "cc.bili.display.scrollEdgeEffectPreference.v1"
-    private static let videoCoverOverlayStyleKey = VideoCoverOverlayStyle.storageKey
+    private static let liquidGlassStylePreferenceKey = AppLiquidGlassStylePreference.storageKey
+    private static let remoteImageQualityPreferenceKey = RemoteImageQualityPreference.storageKey
+    private static let videoCoverBadgeShadowOpacityKey = VideoCoverBadgeShadow.storageKey
     private static let force120HzScrollingEnabledKey = RefreshRateManager.isEnabledKey
     private static let visibleRootTabsKey = "cc.bili.display.visibleRootTabs.v1"
     private static let homeRefreshTriggerDistanceKey = "cc.bili.home.refreshTriggerDistance.v1"
@@ -166,6 +188,7 @@ final class LibraryStore: ObservableObject {
     private static let showsHotSearchesKey = "cc.bili.search.showsHotSearches.v1"
     private static let supportedPlaybackRates = [0.75, 1.0, 1.25, 1.5, 2.0]
     nonisolated static let defaultPreferredVideoQuality = 112
+    nonisolated static let defaultCellularPreferredVideoQuality = 64
     nonisolated static let defaultAppTintColorHex = AppThemeTintColor.defaultHex
     nonisolated static let defaultPlaybackStreamSourcePreference: PlaybackStreamSourcePreference = .app
     nonisolated static let defaultHomeRecommendFeedSourcePreference: HomeRecommendFeedSourcePreference = .app
@@ -174,12 +197,19 @@ final class LibraryStore: ObservableObject {
     nonisolated static let defaultPlaybackCDNProbeRefreshIntervalMinutes = 120
     nonisolated static let homeRefreshDistanceRange: ClosedRange<Double> = 70...180
     nonisolated static let defaultHomeRefreshTriggerDistance = 110.0
+    nonisolated static let supportedRecommendMinimumDurations = [0, 30, 60, 90, 120]
+    nonisolated static let supportedRecommendMinimumViews = [0, 50, 100, 500, 1000]
+    nonisolated static let supportedRecommendMinimumLikeRatios = [0, 1, 2, 3, 4]
     private static let temporaryPlaybackCDNAvoidanceDuration: TimeInterval = 10 * 60
     private var playbackCDNProbeSnapshotsByContext: [String: PlaybackCDNProbeSnapshot] = [:]
     private var temporarilyAvoidedPlaybackCDNPreferences: [PlaybackCDNPreference: Date] = [:]
 
     var effectivePlaybackCDNPreference: PlaybackCDNPreference {
         effectivePlaybackCDNPreference(for: playbackCDNPreference)
+    }
+
+    var effectivePreferredVideoQuality: Int? {
+        effectivePreferredVideoQuality(for: PlaybackEnvironment.current.networkClass)
     }
 
     var isPlaybackAutoOptimizationEnabled: Bool {
@@ -256,14 +286,20 @@ final class LibraryStore: ObservableObject {
         } else {
             self.preferredVideoQuality = Self.defaultPreferredVideoQuality
         }
+        if let storedCellularVideoQuality = userDefaults.object(forKey: Self.cellularPreferredVideoQualityKey) as? Int {
+            self.cellularPreferredVideoQuality = storedCellularVideoQuality == 0 ? nil : Self.normalizedVideoQuality(storedCellularVideoQuality)
+        } else {
+            self.cellularPreferredVideoQuality = Self.defaultCellularPreferredVideoQuality
+        }
         self.playbackAutoOptimizationMode = PlaybackAutoOptimizationMode(
             rawValue: userDefaults.string(forKey: Self.playbackAutoOptimizationModeKey) ?? ""
         ) ?? .automatic
         self.playbackStreamSourcePreference = PlaybackStreamSourcePreference(
             rawValue: userDefaults.string(forKey: Self.playbackStreamSourcePreferenceKey) ?? ""
         ) ?? Self.defaultPlaybackStreamSourcePreference
-        self.playerRenderingEnginePreference = PlayerRenderingEnginePreference.stored(in: userDefaults)
         self.videoCodecPreference = VideoCodecPreference.stored(in: userDefaults)
+        self.forceHardwareDecodeEnabled = PlaybackHardwareDecodePolicy.stored(in: userDefaults)
+        self.dolbyVisionRenderingPolicy = DolbyVisionRenderingPolicy.stored(in: userDefaults)
         self.playbackCDNPreference = PlaybackCDNPreference(
             rawValue: userDefaults.string(forKey: Self.playbackCDNPreferenceKey) ?? ""
         ) ?? .automatic
@@ -281,6 +317,7 @@ final class LibraryStore: ObservableObject {
             rawValue: userDefaults.string(forKey: Self.playbackNetworkAddressFamilyPreferenceKey) ?? ""
         ) ?? .automatic
         self.playbackNetworkAddressFamilyPreference = storedAddressFamilyPreference
+        self.prefersBackupAudioURL = PlaybackAudioURLPolicy.stored(in: userDefaults)
         let currentProbeContextKey = Self.playbackCDNProbeContextKey(
             networkClass: PlaybackEnvironment.current.networkClass,
             addressFamilyPreference: storedAddressFamilyPreference
@@ -302,6 +339,22 @@ final class LibraryStore: ObservableObject {
         self.blockedDynamicKeywords = Self.normalizedBlockedDynamicKeywords(
             userDefaults.stringArray(forKey: Self.blockedDynamicKeywordsKey) ?? []
         )
+        self.recommendMinimumDurationSeconds = Self.normalizedRecommendFilterValue(
+            userDefaults.object(forKey: Self.recommendMinimumDurationSecondsKey) as? Int,
+            supportedValues: Self.supportedRecommendMinimumDurations
+        )
+        self.recommendMinimumViewCount = Self.normalizedRecommendFilterValue(
+            userDefaults.object(forKey: Self.recommendMinimumViewCountKey) as? Int,
+            supportedValues: Self.supportedRecommendMinimumViews
+        )
+        self.recommendMinimumLikeRatioPercent = Self.normalizedRecommendFilterValue(
+            userDefaults.object(forKey: Self.recommendMinimumLikeRatioPercentKey) as? Int,
+            supportedValues: Self.supportedRecommendMinimumLikeRatios
+        )
+        self.blockedRecommendKeywords = Self.normalizedBlockedRecommendKeywords(
+            userDefaults.stringArray(forKey: Self.blockedRecommendKeywordsKey) ?? []
+        )
+        self.appliesRecommendFiltersToRelatedVideos = userDefaults.object(forKey: Self.appliesRecommendFiltersToRelatedVideosKey) as? Bool ?? false
         self.danmakuEnabled = userDefaults.object(forKey: Self.danmakuEnabledKey) as? Bool ?? true
         if let settingsData = userDefaults.data(forKey: Self.danmakuSettingsKey),
            let settings = try? JSONDecoder().decode(DanmakuSettings.self, from: settingsData) {
@@ -312,6 +365,7 @@ final class LibraryStore: ObservableObject {
         self.sponsorBlockEnabled = userDefaults.object(forKey: Self.sponsorBlockEnabledKey) as? Bool ?? false
         self.pictureInPictureEnabled = userDefaults.object(forKey: Self.pictureInPictureEnabledKey) as? Bool ?? false
         self.playerPerformanceOverlayEnabled = userDefaults.object(forKey: Self.playerPerformanceOverlayEnabledKey) as? Bool ?? false
+        self.playerControlEdgeScrimEnabled = userDefaults.object(forKey: Self.playerControlEdgeScrimEnabledKey) as? Bool ?? true
         self.showsVideoDetailNetworkDiagnosticsButton = userDefaults.object(forKey: Self.showsVideoDetailNetworkDiagnosticsButtonKey) as? Bool ?? false
         self.showsVideoDetailPinnedProgressBar = userDefaults.object(forKey: Self.showsVideoDetailPinnedProgressBarKey) as? Bool ?? false
         self.incognitoModeEnabled = userDefaults.object(forKey: Self.incognitoModeEnabledKey) as? Bool ?? false
@@ -320,8 +374,13 @@ final class LibraryStore: ObservableObject {
         self.scrollEdgeEffectPreference = AppScrollEdgeEffectPreference(
             rawValue: userDefaults.string(forKey: Self.scrollEdgeEffectPreferenceKey) ?? ""
         ) ?? .soft
-        self.videoCoverOverlayStyle = VideoCoverOverlayStyle.normalized(
-            rawValue: userDefaults.string(forKey: Self.videoCoverOverlayStyleKey)
+        self.liquidGlassStylePreference = AppLiquidGlassStylePreference(
+            storedRawValue: userDefaults.string(forKey: Self.liquidGlassStylePreferenceKey)
+        )
+        self.remoteImageQualityPreference = RemoteImageQualityPreference.stored(in: userDefaults)
+        self.videoCoverBadgeShadowOpacity = VideoCoverBadgeShadow.normalized(
+            userDefaults.object(forKey: Self.videoCoverBadgeShadowOpacityKey) as? Double
+                ?? VideoCoverBadgeShadow.defaultOpacity
         )
         self.force120HzScrollingEnabled = userDefaults.object(forKey: Self.force120HzScrollingEnabledKey) as? Bool ?? false
         self.visibleRootTabs = Self.normalizedVisibleRootTabs(
@@ -377,6 +436,16 @@ final class LibraryStore: ObservableObject {
         }
     }
 
+    func setCellularPreferredVideoQuality(_ quality: Int?) {
+        let normalizedQuality = Self.normalizedVideoQuality(quality)
+        cellularPreferredVideoQuality = normalizedQuality
+        if let normalizedQuality {
+            userDefaults.set(normalizedQuality, forKey: Self.cellularPreferredVideoQualityKey)
+        } else {
+            userDefaults.set(0, forKey: Self.cellularPreferredVideoQualityKey)
+        }
+    }
+
     func setPlaybackAutoOptimizationMode(_ mode: PlaybackAutoOptimizationMode) {
         playbackAutoOptimizationMode = mode
         userDefaults.set(mode.rawValue, forKey: Self.playbackAutoOptimizationModeKey)
@@ -387,17 +456,21 @@ final class LibraryStore: ObservableObject {
         userDefaults.set(preference.rawValue, forKey: Self.playbackStreamSourcePreferenceKey)
     }
 
-    func setPlayerRenderingEnginePreference(_ preference: PlayerRenderingEnginePreference) {
-        let normalizedPreference = preference.normalizedForFormalPlayback
-        playerRenderingEnginePreference = normalizedPreference
-        userDefaults.set(normalizedPreference.rawValue, forKey: Self.playerRenderingEnginePreferenceKey)
+    func setVideoCodecPreference(_ preference: VideoCodecPreference) {
+        videoCodecPreference = preference
+        userDefaults.set(preference.rawValue, forKey: Self.videoCodecPreferenceKey)
         PlayerSettings.shared.reload()
     }
 
-    func setVideoCodecPreference(_ preference: VideoCodecPreference) {
-        let normalizedPreference = preference.normalizedForPlayback
-        videoCodecPreference = normalizedPreference
-        userDefaults.set(normalizedPreference.rawValue, forKey: Self.videoCodecPreferenceKey)
+    func setForceHardwareDecodeEnabled(_ isEnabled: Bool) {
+        forceHardwareDecodeEnabled = isEnabled
+        userDefaults.set(isEnabled, forKey: Self.forceHardwareDecodeKey)
+        PlayerSettings.shared.reload()
+    }
+
+    func setDolbyVisionRenderingPolicy(_ policy: DolbyVisionRenderingPolicy) {
+        dolbyVisionRenderingPolicy = policy
+        userDefaults.set(policy.rawValue, forKey: Self.dolbyVisionRenderingPolicyKey)
         PlayerSettings.shared.reload()
     }
 
@@ -441,6 +514,32 @@ final class LibraryStore: ObservableObject {
         userDefaults.set(preference.rawValue, forKey: Self.playbackNetworkAddressFamilyPreferenceKey)
         clearTemporaryPlaybackCDNAvoidance()
         clearPlaybackCDNProbeSnapshots()
+    }
+
+    func setPrefersBackupAudioURL(_ isEnabled: Bool) {
+        prefersBackupAudioURL = isEnabled
+        userDefaults.set(isEnabled, forKey: Self.prefersBackupAudioURLKey)
+    }
+
+    func effectivePreferredVideoQuality(for networkClass: PlaybackEnvironment.NetworkClass) -> Int? {
+        Self.effectivePreferredVideoQuality(
+            preferred: preferredVideoQuality,
+            cellular: cellularPreferredVideoQuality,
+            networkClass: networkClass
+        )
+    }
+
+    nonisolated static func effectivePreferredVideoQuality(
+        preferred: Int?,
+        cellular: Int?,
+        networkClass: PlaybackEnvironment.NetworkClass
+    ) -> Int? {
+        switch networkClass {
+        case .cellular, .constrained:
+            return cellular ?? preferred
+        case .wifi, .unknown:
+            return preferred
+        }
     }
 
     func effectivePlaybackCDNPreference(for preference: PlaybackCDNPreference) -> PlaybackCDNPreference {
@@ -593,6 +692,70 @@ final class LibraryStore: ObservableObject {
         persistBlockedDynamicKeywords()
     }
 
+    func setRecommendMinimumDurationSeconds(_ seconds: Int) {
+        recommendMinimumDurationSeconds = Self.normalizedRecommendFilterValue(
+            seconds,
+            supportedValues: Self.supportedRecommendMinimumDurations
+        )
+        userDefaults.set(recommendMinimumDurationSeconds, forKey: Self.recommendMinimumDurationSecondsKey)
+    }
+
+    func setRecommendMinimumViewCount(_ count: Int) {
+        recommendMinimumViewCount = Self.normalizedRecommendFilterValue(
+            count,
+            supportedValues: Self.supportedRecommendMinimumViews
+        )
+        userDefaults.set(recommendMinimumViewCount, forKey: Self.recommendMinimumViewCountKey)
+    }
+
+    func setRecommendMinimumLikeRatioPercent(_ percent: Int) {
+        recommendMinimumLikeRatioPercent = Self.normalizedRecommendFilterValue(
+            percent,
+            supportedValues: Self.supportedRecommendMinimumLikeRatios
+        )
+        userDefaults.set(recommendMinimumLikeRatioPercent, forKey: Self.recommendMinimumLikeRatioPercentKey)
+    }
+
+    func setAppliesRecommendFiltersToRelatedVideos(_ isEnabled: Bool) {
+        appliesRecommendFiltersToRelatedVideos = isEnabled
+        userDefaults.set(isEnabled, forKey: Self.appliesRecommendFiltersToRelatedVideosKey)
+    }
+
+    func setBlockedRecommendKeywords(_ keywords: [String]) {
+        blockedRecommendKeywords = Self.normalizedBlockedRecommendKeywords(keywords)
+        persistBlockedRecommendKeywords()
+    }
+
+    func addBlockedRecommendKeyword(_ keyword: String) {
+        let normalizedKeyword = Self.normalizedBlockedRecommendKeyword(keyword)
+        guard !normalizedKeyword.isEmpty else { return }
+        guard !blockedRecommendKeywords.contains(where: { Self.blockedRecommendKeywordKey($0) == Self.blockedRecommendKeywordKey(normalizedKeyword) }) else {
+            return
+        }
+        blockedRecommendKeywords.append(normalizedKeyword)
+        persistBlockedRecommendKeywords()
+    }
+
+    func removeBlockedRecommendKeyword(_ keyword: String) {
+        let keywordKey = Self.blockedRecommendKeywordKey(keyword)
+        let updated = blockedRecommendKeywords.filter { Self.blockedRecommendKeywordKey($0) != keywordKey }
+        guard updated.count != blockedRecommendKeywords.count else { return }
+        blockedRecommendKeywords = updated
+        persistBlockedRecommendKeywords()
+    }
+
+    func removeBlockedRecommendKeywords(at offsets: IndexSet) {
+        guard !offsets.isEmpty else { return }
+        blockedRecommendKeywords.remove(atOffsets: offsets)
+        persistBlockedRecommendKeywords()
+    }
+
+    func clearBlockedRecommendKeywords() {
+        guard !blockedRecommendKeywords.isEmpty else { return }
+        blockedRecommendKeywords = []
+        persistBlockedRecommendKeywords()
+    }
+
     func setDanmakuEnabled(_ isEnabled: Bool) {
         danmakuEnabled = isEnabled
         userDefaults.set(isEnabled, forKey: Self.danmakuEnabledKey)
@@ -618,6 +781,11 @@ final class LibraryStore: ObservableObject {
     func setPlayerPerformanceOverlayEnabled(_ isEnabled: Bool) {
         playerPerformanceOverlayEnabled = isEnabled
         userDefaults.set(isEnabled, forKey: Self.playerPerformanceOverlayEnabledKey)
+    }
+
+    func setPlayerControlEdgeScrimEnabled(_ isEnabled: Bool) {
+        playerControlEdgeScrimEnabled = isEnabled
+        userDefaults.set(isEnabled, forKey: Self.playerControlEdgeScrimEnabledKey)
     }
 
     func setShowsVideoDetailNetworkDiagnosticsButton(_ isEnabled: Bool) {
@@ -650,9 +818,20 @@ final class LibraryStore: ObservableObject {
         userDefaults.set(preference.rawValue, forKey: Self.scrollEdgeEffectPreferenceKey)
     }
 
-    func setVideoCoverOverlayStyle(_ style: VideoCoverOverlayStyle) {
-        videoCoverOverlayStyle = style
-        userDefaults.set(style.rawValue, forKey: Self.videoCoverOverlayStyleKey)
+    func setLiquidGlassStylePreference(_ preference: AppLiquidGlassStylePreference) {
+        liquidGlassStylePreference = preference
+        userDefaults.set(preference.rawValue, forKey: Self.liquidGlassStylePreferenceKey)
+    }
+
+    func setRemoteImageQualityPreference(_ preference: RemoteImageQualityPreference) {
+        remoteImageQualityPreference = preference
+        userDefaults.set(preference.rawValue, forKey: Self.remoteImageQualityPreferenceKey)
+    }
+
+    func setVideoCoverBadgeShadowOpacity(_ opacity: Double) {
+        let normalizedOpacity = VideoCoverBadgeShadow.normalized(opacity)
+        videoCoverBadgeShadowOpacity = normalizedOpacity
+        userDefaults.set(normalizedOpacity, forKey: Self.videoCoverBadgeShadowOpacityKey)
     }
 
     func setForce120HzScrollingEnabled(_ isEnabled: Bool) {
@@ -742,6 +921,14 @@ final class LibraryStore: ObservableObject {
         userDefaults.set(blockedDynamicKeywords, forKey: Self.blockedDynamicKeywordsKey)
     }
 
+    private func persistBlockedRecommendKeywords() {
+        guard !blockedRecommendKeywords.isEmpty else {
+            userDefaults.removeObject(forKey: Self.blockedRecommendKeywordsKey)
+            return
+        }
+        userDefaults.set(blockedRecommendKeywords, forKey: Self.blockedRecommendKeywordsKey)
+    }
+
     private static func normalizedBlockedDynamicKeywords(_ keywords: [String]) -> [String] {
         var seen = Set<String>()
         return keywords.compactMap { keyword in
@@ -762,6 +949,35 @@ final class LibraryStore: ObservableObject {
             options: [.caseInsensitive, .diacriticInsensitive, .widthInsensitive],
             locale: .current
         )
+    }
+
+    private static func normalizedBlockedRecommendKeywords(_ keywords: [String]) -> [String] {
+        var seen = Set<String>()
+        return keywords.compactMap { keyword in
+            let normalized = normalizedBlockedRecommendKeyword(keyword)
+            guard !normalized.isEmpty else { return nil }
+            let key = blockedRecommendKeywordKey(normalized)
+            guard seen.insert(key).inserted else { return nil }
+            return normalized
+        }
+    }
+
+    private static func normalizedBlockedRecommendKeyword(_ keyword: String) -> String {
+        keyword.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private static func blockedRecommendKeywordKey(_ keyword: String) -> String {
+        normalizedBlockedRecommendKeyword(keyword).folding(
+            options: [.caseInsensitive, .diacriticInsensitive, .widthInsensitive],
+            locale: .current
+        )
+    }
+
+    private static func normalizedRecommendFilterValue(_ value: Int?, supportedValues: [Int]) -> Int {
+        guard let value, supportedValues.contains(value) else {
+            return supportedValues.first ?? 0
+        }
+        return value
     }
 }
 

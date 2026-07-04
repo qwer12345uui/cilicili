@@ -8,7 +8,7 @@ extension VideoDetailViewModel {
               !variant.isProgressiveFastStart
         else { return }
         let canWarmAfterFirstFrame = playbackAdaptationProfile.shouldWarmSupplementalVariants
-            || libraryStore.preferredVideoQuality != nil
+            || libraryStore.effectivePreferredVideoQuality != nil
         guard canWarmAfterFirstFrame else { return }
         let bvid = detail.bvid
         let variantID = variant.id

@@ -1,3 +1,4 @@
+import AVFoundation
 import Foundation
 
 enum HLSBridgeRemoteFailureCategory: String, Sendable {
@@ -39,10 +40,11 @@ struct HLSBridgeFailureReason: Sendable, Equatable {
 
     var allowsSameSourceRecovery: Bool {
         switch category {
-        case .authDenied, .urlExpired, .rangeUnsupported, .rateLimited, .cancelled:
+        case .authDenied, .urlExpired, .rangeUnsupported, .rateLimited,
+             .codecUnsupported, .hardwareDecodeRejected, .decoderFailed,
+             .cancelled:
             return false
         case .serverUnavailable, .timeout, .network, .invalidResponse,
-             .codecUnsupported, .hardwareDecodeRejected, .decoderFailed,
              .terminalStall, .unknown:
             return true
         }
@@ -102,6 +104,8 @@ struct HLSBridgeFailureReason: Sendable, Equatable {
         }
     }
 }
+
+typealias HLSRemoteFailureHandler = @MainActor @Sendable (HLSBridgeFailureReason) -> Void
 
 struct HLSBridgeRemoteFailure: LocalizedError, Sendable {
     let category: HLSBridgeRemoteFailureCategory
@@ -200,6 +204,9 @@ struct HLSBridgeRemoteFailure: LocalizedError, Sendable {
         if let failure = error as? HLSBridgeRemoteFailure {
             return failure.reason
         }
+        if let reason = reasonForAVFoundationError(error) {
+            return reason
+        }
         if let streamError = error as? HLSRangeStreamError {
             switch streamError {
             case let .responseAlreadyStarted(underlying):
@@ -266,7 +273,7 @@ struct HLSBridgeRemoteFailure: LocalizedError, Sendable {
 
     static func reason(forHTTPStatus statusCode: Int) -> HLSBridgeFailureReason? {
         switch statusCode {
-        case 401, 403, 404, 410, 416, 429, 500...599:
+        case 401, 403, 404, 410, 412, 416, 429, 500...599:
             return HLSBridgeFailureReason(
                 layer: .remoteRange,
                 category: category(forHTTPStatus: statusCode),
@@ -280,11 +287,39 @@ struct HLSBridgeRemoteFailure: LocalizedError, Sendable {
         }
     }
 
+    private static func reasonForAVFoundationError(_ error: Error) -> HLSBridgeFailureReason? {
+        let nsError = error as NSError
+        guard nsError.domain == AVFoundationErrorDomain else { return nil }
+        let category: HLSBridgeRemoteFailureCategory
+        switch nsError.code {
+        case AVError.Code.decoderNotFound.rawValue,
+             AVError.Code.decoderTemporarilyUnavailable.rawValue:
+            category = .decoderFailed
+        case AVError.Code.fileFormatNotRecognized.rawValue,
+             AVError.Code.unsupportedOutputSettings.rawValue:
+            category = .codecUnsupported
+        case AVError.Code.contentIsNotAuthorized.rawValue:
+            category = .authDenied
+        case AVError.Code.contentIsUnavailable.rawValue:
+            category = .invalidResponse
+        default:
+            return nil
+        }
+        return HLSBridgeFailureReason(
+            layer: .avPlayerItem,
+            category: category,
+            statusCode: nil,
+            urlHost: nil,
+            rangeDescription: nil,
+            underlyingDescription: nsError.localizedDescription
+        )
+    }
+
     private static func category(forHTTPStatus statusCode: Int) -> HLSBridgeRemoteFailureCategory {
         switch statusCode {
         case 401, 403:
             return .authDenied
-        case 404, 410:
+        case 404, 410, 412:
             return .urlExpired
         case 416:
             return .rangeUnsupported
@@ -333,7 +368,7 @@ struct HLSBridgeRemoteFailure: LocalizedError, Sendable {
         case .invalidResponse:
             return "CDN 返回异常数据，正在切换线路"
         case .codecUnsupported, .hardwareDecodeRejected, .decoderFailed:
-            return "当前视频流暂不支持 AVPlayer 解码，正在切换播放器"
+            return "当前视频流暂不支持 AVPlayer 解码，正在切换兼容格式"
         case .terminalStall:
             return "播放长时间无进展，正在切换播放器"
         case .cancelled:

@@ -12,6 +12,7 @@ enum VideoDetailPlaybackRecoveryIgnoreReason: String, Sendable, Equatable {
     case staleVariant
     case duplicateFailure
     case cancelled
+    case playURLReloadInFlight
 }
 
 enum VideoDetailPlaybackRecoveryAction: Sendable, Equatable {
@@ -81,7 +82,12 @@ struct VideoDetailPlaybackRecoveryCoordinator: Sendable, Equatable {
         let shouldRefreshCDN = Self.shouldRefreshCDN(for: input.reason)
         let canReloadPlayURL = input.recoveryAttemptCount < input.maxRecoveryReloadAttempts
             && !input.playURLIsLoading
+        let shouldReloadPlayURL = Self.prefersPlayURLReload(message: input.message, reason: input.reason)
+            || Self.requiresPlayURLReload(input.reason)
 
+        if shouldReloadPlayURL, input.playURLIsLoading {
+            return ignored(.playURLReloadInFlight)
+        }
         if Self.prefersPlayURLReload(message: input.message, reason: input.reason), canReloadPlayURL {
             return handled(.reloadPlayURL, shouldRefreshCDN: shouldRefreshCDN)
         }

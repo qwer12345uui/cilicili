@@ -24,7 +24,7 @@ struct PlayerNativeControlMetrics: Equatable {
         groupSpacing: 5,
         controlSpacing: 4,
         sliderHorizontalPadding: 8,
-        timeLabelWidth: 62,
+        timeLabelWidth: 104,
         qualityButtonMaxWidth: 68,
         qualityHorizontalPadding: 6
     )

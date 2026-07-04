@@ -41,6 +41,7 @@ enum VideoDetailPlaybackQualityMenuBuilder {
             return VideoDetailPlaybackQualityMenuItem(
                 variant: variant,
                 title: variant.qualityMenuTitle,
+                subtitle: routeSubtitle(for: variant, selectedPlayVariant: selectedPlayVariant),
                 systemImage: systemImage,
                 isDisabled: !variant.isPlayable || isSwitchingPlayQuality
             )
@@ -65,5 +66,39 @@ enum VideoDetailPlaybackQualityMenuBuilder {
         guard let pendingPlayVariantID else { return false }
         if pendingPlayVariantID == menuVariant.id { return true }
         return playVariants.first { $0.id == pendingPlayVariantID }?.quality == menuVariant.quality
+    }
+
+    private static func routeSubtitle(
+        for menuVariant: PlayVariant,
+        selectedPlayVariant: PlayVariant?
+    ) -> String? {
+        let isSelectedQuality = selectedPlayVariant?.quality == menuVariant.quality
+        let routeVariant = isSelectedQuality ? (selectedPlayVariant ?? menuVariant) : menuVariant
+        let isFallbackRoute = isSelectedQuality && selectedPlayVariant?.id != menuVariant.id
+        return routeSubtitle(for: routeVariant, isFallbackRoute: isFallbackRoute)
+    }
+
+    private static func routeSubtitle(
+        for variant: PlayVariant,
+        isFallbackRoute: Bool
+    ) -> String? {
+        guard variant.isPlayable else { return nil }
+        if variant.isProgressiveFastStart {
+            return isFallbackRoute ? "单流兜底" : "单流"
+        }
+        guard let videoStream = variant.videoStream else { return "DASH" }
+        if !videoStream.isHardwareDecodingCompatibleVideo {
+            return isFallbackRoute ? "软解兜底" : "软解 DASH"
+        }
+        switch videoStream.videoCodecFamily {
+        case .h264:
+            return isFallbackRoute ? "H.264 兜底" : "H.264 DASH"
+        case .hevc:
+            return isFallbackRoute ? "HEVC 兜底" : "硬解 DASH"
+        case .av1:
+            return isFallbackRoute ? "AV1 兜底" : "AV1 DASH"
+        case .unknown:
+            return isFallbackRoute ? "编码兜底" : "硬解 DASH"
+        }
     }
 }

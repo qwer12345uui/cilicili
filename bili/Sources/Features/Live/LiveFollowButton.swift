@@ -8,12 +8,12 @@ struct LiveFollowButton: View {
             LiveFollowButtonContent(viewModel: viewModel, isFollowing: true)
                 .buttonBorderShape(.capsule)
                 .controlSize(.mini)
-                .buttonStyle(.glass)
+                .biliGlassButtonStyle()
         } else {
             LiveFollowButtonContent(viewModel: viewModel, isFollowing: false)
                 .buttonBorderShape(.capsule)
                 .controlSize(.mini)
-                .buttonStyle(.glassProminent)
+                .biliGlassButtonStyle(prominent: true)
         }
     }
 }

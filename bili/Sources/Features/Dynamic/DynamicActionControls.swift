@@ -71,7 +71,7 @@ struct DynamicActionFeedbackToast: View {
             .lineLimit(1)
             .padding(.horizontal, 12)
             .frame(height: 32)
-            .glassEffect(.regular.tint(.white.opacity(0.18)).interactive(false), in: Capsule())
+            .biliGlassEffect(tint: .white.opacity(0.18), interactive: false, in: Capsule())
             .shadow(color: .black.opacity(0.10), radius: 10, y: 4)
             .accessibilityLabel(message)
     }

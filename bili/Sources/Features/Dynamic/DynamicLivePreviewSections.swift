@@ -33,7 +33,7 @@ struct DynamicLiveCover: View {
                         .foregroundStyle(.primary)
                         .padding(.horizontal, 10)
                         .padding(.vertical, 6)
-                        .glassEffect(.regular, in: Capsule())
+                        .biliRegularGlassEffect(in: Capsule())
                         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
                 }
 
@@ -42,7 +42,7 @@ struct DynamicLiveCover: View {
                     .foregroundStyle(.primary)
                     .padding(.horizontal, 6)
                     .padding(.vertical, 3)
-                    .glassEffect(.regular, in: Capsule())
+                    .biliRegularGlassEffect(in: Capsule())
                     .padding(8)
             }
         }

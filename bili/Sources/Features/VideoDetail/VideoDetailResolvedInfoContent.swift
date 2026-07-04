@@ -11,11 +11,13 @@ struct VideoDetailResolvedInfoContent: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             VideoDetailInfoTitleText(text: presentation.titleText, isExpanded: isExpanded)
+                .commentCopyContextMenu(text: store.titleText, title: "复制标题")
 
             VideoDetailInfoMetadataRow(
                 metadataText: presentation.metadataText,
                 hasDescriptionContent: presentation.hasDescriptionContent,
                 isExpanded: isExpanded,
+                descriptionCopyText: presentation.hasDescriptionContent && !isExpanded ? presentation.descriptionText : nil,
                 toggleExpansion: toggleExpansion
             )
 

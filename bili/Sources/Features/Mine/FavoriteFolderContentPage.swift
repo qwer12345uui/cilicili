@@ -52,13 +52,26 @@ struct FavoriteFolderContentPage: View {
                 VideoRouteLink(item.videoItem) {
                     LibraryVideoRow(item: item, timestampTitle: "收藏时间")
                 }
+                .task {
+                    await viewModel.loadMoreFavoriteFolderIfNeeded(folder, current: item)
+                }
             }
 
             if state.isLoading {
                 LibraryLoadingRow(title: "正在同步收藏夹")
+            } else if loadMoreState.isLoading {
+                LibraryLoadingRow(title: "正在加载更多收藏")
             } else if case .failed(let message) = state {
                 LibraryErrorRow(title: "收藏夹同步失败", message: message) {
                     Task { await reload() }
+                }
+            } else if case .failed(let message) = loadMoreState {
+                LibraryErrorRow(title: "更多收藏加载失败", message: message) {
+                    Task { await viewModel.loadMoreFavoriteFolder(folder) }
+                }
+            } else if hasMore {
+                LibraryLoadMoreTriggerRow(title: "正在加载更多收藏") {
+                    Task { await viewModel.loadMoreFavoriteFolder(folder) }
                 }
             }
         }
@@ -70,6 +83,14 @@ struct FavoriteFolderContentPage: View {
 
     private var state: LoadingState {
         viewModel.favoriteFolderEntryStates[folder.id] ?? .idle
+    }
+
+    private var loadMoreState: LoadingState {
+        viewModel.favoriteFolderLoadMoreStates[folder.id] ?? .idle
+    }
+
+    private var hasMore: Bool {
+        viewModel.favoriteFolderHasMore[folder.id] == true
     }
 
     private func loadIfNeeded() async {

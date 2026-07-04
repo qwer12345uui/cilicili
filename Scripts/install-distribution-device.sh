@@ -20,5 +20,7 @@ if [[ ! -d "$APP_PATH" ]]; then
   exit 1
 fi
 
+zsh "$ROOT_DIR/Scripts/remove-empty-frameworks.sh" "$APP_PATH"
+
 echo "Installing to device: $DEVICE"
 xcrun devicectl device install app --device "$DEVICE" "$APP_PATH"

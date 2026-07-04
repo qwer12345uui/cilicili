@@ -136,7 +136,7 @@ final class DynamicFeedResourcePrefetchCoordinator {
             return
         }
 
-        let preferredQuality = libraryStore.preferredVideoQuality
+        let preferredQuality = libraryStore.effectivePreferredVideoQuality
         let cdnPreference = libraryStore.effectivePlaybackCDNPreference
         playbackPreloadTask = Task(priority: .background) { [api, cdnPreference] in
             if initialDelay > 0 {

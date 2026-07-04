@@ -1,5 +1,6 @@
 import Combine
 import Foundation
+import OSLog
 import UIKit
 
 struct PlayerPlaybackProgressContext {
@@ -14,6 +15,7 @@ struct PlayerPlaybackProgressContext {
 
 @MainActor
 final class PlayerPlaybackProgressCoordinator: ObservableObject {
+    private let logger = Logger(subsystem: "cc.bili", category: "PlaybackProgress")
     private var backgroundTaskID: UIBackgroundTaskIdentifier = .invalid
     private var progressSaveTask: Task<Void, Never>?
     private var backgroundTaskEndTask: Task<Void, Never>?
@@ -25,8 +27,13 @@ final class PlayerPlaybackProgressCoordinator: ObservableObject {
     ) {
         guard !context.libraryStore.incognitoModeEnabled else { return }
         guard time.isFinite, time >= 5 else { return }
-        guard let historyVideo = context.historyVideo,
-              let aid = historyVideo.aid else { return }
+        guard let historyVideo = context.historyVideo else { return }
+        let bvid = historyVideo.bvid.trimmingCharacters(in: .whitespacesAndNewlines)
+        let aid = historyVideo.aid
+        guard aid != nil || !bvid.isEmpty else {
+            logger.error("progressReport skipped missing video identity time=\(Int(time), privacy: .public)")
+            return
+        }
         let duration = context.historyDuration ?? context.durationHint ?? context.playerDuration
         HomeRecommendFeedbackCenter.shared.recordPlayProgress(
             video: historyVideo,
@@ -35,12 +42,19 @@ final class PlayerPlaybackProgressCoordinator: ObservableObject {
         )
         progressSaveTask?.cancel()
         progressSaveTask = Task {
-            try? await context.dependencies.api.reportVideoHistory(
-                aid: aid,
-                cid: context.historyCID ?? historyVideo.cid,
-                progress: time,
-                duration: duration
-            )
+            do {
+                try await context.dependencies.api.reportVideoHistory(
+                    aid: aid,
+                    cid: context.historyCID ?? historyVideo.cid,
+                    progress: time,
+                    duration: duration,
+                    bvid: bvid
+                )
+            } catch is CancellationError {
+                return
+            } catch {
+                logger.error("progressReport failed aid=\(aid ?? 0, privacy: .public) time=\(Int(time), privacy: .public) error=\(error.localizedDescription, privacy: .public)")
+            }
         }
     }
 

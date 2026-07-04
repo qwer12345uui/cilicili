@@ -26,6 +26,9 @@ struct RootVideoNavigationHost: View {
                     )
                     .id(video.id)
                 }
+                .navigationDestination(for: PgcSeasonRoute.self) { route in
+                    PgcSeasonView(route: route)
+                }
                 .navigationDestination(for: VideoOwner.self) { owner in
                     UploaderView(owner: owner)
                 }

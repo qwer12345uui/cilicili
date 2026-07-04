@@ -9,22 +9,7 @@ final class DashStreamDispatcherTests: XCTestCase {
 
         let selected = CoreVideoPlayerManager.selectBestStream(
             from: [h264, hevc, av1],
-            preference: .auto,
-            kernel: .ksPlayer
-        )
-
-        XCTAssertEqual(selected?.codecs, hevc.codecs)
-    }
-
-    func testAutoPrefersHEVCWhenAVPlayerKernelIsRequested() {
-        let h264 = stream(codecs: "avc1.64002a", bandwidth: 8_000)
-        let hevc = stream(codecs: "hev1.1.6.L120.90", bandwidth: 12_000)
-        let av1 = stream(codecs: "av01.0.08M.08", bandwidth: 6_000)
-
-        let selected = CoreVideoPlayerManager.selectBestStream(
-            from: [h264, hevc, av1],
-            preference: .auto,
-            kernel: .avPlayer
+            preference: .auto
         )
 
         XCTAssertEqual(selected?.codecs, hevc.codecs)
@@ -40,8 +25,7 @@ final class DashStreamDispatcherTests: XCTestCase {
         )
 
         XCTAssertNil(selected)
-        XCTAssertEqual(VideoCodecPreference.forceAV1.normalizedForPlayback, .auto)
-        XCTAssertEqual(CoreVideoPlayerManager.selectBestStream(from: [h264, av1], preference: .forceAV1)?.codecs, h264.codecs)
+        XCTAssertEqual(CoreVideoPlayerManager.selectBestStream(from: [h264, av1], preference: .auto)?.codecs, h264.codecs)
     }
 
     func testForceHEVCRejectsOtherCodecs() {
@@ -54,6 +38,30 @@ final class DashStreamDispatcherTests: XCTestCase {
         )
 
         XCTAssertNil(selected)
+    }
+
+    func testDolbyVisionCodecIsTreatedAsHEVCFamily() {
+        let h264 = stream(codecs: "avc1.64002a", bandwidth: 10_000)
+        let dolby = stream(codecs: "dvh1.08.06", bandwidth: 8_000)
+
+        XCTAssertEqual(dolby.videoCodecFamily, .hevc)
+        XCTAssertTrue(dolby.isHEVCVideoCodec)
+        XCTAssertTrue(dolby.isDolbyVisionVideoCodec)
+        XCTAssertEqual(dolby.codecLabel, "Dolby Vision")
+        XCTAssertEqual(
+            CoreVideoPlayerManager.selectBestStream(from: [h264, dolby], preference: .forceHEVC)?.codecs,
+            dolby.codecs
+        )
+    }
+
+    func testAutoPrefersPlainHEVCOverDolbyVisionWithinSameQuality() {
+        let hevc = stream(codecs: "hvc1.2.4.L150.B0", bandwidth: 14_000)
+        let dolby = stream(codecs: "dvh1.08.06", bandwidth: 8_000)
+
+        XCTAssertEqual(
+            CoreVideoPlayerManager.selectBestStream(from: [hevc, dolby], preference: .auto)?.codecs,
+            hevc.codecs
+        )
     }
 
     func testForceH264RejectsOtherCodecs() {

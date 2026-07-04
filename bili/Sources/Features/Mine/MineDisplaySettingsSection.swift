@@ -20,20 +20,63 @@ struct MineDisplaySettingsSection: View {
             MineThemeColorControl(libraryStore: libraryStore)
 
             Picker(selection: Binding(
-                get: { libraryStore.videoCoverOverlayStyle },
-                set: { libraryStore.setVideoCoverOverlayStyle($0) }
+                get: { libraryStore.liquidGlassStylePreference },
+                set: { libraryStore.setLiquidGlassStylePreference($0) }
             )) {
-                ForEach(VideoCoverOverlayStyle.allCases) { style in
-                    VStack(alignment: .leading) {
-                        Text(style.title)
-                        Text(style.subtitle)
-                    }
-                    .tag(style)
+                ForEach(AppLiquidGlassStylePreference.allCases) { preference in
+                    Text(preference.title).tag(preference)
                 }
             } label: {
-                Label("视频封面遮罩", systemImage: "rectangle.on.rectangle")
+                VStack(alignment: .leading, spacing: 4) {
+                    Label("液态玻璃", systemImage: "sparkles")
+
+                    Text(libraryStore.liquidGlassStylePreference.detail)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
             }
             .pickerStyle(.navigationLink)
+
+            Picker(selection: Binding(
+                get: { libraryStore.remoteImageQualityPreference },
+                set: { libraryStore.setRemoteImageQualityPreference($0) }
+            )) {
+                ForEach(RemoteImageQualityPreference.allCases) { preference in
+                    Text(preference.title).tag(preference)
+                }
+            } label: {
+                VStack(alignment: .leading, spacing: 4) {
+                    Label("图片质量", systemImage: "photo")
+
+                    Text(libraryStore.remoteImageQualityPreference.detail)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            .pickerStyle(.navigationLink)
+
+            MineImageCacheControl()
+
+            VStack(alignment: .leading, spacing: 10) {
+                HStack {
+                    Label("封面角标阴影", systemImage: "textformat")
+                    Spacer(minLength: 8)
+                    Text(videoCoverBadgeShadowOpacityTitle)
+                        .font(.caption.monospacedDigit())
+                        .foregroundStyle(.secondary)
+                }
+
+                Slider(
+                    value: Binding(
+                        get: { libraryStore.videoCoverBadgeShadowOpacity },
+                        set: { libraryStore.setVideoCoverBadgeShadowOpacity($0) }
+                    ),
+                    in: VideoCoverBadgeShadow.opacityRange,
+                    step: 0.05
+                )
+            }
 
             Toggle(isOn: Binding(
                 get: { libraryStore.minimizesTabBarOnScroll },
@@ -68,6 +111,10 @@ struct MineDisplaySettingsSection: View {
                 }
             }
         }
+    }
+
+    private var videoCoverBadgeShadowOpacityTitle: String {
+        "\(Int((libraryStore.videoCoverBadgeShadowOpacity * 100).rounded()))%"
     }
 }
 
@@ -217,6 +264,73 @@ private struct MineThemeColorControl: View {
                 Circle()
                     .stroke(Color(.separator).opacity(0.30), lineWidth: 0.8)
             }
+    }
+}
+
+private struct MineImageCacheControl: View {
+    @State private var statistics: RemoteImageCacheStatistics?
+    @State private var isWorking = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(alignment: .firstTextBaseline) {
+                Label("图片缓存", systemImage: "photo.on.rectangle")
+
+                Spacer(minLength: 8)
+
+                if isWorking {
+                    ProgressView()
+                        .controlSize(.small)
+                } else {
+                    Text(summaryTitle)
+                        .font(.caption.monospacedDigit())
+                        .foregroundStyle(.secondary)
+                }
+            }
+
+            Text(summaryDetail)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            Button(role: .destructive) {
+                Task {
+                    await clearImageCache()
+                }
+            } label: {
+                Label("清理图片缓存", systemImage: "trash")
+            }
+            .buttonStyle(.borderless)
+            .disabled(isWorking)
+        }
+        .task {
+            await reload()
+        }
+    }
+
+    private var summaryTitle: String {
+        guard let statistics else { return "读取中" }
+        return ResourceCacheByteFormatter.bytes(statistics.diskUsage)
+    }
+
+    private var summaryDetail: String {
+        guard let statistics else {
+            return "正在读取内存和磁盘图片缓存。"
+        }
+        return "\(statistics.memoryEntryCount) 张 · 磁盘 \(ResourceCacheByteFormatter.bytes(statistics.diskUsage)) / \(ResourceCacheByteFormatter.bytes(statistics.diskCapacity))"
+    }
+
+    @MainActor
+    private func reload() async {
+        statistics = await RemoteImageCache.shared.statistics()
+    }
+
+    @MainActor
+    private func clearImageCache() async {
+        isWorking = true
+        await ResourceCacheCenter.clearImages(includeDisk: true)
+        await reload()
+        isWorking = false
     }
 }
 

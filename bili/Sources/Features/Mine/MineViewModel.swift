@@ -8,6 +8,12 @@ final class MineViewModel: ObservableObject {
     @Published var qrLoginState: QRCodeLoginState = .idle
     @Published var historyState: LoadingState = .idle
     @Published var favoriteState: LoadingState = .idle
+    @Published private(set) var historyLoadMoreState: LoadingState = .idle {
+        didSet { accountLibraryRevision &+= 1 }
+    }
+    @Published private(set) var historyHasMore = false {
+        didSet { accountLibraryRevision &+= 1 }
+    }
     @Published var accountHistory: [AccountVideoEntry] = [] {
         didSet { accountLibraryRevision &+= 1 }
     }
@@ -23,12 +29,21 @@ final class MineViewModel: ObservableObject {
     @Published var favoriteFolderEntryStates: [Int: LoadingState] = [:] {
         didSet { favoriteFolderRevision &+= 1 }
     }
+    @Published private(set) var favoriteFolderLoadMoreStates: [Int: LoadingState] = [:] {
+        didSet { favoriteFolderRevision &+= 1 }
+    }
+    @Published private(set) var favoriteFolderHasMore: [Int: Bool] = [:] {
+        didSet { favoriteFolderRevision &+= 1 }
+    }
     @Published private(set) var accountLibraryRevision = 0
     @Published private(set) var favoriteFolderRevision = 0
 
     private let api: BiliAPIClient
     private let sessionStore: SessionStore
     private var qrLoginTask: Task<Void, Never>?
+    private let accountLibraryPageSize = 20
+    private var historyCursor: AccountHistoryCursor?
+    private var favoriteFolderPages: [Int: Int] = [:]
 
     init(api: BiliAPIClient, sessionStore: SessionStore) {
         self.api = api
@@ -53,13 +68,7 @@ final class MineViewModel: ObservableObject {
 
     func refreshAccountLibrary() async {
         guard sessionStore.isLoggedIn else {
-            accountHistory = []
-            accountFavorites = []
-            favoriteFolders = []
-            favoriteFolderEntries = [:]
-            favoriteFolderEntryStates = [:]
-            historyState = .idle
-            favoriteState = .idle
+            resetAccountLibraryState()
             return
         }
 
@@ -71,8 +80,14 @@ final class MineViewModel: ObservableObject {
     func refreshHistory() async {
         guard sessionStore.isLoggedIn else { return }
         historyState = .loading
+        historyLoadMoreState = .idle
+        historyCursor = nil
+        historyHasMore = false
         do {
-            accountHistory = try await api.fetchAccountHistory()
+            let page = try await api.fetchAccountHistoryPage(pageSize: accountLibraryPageSize)
+            accountHistory = Self.uniqued(page.entries)
+            historyCursor = page.nextHistoryCursor
+            historyHasMore = page.hasMore
             historyState = .loaded
         } catch {
             historyState = .failed(error.localizedDescription)
@@ -94,12 +109,80 @@ final class MineViewModel: ObservableObject {
     func refreshFavoriteFolder(_ folder: FavoriteFolder) async {
         guard sessionStore.isLoggedIn else { return }
         favoriteFolderEntryStates[folder.id] = .loading
+        favoriteFolderLoadMoreStates[folder.id] = .idle
+        favoriteFolderPages[folder.id] = 1
+        favoriteFolderHasMore[folder.id] = false
         do {
-            let entries = try await api.fetchFavoriteFolderVideos(folderID: folder.id)
-            favoriteFolderEntries[folder.id] = entries
+            let page = try await api.fetchFavoriteFolderVideoPage(
+                folderID: folder.id,
+                page: 1,
+                pageSize: accountLibraryPageSize
+            )
+            favoriteFolderEntries[folder.id] = Self.uniqued(page.entries)
+            favoriteFolderHasMore[folder.id] = page.hasMore
             favoriteFolderEntryStates[folder.id] = .loaded
         } catch {
             favoriteFolderEntryStates[folder.id] = .failed(error.localizedDescription)
+        }
+    }
+
+    func loadMoreHistoryIfNeeded(current item: AccountVideoEntry?) async {
+        guard let item, accountHistory.last?.id == item.id else { return }
+        await loadMoreHistory()
+    }
+
+    func loadMoreHistory() async {
+        guard sessionStore.isLoggedIn,
+              historyHasMore,
+              !historyState.isLoading,
+              !historyLoadMoreState.isLoading
+        else { return }
+        historyLoadMoreState = .loading
+        do {
+            let page = try await api.fetchAccountHistoryPage(
+                cursor: historyCursor,
+                pageSize: accountLibraryPageSize
+            )
+            let previousCount = accountHistory.count
+            accountHistory = Self.appendingUnique(page.entries, to: accountHistory)
+            historyCursor = page.nextHistoryCursor
+            historyHasMore = page.hasMore && accountHistory.count > previousCount
+            historyLoadMoreState = .idle
+        } catch {
+            historyLoadMoreState = .failed(error.localizedDescription)
+        }
+    }
+
+    func loadMoreFavoriteFolderIfNeeded(_ folder: FavoriteFolder, current item: AccountVideoEntry?) async {
+        guard let item, favoriteFolderEntries[folder.id]?.last?.id == item.id else { return }
+        await loadMoreFavoriteFolder(folder)
+    }
+
+    func loadMoreFavoriteFolder(_ folder: FavoriteFolder) async {
+        guard sessionStore.isLoggedIn,
+              favoriteFolderHasMore[folder.id] == true,
+              !(favoriteFolderEntryStates[folder.id]?.isLoading ?? false),
+              !(favoriteFolderLoadMoreStates[folder.id]?.isLoading ?? false)
+        else { return }
+        let nextPage = (favoriteFolderPages[folder.id] ?? 1) + 1
+        favoriteFolderLoadMoreStates[folder.id] = .loading
+        do {
+            let page = try await api.fetchFavoriteFolderVideoPage(
+                folderID: folder.id,
+                page: nextPage,
+                pageSize: accountLibraryPageSize
+            )
+            let previousCount = favoriteFolderEntries[folder.id]?.count ?? 0
+            favoriteFolderEntries[folder.id] = Self.appendingUnique(
+                page.entries,
+                to: favoriteFolderEntries[folder.id] ?? []
+            )
+            favoriteFolderPages[folder.id] = nextPage
+            favoriteFolderHasMore[folder.id] = page.hasMore
+                && (favoriteFolderEntries[folder.id]?.count ?? 0) > previousCount
+            favoriteFolderLoadMoreStates[folder.id] = .idle
+        } catch {
+            favoriteFolderLoadMoreStates[folder.id] = .failed(error.localizedDescription)
         }
     }
 
@@ -123,6 +206,12 @@ final class MineViewModel: ObservableObject {
         favoriteFolders = []
         favoriteFolderEntries = [:]
         favoriteFolderEntryStates = [:]
+        historyLoadMoreState = .idle
+        historyHasMore = false
+        historyCursor = nil
+        favoriteFolderLoadMoreStates = [:]
+        favoriteFolderHasMore = [:]
+        favoriteFolderPages = [:]
         historyState = .idle
         favoriteState = .idle
         loginMessage = ""
@@ -282,6 +371,38 @@ final class MineViewModel: ObservableObject {
         default:
             return false
         }
+    }
+
+    private func resetAccountLibraryState() {
+        accountHistory = []
+        accountFavorites = []
+        favoriteFolders = []
+        favoriteFolderEntries = [:]
+        favoriteFolderEntryStates = [:]
+        historyLoadMoreState = .idle
+        historyHasMore = false
+        historyCursor = nil
+        favoriteFolderLoadMoreStates = [:]
+        favoriteFolderHasMore = [:]
+        favoriteFolderPages = [:]
+        historyState = .idle
+        favoriteState = .idle
+    }
+
+    private nonisolated static func uniqued(_ entries: [AccountVideoEntry]) -> [AccountVideoEntry] {
+        appendingUnique(entries, to: [])
+    }
+
+    private nonisolated static func appendingUnique(
+        _ newEntries: [AccountVideoEntry],
+        to existingEntries: [AccountVideoEntry]
+    ) -> [AccountVideoEntry] {
+        var result = existingEntries
+        var seen = Set(existingEntries.map(\.id))
+        for entry in newEntries where seen.insert(entry.id).inserted {
+            result.append(entry)
+        }
+        return result
     }
 }
 

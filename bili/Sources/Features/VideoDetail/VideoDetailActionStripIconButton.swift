@@ -16,7 +16,7 @@ struct VideoDetailActionStripIconButton: View {
         }
         .buttonBorderShape(.circle)
         .controlSize(.mini)
-        .buttonStyle(.glass)
+        .biliGlassButtonStyle()
         .contentShape(Circle())
         .disabled(isDisabled)
         .opacity(isDisabled ? 0.52 : 1)

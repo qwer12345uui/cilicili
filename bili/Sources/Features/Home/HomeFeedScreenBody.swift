@@ -25,7 +25,7 @@ struct HomeFeedScreenBody: View {
                 metrics: viewportState.layoutMetrics(for: runtimeSettings.homeFeedLayout),
                 cells: viewModel.videoCells,
                 lastSeenMarkerIndex: viewModel.lastSeenMarkerIndex,
-                isLoadingMore: viewModel.state.isLoading && !viewModel.isRefreshing,
+                isLoadingMore: viewModel.state.isLoading && !viewModel.isRefreshing && !viewModel.isUserRefreshing,
                 actions: contentActions
             )
         }

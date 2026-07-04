@@ -53,5 +53,6 @@ struct CommentDialogRow: View {
         .padding(.horizontal, isFocused ? 10 : 0)
         .background(isFocused ? appTintColor.opacity(0.06) : Color.clear)
         .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+        .commentCopyContextMenu(text: reply.content?.message, title: "复制回复")
     }
 }

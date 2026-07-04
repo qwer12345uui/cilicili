@@ -13,13 +13,13 @@ struct VideoDetailInitialPlaybackLayout {
         )
 
         let standardHeight = width * 9 / 16
-        let headerLayout = VideoDetailPinnedDynamicPlayerHeaderLayout(
-            screenSize: CGSize(width: width, height: proxy.size.height),
-            standardHeight: standardHeight,
-            isPortraitVideo: isPortraitVideo,
-            isEnabled: true
-        )
-        playerHeight = headerLayout.expandedHeight
+        if isPortraitVideo {
+            let proposedHeight = max(proxy.size.height * 0.65, width)
+            let maximumHeight = max(standardHeight, proxy.size.height * 0.72)
+            playerHeight = max(standardHeight, min(proposedHeight, maximumHeight))
+        } else {
+            playerHeight = standardHeight
+        }
     }
 }
 

@@ -50,7 +50,7 @@ struct CompactDynamicImageTile: View {
                     .foregroundStyle(.primary)
                     .padding(.horizontal, 12)
                     .padding(.vertical, 7)
-                    .glassEffect(.regular, in: Capsule())
+                    .biliRegularGlassEffect(in: Capsule())
             }
             .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
         }

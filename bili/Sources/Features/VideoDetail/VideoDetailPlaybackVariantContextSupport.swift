@@ -26,7 +26,7 @@ extension VideoDetailViewModel {
     }
 
     var targetPlaybackPreferredQuality: Int? {
-        libraryStore.preferredVideoQuality ?? LibraryStore.defaultPreferredVideoQuality
+        libraryStore.effectivePreferredVideoQuality ?? LibraryStore.defaultPreferredVideoQuality
     }
 
     var adaptiveStartupPreferredQuality: Int? {
@@ -35,5 +35,14 @@ extension VideoDetailViewModel {
 
     var adaptiveStartupQualityCeiling: Int? {
         nil
+    }
+
+    func playVariants(from data: PlayURLData) -> [PlayVariant] {
+        data.playVariants(
+            cdnPreference: libraryStore.effectivePlaybackCDNPreference,
+            codecPreference: libraryStore.videoCodecPreference,
+            requiresHardwareDecode: libraryStore.forceHardwareDecodeEnabled,
+            prefersBackupAudioURL: libraryStore.prefersBackupAudioURL
+        )
     }
 }

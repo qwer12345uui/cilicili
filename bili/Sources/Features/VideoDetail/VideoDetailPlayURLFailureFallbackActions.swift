@@ -39,6 +39,7 @@ extension VideoDetailViewModel {
     }
 
     func handlePlayURLFailure(_ error: Error) {
+        currentPlayURLData = nil
         playVariants = []
         selectedPlayVariant = nil
         isSupplementingPlayQualities = false
@@ -54,7 +55,9 @@ extension VideoDetailViewModel {
     }
 
     private func shouldShowCodecUnavailableMessage(for error: Error) -> Bool {
-        guard libraryStore.videoCodecPreference.forcedUnavailableMessage != nil else { return false }
+        guard libraryStore.forceHardwareDecodeEnabled
+            || libraryStore.videoCodecPreference.forcedUnavailableMessage != nil
+        else { return false }
         if let apiError = error as? BiliAPIError {
             switch apiError {
             case .emptyPlayURL, .unsupportedHardwarePlayback:

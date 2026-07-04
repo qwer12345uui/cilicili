@@ -5,6 +5,7 @@ extension VideoDetailViewModel {
         priority: TaskPriority = .utility,
         waitsForFirstFrame: Bool = false
     ) {
+        guard !detail.isPGCEpisode else { return }
         guard !isPlaybackInvalidatedForNavigation, detailLoadingTask == nil else { return }
         let token = UUID()
         detailLoadingToken = token

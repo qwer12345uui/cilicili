@@ -168,7 +168,7 @@ final class VideoDetailRuntimeSettingsStore: ObservableObject {
             playerPerformanceOverlayEnabled: libraryStore.playerPerformanceOverlayEnabled,
             showsNetworkDiagnosticsButton: libraryStore.showsVideoDetailNetworkDiagnosticsButton,
             showsPinnedProgressBar: libraryStore.showsVideoDetailPinnedProgressBar,
-            preferredVideoQuality: libraryStore.preferredVideoQuality,
+            preferredVideoQuality: libraryStore.effectivePreferredVideoQuality,
             effectivePlaybackCDNPreference: libraryStore.effectivePlaybackCDNPreference,
             playbackAutoOptimizationEnabled: libraryStore.isPlaybackAutoOptimizationEnabled,
             minimizesTabBarOnScroll: libraryStore.minimizesTabBarOnScroll

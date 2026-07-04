@@ -14,7 +14,7 @@ final class VideoDetailDanmakuOverlayState: ObservableObject {
     var publishedWindowRange: Range<Int> = 0..<0
     var lastWindowCenterBucket: Int?
     let normalWindowLookBehind: TimeInterval = 12
-    let normalWindowLookAhead: TimeInterval = 45
+    let normalWindowLookAhead: TimeInterval = 32
     let windowRecenterInterval: TimeInterval = 8
 
     func bind(store: VideoDetailDanmakuRenderStore, playerViewModel: PlayerStateViewModel) {

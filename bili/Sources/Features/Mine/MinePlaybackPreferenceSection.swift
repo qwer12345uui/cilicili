@@ -18,7 +18,10 @@ struct MinePlaybackPreferenceSection<ProbeSummary: View>: View {
             playbackAutoOptimizationPicker
             pictureInPictureToggle
             preferredVideoQualityPicker
+            cellularPreferredVideoQualityPicker
             videoCodecPreferencePicker
+            forceHardwareDecodeToggle
+            dolbyVisionRenderingPolicyPicker
             defaultPlaybackRatePicker
         } header: {
             Text("播放体验")
@@ -31,6 +34,7 @@ struct MinePlaybackPreferenceSection<ProbeSummary: View>: View {
             if showsAdvancedPlaybackSettings {
                 playbackStreamSourcePicker
                 playbackCDNPicker
+                prefersBackupAudioURLToggle
                 playbackCustomCDNHostEditor
                 playbackCDNProbeRefreshPolicyPicker
                 playbackCDNProbeRefreshPolicyDetail
@@ -116,6 +120,21 @@ struct MinePlaybackPreferenceSection<ProbeSummary: View>: View {
         .pickerStyle(.navigationLink)
     }
 
+    private var cellularPreferredVideoQualityPicker: some View {
+        Picker(selection: Binding<Int>(
+            get: { libraryStore.cellularPreferredVideoQuality ?? 0 },
+            set: { libraryStore.setCellularPreferredVideoQuality($0 == 0 ? nil : $0) }
+        )) {
+            Text(LibraryStore.videoQualityTitle(nil)).tag(0)
+            ForEach(LibraryStore.supportedVideoQualities, id: \.self) { quality in
+                Text(LibraryStore.videoQualityTitle(quality)).tag(quality)
+            }
+        } label: {
+            Label("蜂窝网络画质", systemImage: "antenna.radiowaves.left.and.right")
+        }
+        .pickerStyle(.navigationLink)
+    }
+
     private var videoCodecPreferencePicker: some View {
         Picker(selection: Binding(
             get: { libraryStore.videoCodecPreference },
@@ -126,6 +145,29 @@ struct MinePlaybackPreferenceSection<ProbeSummary: View>: View {
             }
         } label: {
             Label("首选编码", systemImage: "film.stack")
+        }
+        .pickerStyle(.navigationLink)
+    }
+
+    private var forceHardwareDecodeToggle: some View {
+        Toggle(isOn: Binding(
+            get: { libraryStore.forceHardwareDecodeEnabled },
+            set: { libraryStore.setForceHardwareDecodeEnabled($0) }
+        )) {
+            Label("硬解优先", systemImage: "cpu")
+        }
+    }
+
+    private var dolbyVisionRenderingPolicyPicker: some View {
+        Picker(selection: Binding(
+            get: { libraryStore.dolbyVisionRenderingPolicy },
+            set: { libraryStore.setDolbyVisionRenderingPolicy($0) }
+        )) {
+            ForEach(DolbyVisionRenderingPolicy.allCases) { policy in
+                Text(policy.title).tag(policy)
+            }
+        } label: {
+            Label("杜比视界渲染", systemImage: "sparkles.tv")
         }
         .pickerStyle(.navigationLink)
     }
@@ -156,6 +198,15 @@ struct MinePlaybackPreferenceSection<ProbeSummary: View>: View {
             Label("CDN 线路", systemImage: "network")
         }
         .pickerStyle(.navigationLink)
+    }
+
+    private var prefersBackupAudioURLToggle: some View {
+        Toggle(isOn: Binding(
+            get: { libraryStore.prefersBackupAudioURL },
+            set: { libraryStore.setPrefersBackupAudioURL($0) }
+        )) {
+            Label("音频优先备用 URL", systemImage: "speaker.wave.2")
+        }
     }
 
     @ViewBuilder

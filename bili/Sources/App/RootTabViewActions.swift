@@ -157,6 +157,7 @@ extension RootTabView {
 
     func beginPlaybackPreload(for video: VideoItem) {
         guard !video.bvid.isEmpty, !video.bvid.hasPrefix("av") else { return }
+        guard !video.isPGCEpisode else { return }
         let now = Date()
         if let lastPreload = recentPlaybackPreloadTimes[video.bvid],
            now.timeIntervalSince(lastPreload) < 1.2 {
@@ -171,7 +172,7 @@ extension RootTabView {
                 for: video.bvid,
                 isEnabled: dependencies.libraryStore.isPlaybackAutoOptimizationEnabled
             )
-            let preferredQuality = dependencies.libraryStore.preferredVideoQuality
+            let preferredQuality = dependencies.libraryStore.effectivePreferredVideoQuality
             let cdnPreference = dependencies.libraryStore.effectivePlaybackCDNPreference
             let api = dependencies.api
             await VideoPreloadCenter.shared.updatePlaybackPreferences(

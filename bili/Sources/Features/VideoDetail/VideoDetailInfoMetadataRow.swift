@@ -4,6 +4,7 @@ struct VideoDetailInfoMetadataRow: View {
     let metadataText: String
     let hasDescriptionContent: Bool
     let isExpanded: Bool
+    let descriptionCopyText: String?
     let toggleExpansion: () -> Void
 
     var body: some View {
@@ -29,5 +30,6 @@ struct VideoDetailInfoMetadataRow: View {
         }
         .frame(height: 24, alignment: .center)
         .frame(maxWidth: .infinity, alignment: .leading)
+        .commentCopyContextMenu(text: descriptionCopyText, title: "复制简介")
     }
 }

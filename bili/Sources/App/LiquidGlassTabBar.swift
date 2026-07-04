@@ -92,21 +92,20 @@ extension View {
         interactive: Bool = false,
         in shape: S
     ) -> some View {
-        glassEffect(
-            .regular
-                .tint(tint)
-                .interactive(interactive),
-            in: shape
-        )
+        modifier(BiliGlassEffectModifier(tint: tint, interactive: interactive, shape: shape))
+    }
+
+    @ViewBuilder
+    func biliRegularGlassEffect<S: Shape>(
+        interactive: Bool = false,
+        in shape: S
+    ) -> some View {
+        modifier(BiliRegularGlassEffectModifier(interactive: interactive, shape: shape))
     }
 
     @ViewBuilder
     func biliGlassButtonStyle(prominent: Bool = false) -> some View {
-        if prominent {
-            buttonStyle(.glassProminent)
-        } else {
-            buttonStyle(.glass)
-        }
+        modifier(BiliGlassButtonStyleModifier(prominent: prominent))
     }
 
     @ViewBuilder
@@ -127,6 +126,71 @@ extension View {
                     .stroke(.white.opacity(prominent ? 0.12 : 0.08), lineWidth: 0.5)
             }
             .contentShape(Capsule())
+    }
+}
+
+private struct BiliGlassEffectModifier<GlassShape: Shape>: ViewModifier {
+    @AppStorage(AppLiquidGlassStylePreference.storageKey) private var rawPreference = AppLiquidGlassStylePreference.defaultValue.rawValue
+    let tint: Color
+    let interactive: Bool
+    let shape: GlassShape
+
+    private var preference: AppLiquidGlassStylePreference {
+        AppLiquidGlassStylePreference(storedRawValue: rawPreference)
+    }
+
+    @ViewBuilder
+    func body(content: Content) -> some View {
+        if #available(iOS 26, *) {
+            switch preference {
+            case .current:
+                content.glassEffect(
+                    .regular
+                        .tint(tint)
+                        .interactive(interactive),
+                    in: shape
+                )
+            case .appleRecommended:
+                content.glassEffect(
+                    .regular
+                        .interactive(interactive),
+                    in: shape
+                )
+            }
+        } else {
+            content.background(.ultraThinMaterial, in: shape)
+        }
+    }
+}
+
+private struct BiliRegularGlassEffectModifier<GlassShape: Shape>: ViewModifier {
+    let interactive: Bool
+    let shape: GlassShape
+
+    @ViewBuilder
+    func body(content: Content) -> some View {
+        if #available(iOS 26, *) {
+            content.glassEffect(
+                .regular
+                    .interactive(interactive),
+                in: shape
+            )
+        } else {
+            content.background(.ultraThinMaterial, in: shape)
+        }
+    }
+}
+
+private struct BiliGlassButtonStyleModifier: ViewModifier {
+    let prominent: Bool
+
+    @ViewBuilder
+    func body(content: Content) -> some View {
+        if prominent {
+            content.buttonStyle(.glassProminent)
+        } else {
+            content.buttonStyle(.glass)
+        }
     }
 }
 

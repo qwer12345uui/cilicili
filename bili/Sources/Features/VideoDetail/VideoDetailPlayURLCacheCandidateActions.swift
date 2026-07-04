@@ -29,7 +29,7 @@ extension VideoDetailViewModel {
         }
 
         if shouldRefetchForPreferredQuality(data),
-           libraryStore.preferredVideoQuality != nil {
+           libraryStore.effectivePreferredVideoQuality != nil {
             rememberDeferredPlayableFallback(
                 data,
                 source: fallbackSource,

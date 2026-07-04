@@ -49,7 +49,7 @@ extension VideoDetailViewModel {
                       self.stablePlayerViewModel?.isPlaying == true,
                       self.stablePlayerViewModel?.isBuffering == false
                 else { return }
-                let preferredQuality = self.libraryStore.preferredVideoQuality
+                let preferredQuality = self.libraryStore.effectivePreferredVideoQuality
                 let playbackAdaptationProfile = self.playbackAdaptationProfile
                 await VideoPreloadCenter.shared.preloadPlayInfo(
                     video,

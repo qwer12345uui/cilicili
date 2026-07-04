@@ -3,7 +3,7 @@ import UIKit
 
 struct PlayerPerformanceOverlayHeaderRow: View {
     let metricsID: String
-    let copyText: String?
+    let copyTextProvider: () -> String?
     @State private var didCopy = false
 
     var body: some View {
@@ -16,8 +16,9 @@ struct PlayerPerformanceOverlayHeaderRow: View {
             Text(PlayerPerformanceOverlayFormatting.shortMetricsID(metricsID))
                 .font(.caption2.monospaced())
                 .foregroundStyle(.secondary)
-            if let copyText {
+            if copyTextProvider() != nil {
                 Button {
+                    guard let copyText = copyTextProvider() else { return }
                     UIPasteboard.general.string = copyText
                     didCopy = true
                     Task { @MainActor in
@@ -32,7 +33,7 @@ struct PlayerPerformanceOverlayHeaderRow: View {
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
-                .accessibilityLabel(didCopy ? "已复制测试结果" : "复制测试结果")
+                .accessibilityLabel(didCopy ? "已复制诊断日志" : "复制诊断日志")
             }
         }
     }

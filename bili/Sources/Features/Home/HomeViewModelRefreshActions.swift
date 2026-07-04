@@ -13,8 +13,8 @@ extension HomeViewModel {
         requestRevision += 1
         cancelRecommendMetadataHydrationTasks()
         let revision = requestRevision
-        state = .loading
         isRefreshing = true
+        state = .loading
         defer {
             if revision == requestRevision {
                 isRefreshing = false

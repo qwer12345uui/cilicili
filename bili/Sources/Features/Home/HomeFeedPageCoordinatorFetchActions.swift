@@ -8,16 +8,16 @@ extension HomeFeedPageCoordinator {
         switch mode {
         case .recommend:
             if usesNativeAppRecommendSource(for: mode) {
-                return try await api.fetchRecommendFeed(freshIndex: freshIndex)
+                return filterFeedRecommendations(try await api.fetchRecommendFeed(freshIndex: freshIndex))
             }
             if usesGuestRecommendDiversity(for: mode) {
-                return try await fetchGuestRecommendPage(
+                return filterFeedRecommendations(try await fetchGuestRecommendPage(
                     excluding: existingIDs,
                     minimumFreshCount: 10,
                     maximumAttempts: 4
-                )
+                ))
             }
-            return try await api.fetchRecommendFeed(freshIndex: freshIndex)
+            return filterFeedRecommendations(try await api.fetchRecommendFeed(freshIndex: freshIndex))
         case .popular:
             return try await api.fetchPopularVideos(page: popularPage)
         }

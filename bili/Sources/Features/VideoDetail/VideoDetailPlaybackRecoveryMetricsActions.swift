@@ -18,7 +18,10 @@ extension VideoDetailViewModel {
             reason: reason
         )
         if let fallbackVariant {
-            parts.append("fallbackQ=\(fallbackVariant.quality)")
+            parts.append(contentsOf: VideoDetailPlaybackFallbackContext(
+                failedVariant: failedVariant,
+                fallbackVariant: fallbackVariant
+            ).metricParts)
         }
         if decision.shouldRefreshCDN {
             parts.append("cdnRefresh=queued")
@@ -73,7 +76,9 @@ extension VideoDetailViewModel {
             "status=\(status)",
             "attempt=\(attempt)",
             "q=\(failedVariant.quality)",
-            "variant=\(diagnosticToken(failedVariant.id))"
+            "variant=\(diagnosticToken(failedVariant.id))",
+            "codec=\(diagnosticToken(failedVariant.codec ?? "-"))",
+            "range=\(failedVariant.dynamicRange.rawValue)"
         ]
         if let source {
             parts.append("source=\(source.rawValue)")

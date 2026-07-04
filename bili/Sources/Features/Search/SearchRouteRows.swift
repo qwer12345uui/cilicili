@@ -40,21 +40,25 @@ struct SearchResultRouteRow: View {
                 SearchUserResultRow(user: user)
             }
         case .bangumi(let media):
-            SearchExternalMediaRouteRow(media: media, kind: "番剧")
+            SearchInternalMediaRouteRow(media: media, kind: "番剧")
         case .movie(let media):
-            SearchExternalMediaRouteRow(media: media, kind: "影视")
+            SearchInternalMediaRouteRow(media: media, kind: "影视")
         case .article(let article):
             SearchArticleRouteRow(article: article)
         }
     }
 }
 
-private struct SearchExternalMediaRouteRow: View {
+private struct SearchInternalMediaRouteRow: View {
     let media: SearchMediaItem
     let kind: String
 
     var body: some View {
-        if let url = media.destinationURL {
+        if let route = PgcSeasonRoute(media: media) {
+            NavigationLink(value: route) {
+                SearchMediaResultRow(media: media, kind: kind)
+            }
+        } else if let url = media.destinationURL {
             Link(destination: url) {
                 SearchMediaResultRow(media: media, kind: kind)
             }

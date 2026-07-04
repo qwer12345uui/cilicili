@@ -106,6 +106,7 @@ private struct BiliPlayerMoreControlsButton: View {
 
 private struct BiliPlayerMoreControlsSheet: View {
     @Environment(\.dismiss) private var dismiss
+    @EnvironmentObject private var libraryStore: LibraryStore
     @ObservedObject var viewModel: PlayerStateViewModel
     let configuration: BiliPlayerViewConfiguration
     @Binding var showsRateChoices: Bool
@@ -156,6 +157,20 @@ private struct BiliPlayerMoreControlsSheet: View {
 
                     Label("解码：\(decodeTitle)", systemImage: "cpu")
                         .foregroundStyle(.secondary)
+
+                    Toggle(isOn: Binding(
+                        get: { libraryStore.playerPerformanceOverlayEnabled },
+                        set: { libraryStore.setPlayerPerformanceOverlayEnabled($0) }
+                    )) {
+                        Label("播放性能浮窗", systemImage: "waveform.path.ecg.rectangle")
+                    }
+
+                    Toggle(isOn: Binding(
+                        get: { libraryStore.playerControlEdgeScrimEnabled },
+                        set: { libraryStore.setPlayerControlEdgeScrimEnabled($0) }
+                    )) {
+                        Label("播放控件边缘遮罩", systemImage: "rectangle.topthird.inset.filled")
+                    }
                 }
             }
             .foregroundStyle(.primary)

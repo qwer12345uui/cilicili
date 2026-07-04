@@ -2,6 +2,7 @@ import Foundation
 
 extension VideoDetailViewModel {
     func scheduleUploaderAndInteractionLoadIfNeeded() {
+        guard !detail.isPGCEpisode else { return }
         guard !isPlaybackInvalidatedForNavigation, uploaderInteractionTask == nil else { return }
         guard let identity = currentUploaderInteractionIdentity,
               uploaderInteractionLoadIdentity != identity,

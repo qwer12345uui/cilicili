@@ -62,6 +62,11 @@ if ! xcodebuild archive \
   exit 1
 fi
 
+APP_PATH="$ARCHIVE_PATH/Products/Applications/bili.app"
+if [[ -d "$APP_PATH" ]]; then
+  zsh "$ROOT_DIR/Scripts/remove-empty-frameworks.sh" "$APP_PATH"
+fi
+
 echo "Exporting signed IPA..."
 if ! xcodebuild -exportArchive \
     -archivePath "$ARCHIVE_PATH" \

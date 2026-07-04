@@ -57,6 +57,10 @@ final class ActivePlaybackCoordinator {
         activePlayer === player
     }
 
+    func currentActivePlayer() -> PlayerStateViewModel? {
+        activePlayer
+    }
+
     private func registeredPlayersIncludingActive() -> [PlayerStateViewModel] {
         cleanupRegisteredPlayers()
         var players = registeredPlayers.values.compactMap(\.player)

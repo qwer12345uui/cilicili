@@ -3,6 +3,7 @@ import Foundation
 extension VideoDetailViewModel {
     func resetPlaybackStateForSelectedPage() {
         resetDanmakuLoad(clearItems: true)
+        currentPlayURLData = nil
         playVariants = []
         selectedPlayVariant = nil
         playURLElapsedMilliseconds = nil

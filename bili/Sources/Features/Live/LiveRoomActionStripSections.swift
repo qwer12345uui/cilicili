@@ -53,12 +53,12 @@ extension LiveRoomContentView {
             liveFollowButtonContent(viewModel, isFollowing: true)
                 .buttonBorderShape(.capsule)
                 .controlSize(.mini)
-                .buttonStyle(.glass)
+                .biliGlassButtonStyle()
         } else {
             liveFollowButtonContent(viewModel, isFollowing: false)
                 .buttonBorderShape(.capsule)
                 .controlSize(.mini)
-                .buttonStyle(.glassProminent)
+                .biliGlassButtonStyle(prominent: true)
         }
     }
 

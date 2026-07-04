@@ -86,8 +86,10 @@ enum BiliVideoDynamicRange: String, Hashable, Sendable {
         switch self {
         case .sdr:
             return nil
-        case .hdr10, .dolbyVision:
+        case .dolbyVision:
             return "PQ"
+        case .hdr10:
+            return nil
         case .hlg:
             return "HLG"
         }
@@ -134,10 +136,12 @@ nonisolated struct VideoItem: Identifiable, Decodable, Hashable, Sendable {
     let historyResumeTime: TimeInterval?
     let historyCID: Int?
     let recommendReason: String?
+    let pgcSeasonID: Int?
+    let pgcEpisodeID: Int?
 
     enum CodingKeys: String, CodingKey {
         case bvid, aid, title, pic, desc, duration, pubdate, owner, stat, cid, pages, dimension
-        case historyResumeTime, historyCID, recommendReason
+        case historyResumeTime, historyCID, recommendReason, pgcSeasonID, pgcEpisodeID
     }
 
     init(
@@ -155,7 +159,9 @@ nonisolated struct VideoItem: Identifiable, Decodable, Hashable, Sendable {
         dimension: VideoDimension?,
         historyResumeTime: TimeInterval? = nil,
         historyCID: Int? = nil,
-        recommendReason: String? = nil
+        recommendReason: String? = nil,
+        pgcSeasonID: Int? = nil,
+        pgcEpisodeID: Int? = nil
     ) {
         self.bvid = bvid
         self.aid = aid
@@ -172,6 +178,8 @@ nonisolated struct VideoItem: Identifiable, Decodable, Hashable, Sendable {
         self.historyResumeTime = historyResumeTime
         self.historyCID = historyCID
         self.recommendReason = recommendReason
+        self.pgcSeasonID = pgcSeasonID
+        self.pgcEpisodeID = pgcEpisodeID
     }
 
     nonisolated func mergingFilledValues(from fullDetail: VideoItem) -> VideoItem {
@@ -195,8 +203,14 @@ nonisolated struct VideoItem: Identifiable, Decodable, Hashable, Sendable {
             dimension: fullDetail.dimension ?? dimension,
             historyResumeTime: historyResumeTime ?? fullDetail.historyResumeTime,
             historyCID: historyCID ?? fullDetail.historyCID,
-            recommendReason: recommendReason ?? fullDetail.recommendReason
+            recommendReason: recommendReason ?? fullDetail.recommendReason,
+            pgcSeasonID: pgcSeasonID ?? fullDetail.pgcSeasonID,
+            pgcEpisodeID: pgcEpisodeID ?? fullDetail.pgcEpisodeID
         )
+    }
+
+    nonisolated var isPGCEpisode: Bool {
+        pgcEpisodeID != nil || pgcSeasonID != nil
     }
 }
 
@@ -1152,11 +1166,13 @@ nonisolated struct PlayURLData: Decodable, Sendable {
     nonisolated var rawPlayURLSummary: String {
         let videoStreams = dash?.video ?? []
         let audioStreams = dash?.audio ?? []
+        let dolbyCount = videoStreams.filter(\.isDolbyVisionVideoCodec).count
         let hevcCount = videoStreams.filter(\.isHEVCVideoCodec).count
         let av1Count = videoStreams.filter(\.isAV1VideoCodec).count
         let avcCount = videoStreams.filter(\.isAVCVideoCodec).count
         let aacCount = audioStreams.filter(\.isAACAudioCodec).count
-        return "dashVideo=\(videoStreams.count) hevc=\(hevcCount) av1=\(av1Count) avc=\(avcCount) dashAudio=\(audioStreams.count) aac=\(aacCount) durl=\(durl?.count ?? 0)"
+        let dolbyAudioCount = audioStreams.filter(\.isDolbyCompatibleAudioCodec).count
+        return "dashVideo=\(videoStreams.count) dolby=\(dolbyCount) hevc=\(hevcCount) av1=\(av1Count) avc=\(avcCount) dashAudio=\(audioStreams.count) aac=\(aacCount) dolbyAudio=\(dolbyAudioCount) durl=\(durl?.count ?? 0)"
     }
 
     nonisolated var highestPlayableQuality: Int {
@@ -1168,6 +1184,15 @@ nonisolated struct PlayURLData: Decodable, Sendable {
 
     nonisolated func hasPlayableQuality(_ quality: Int) -> Bool {
         playVariants.contains { $0.satisfiesPreferredQuality(quality) }
+    }
+
+    nonisolated func hasMediaPayloadQuality(_ quality: Int) -> Bool {
+        playVariants.contains { variant in
+            guard variant.quality == quality,
+                  variant.videoURL != nil
+            else { return false }
+            return variant.audioURL != nil || variant.videoStream == nil
+        }
     }
 
     nonisolated func shouldRefetchForPreferredQuality(_ quality: Int) -> Bool {
@@ -1190,15 +1215,18 @@ nonisolated struct PlayURLData: Decodable, Sendable {
     nonisolated func playVariants(cdnPreference: PlaybackCDNPreference) -> [PlayVariant] {
         playVariants(
             cdnPreference: cdnPreference,
-            codecPreference: VideoCodecPreference.stored()
+            codecPreference: VideoCodecPreference.stored(),
+            requiresHardwareDecode: PlaybackHardwareDecodePolicy.stored(),
+            prefersBackupAudioURL: PlaybackAudioURLPolicy.stored()
         )
     }
 
     nonisolated func playVariants(
         cdnPreference: PlaybackCDNPreference,
-        codecPreference: VideoCodecPreference
+        codecPreference: VideoCodecPreference,
+        requiresHardwareDecode: Bool = PlaybackHardwareDecodePolicy.defaultValue,
+        prefersBackupAudioURL: Bool = PlaybackAudioURLPolicy.stored()
     ) -> [PlayVariant] {
-        let preferredKernel = PlayerKernelType.stored()
         let bestAudio = dash?.bestAudioStream
         let videosByQuality = Dictionary(grouping: dash?.video ?? [], by: { $0.id ?? 0 })
         let descriptions = Dictionary(uniqueKeysWithValues: zip(acceptQuality ?? [], acceptDescription ?? []))
@@ -1212,6 +1240,10 @@ nonisolated struct PlayURLData: Decodable, Sendable {
         func appendQuality(_ quality: Int?) {
             guard let quality, !orderedQualities.contains(quality) else { return }
             orderedQualities.append(quality)
+        }
+
+        func audioPlayURL(for stream: DASHStream) -> URL? {
+            stream.playURL(cdnPreference: cdnPreference, prefersBackup: prefersBackupAudioURL)
         }
 
         supportFormats?.forEach { appendQuality($0.quality) }
@@ -1229,13 +1261,12 @@ nonisolated struct PlayURLData: Decodable, Sendable {
             }
             let stream = DashStreamDispatcher.selectBestStream(
                 from: streamCandidates,
-                preference: codecPreference,
-                kernel: preferredKernel
+                preference: codecPreference
             )
             guard let stream,
                   let streamURL = stream.playURL(cdnPreference: cdnPreference),
                   let bestAudio,
-                  let audioURL = bestAudio.playURL(cdnPreference: cdnPreference)
+                  let audioURL = audioPlayURL(for: bestAudio)
             else { continue }
             variants.append(PlayVariant(
                 quality: quality,
@@ -1257,7 +1288,7 @@ nonisolated struct PlayURLData: Decodable, Sendable {
             guard stream.isHardwareDecodingCompatibleVideo,
                   let streamURL = stream.playURL(cdnPreference: cdnPreference),
                   let bestAudio,
-                  let audioURL = bestAudio.playURL(cdnPreference: cdnPreference)
+                  let audioURL = audioPlayURL(for: bestAudio)
             else { continue }
             let quality = stream.id ?? 0
             let support = supportByQuality[quality]
@@ -1277,7 +1308,9 @@ nonisolated struct PlayURLData: Decodable, Sendable {
             ))
         }
 
-        if let durl, !durl.isEmpty {
+        let shouldUseProgressiveFallback = !requiresHardwareDecode
+            || !variants.contains(where: \.isPlayable)
+        if shouldUseProgressiveFallback, let durl, !durl.isEmpty {
             let progressiveQuality = quality ?? orderedQualities.first ?? 0
             let support = supportByQuality[progressiveQuality]
             let title = support?.title ?? descriptions[progressiveQuality] ?? Self.qualityTitle(progressiveQuality)
@@ -1308,6 +1341,7 @@ nonisolated struct PlayURLData: Decodable, Sendable {
             descriptions: descriptions,
             videosByQuality: videosByQuality,
             codecPreference: codecPreference,
+            requiresHardwareDecode: requiresHardwareDecode,
             into: &variants
         )
 
@@ -1320,19 +1354,21 @@ nonisolated struct PlayURLData: Decodable, Sendable {
         descriptions: [Int: String],
         videosByQuality: [Int: [DASHStream]],
         codecPreference: VideoCodecPreference,
+        requiresHardwareDecode: Bool,
         into variants: inout [PlayVariant]
     ) {
-        let preferredKernel = PlayerKernelType.stored()
         for quality in orderedQualities {
             guard quality > 0,
                   !variants.contains(where: { $0.quality == quality })
             else { continue }
 
             let support = supportByQuality[quality]
+            let representativeCandidates = videosByQuality[quality]?.filter { stream in
+                !requiresHardwareDecode || stream.isHardwareDecodingCompatibleVideo
+            } ?? []
             let representativeStream = DashStreamDispatcher.selectBestStream(
-                from: videosByQuality[quality] ?? [],
-                preference: codecPreference,
-                kernel: preferredKernel
+                from: representativeCandidates,
+                preference: codecPreference
             )
             variants.append(PlayVariant(
                 quality: quality,
@@ -1413,8 +1449,42 @@ nonisolated struct PlayVariant: Identifiable, Hashable, Sendable {
     let bandwidth: Int?
     let isHDR: Bool
     let badge: String?
+    let dynamicRangeOverride: BiliVideoDynamicRange?
+
+    init(
+        quality: Int,
+        title: String,
+        videoURL: URL?,
+        audioURL: URL?,
+        videoStream: DASHStream?,
+        audioStream: DASHStream?,
+        codec: String?,
+        resolution: String?,
+        frameRate: String?,
+        bandwidth: Int?,
+        isHDR: Bool,
+        badge: String?,
+        dynamicRangeOverride: BiliVideoDynamicRange? = nil
+    ) {
+        self.quality = quality
+        self.title = title
+        self.videoURL = videoURL
+        self.audioURL = audioURL
+        self.videoStream = videoStream
+        self.audioStream = audioStream
+        self.codec = codec
+        self.resolution = resolution
+        self.frameRate = frameRate
+        self.bandwidth = bandwidth
+        self.isHDR = isHDR
+        self.badge = badge
+        self.dynamicRangeOverride = dynamicRangeOverride
+    }
 
     nonisolated var dynamicRange: BiliVideoDynamicRange {
+        if let dynamicRangeOverride {
+            return dynamicRangeOverride
+        }
         if quality == 126 || title.contains("杜比视界") {
             return .dolbyVision
         }
@@ -1432,7 +1502,7 @@ nonisolated struct PlayVariant: Identifiable, Hashable, Sendable {
         guard isDynamicRangePlaybackCompatible else { return false }
         if let videoStream {
             guard videoStream.isHardwareDecodingCompatibleVideo else { return false }
-        } else if audioURL != nil {
+        } else {
             return false
         }
 
@@ -1476,7 +1546,8 @@ nonisolated struct PlayVariant: Identifiable, Hashable, Sendable {
             frameRate: frameRate,
             bandwidth: bandwidth,
             isHDR: isHDR,
-            badge: badge
+            badge: badge,
+            dynamicRangeOverride: dynamicRangeOverride
         )
     }
 
@@ -1683,12 +1754,50 @@ nonisolated struct DASHInfo: Decodable, Sendable {
     let video: [DASHStream]?
     let audio: [DASHStream]?
 
+    enum CodingKeys: String, CodingKey {
+        case duration, video, audio, dolby, flac
+    }
+
+    enum NestedMediaCodingKeys: String, CodingKey {
+        case audio, video
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        duration = container.decodeLossyIntIfPresent(forKey: .duration)
+        let dolbyContainer = try? container
+            .nestedContainer(keyedBy: NestedMediaCodingKeys.self, forKey: .dolby)
+        video = Self.mergedStreams(
+            primary: try container.decodeIfPresent([DASHStream].self, forKey: .video),
+            secondary: try dolbyContainer?.decodeIfPresent([DASHStream].self, forKey: .video)
+        )
+
+        let flacAudio = try (try? container
+            .nestedContainer(keyedBy: NestedMediaCodingKeys.self, forKey: .flac))?
+            .decodeIfPresent(DASHStream.self, forKey: .audio)
+        let dolbyAudio = try dolbyContainer?.decodeIfPresent([DASHStream].self, forKey: .audio)
+        audio = Self.mergedStreams(
+            primary: (flacAudio.map { [$0] } ?? []) + (dolbyAudio ?? []),
+            secondary: try container.decodeIfPresent([DASHStream].self, forKey: .audio)
+        )
+    }
+
+    init(
+        duration: Int?,
+        video: [DASHStream]?,
+        audio: [DASHStream]?
+    ) {
+        self.duration = duration
+        self.video = video
+        self.audio = audio
+    }
+
     nonisolated var bestAudioStream: DASHStream? {
         audio?
             .filter(\.isHardwareDecodingCompatibleAudio)
             .sorted { lhs, rhs in
-                if lhs.isAACAudioCodec != rhs.isAACAudioCodec {
-                    return lhs.isAACAudioCodec && !rhs.isAACAudioCodec
+                if lhs.audioPlaybackRank != rhs.audioPlaybackRank {
+                    return lhs.audioPlaybackRank < rhs.audioPlaybackRank
                 }
                 return (lhs.bandwidth ?? 0) > (rhs.bandwidth ?? 0)
             }
@@ -1784,6 +1893,11 @@ nonisolated struct DASHStream: Decodable, Hashable, Sendable {
         return cdnPreference.preferredURLs(primary: primary, backups: backupPlayURLs).primary
     }
 
+    nonisolated func playURL(cdnPreference: PlaybackCDNPreference, prefersBackup: Bool) -> URL? {
+        let preference: PlaybackCDNPreference = prefersBackup ? .backupURL : cdnPreference
+        return playURL(cdnPreference: preference)
+    }
+
     nonisolated var backupPlayURLs: [URL] {
         backupURL?.compactMap(URL.init(string:)) ?? []
     }
@@ -1793,6 +1907,29 @@ nonisolated struct DASHStream: Decodable, Hashable, Sendable {
         return cdnPreference.preferredURLs(primary: primary, backups: backupPlayURLs).backups
     }
 
+    nonisolated func backupPlayURLs(cdnPreference: PlaybackCDNPreference, prefersBackup: Bool) -> [URL] {
+        let preference: PlaybackCDNPreference = prefersBackup ? .backupURL : cdnPreference
+        return backupPlayURLs(cdnPreference: preference)
+    }
+
+    nonisolated func playbackURLCandidates(cdnPreference: PlaybackCDNPreference) -> [URL] {
+        let primary = URL(string: baseURL)
+        let preferred = cdnPreference.preferredURLs(primary: primary, backups: backupPlayURLs)
+        return Self.removingDuplicateURLs(
+            [preferred.primary].compactMap { $0 } + preferred.backups + [primary].compactMap { $0 } + backupPlayURLs
+        )
+    }
+
+    nonisolated func fallbackPlayURLs(cdnPreference: PlaybackCDNPreference, selectedURL: URL?) -> [URL] {
+        playbackURLCandidates(cdnPreference: cdnPreference)
+            .filter { $0 != selectedURL }
+    }
+
+    nonisolated private static func removingDuplicateURLs(_ urls: [URL]) -> [URL] {
+        var seen = Set<String>()
+        return urls.filter { seen.insert($0.absoluteString).inserted }
+    }
+
     nonisolated var codecLabel: String? {
         Self.codecLabel(for: codecs, codecid: codecid)
     }
@@ -1800,9 +1937,18 @@ nonisolated struct DASHStream: Decodable, Hashable, Sendable {
     nonisolated var isHEVCVideoCodec: Bool {
         if let codecs, !codecs.isEmpty {
             let lowered = codecs.lowercased()
-            return lowered.contains("hvc1") || lowered.contains("hev1")
+            return lowered.contains("hvc1")
+                || lowered.contains("hev1")
+                || lowered.contains("dvh1")
+                || lowered.contains("dvhe")
         }
         return codecid == 12
+    }
+
+    nonisolated var isDolbyVisionVideoCodec: Bool {
+        guard let codecs, !codecs.isEmpty else { return false }
+        let lowered = codecs.lowercased()
+        return lowered.contains("dvh1") || lowered.contains("dvhe")
     }
 
     nonisolated var isAVCVideoCodec: Bool {
@@ -1830,8 +1976,27 @@ nonisolated struct DASHStream: Decodable, Hashable, Sendable {
         return codecs.lowercased().contains("mp4a")
     }
 
+    nonisolated var isDolbyCompatibleAudioCodec: Bool {
+        guard let codecs, !codecs.isEmpty else { return false }
+        let lowered = codecs.lowercased()
+        return lowered.contains("ec-3") || lowered.contains("ac-3")
+    }
+
+    nonisolated var audioPlaybackRank: Int {
+        if isAACAudioCodec {
+            return 0
+        }
+        if isDolbyCompatibleAudioCodec {
+            return 1
+        }
+        return 2
+    }
+
     nonisolated static func codecLabel(for codecs: String?, codecid: Int? = nil) -> String? {
         if let codecs, !codecs.isEmpty {
+            if codecs.localizedCaseInsensitiveContains("dvh1") || codecs.localizedCaseInsensitiveContains("dvhe") {
+                return "Dolby Vision"
+            }
             if codecs.localizedCaseInsensitiveContains("hev") || codecs.localizedCaseInsensitiveContains("hvc") {
                 return "HEVC"
             }
@@ -1883,7 +2048,6 @@ nonisolated struct DASHStream: Decodable, Hashable, Sendable {
             let lowered = codecs.lowercased()
             return lowered.contains("avc1")
                 || lowered.contains("avc3")
-                || (PlaybackCodecPolicy.canDecodeAV1 && lowered.contains("av01"))
                 || lowered.contains("dvh1")
                 || lowered.contains("dvhe")
         }
@@ -1891,8 +2055,6 @@ nonisolated struct DASHStream: Decodable, Hashable, Sendable {
         switch codecid {
         case 7:
             return true
-        case 13:
-            return PlaybackCodecPolicy.canDecodeAV1
         default:
             return false
         }
@@ -1900,7 +2062,7 @@ nonisolated struct DASHStream: Decodable, Hashable, Sendable {
 
     nonisolated var isHardwareDecodingCompatibleAudio: Bool {
         if PlaybackCodecPolicy.requiresAACAudioPlayback {
-            return isAACAudioCodec
+            return isAACAudioCodec || isDolbyCompatibleAudioCodec
         }
 
         if let codecs, !codecs.isEmpty {
@@ -1958,10 +2120,10 @@ nonisolated struct DASHStream: Decodable, Hashable, Sendable {
             if codecs.contains("av01") {
                 return 1
             }
-            if codecs.contains("hvc1") || codecs.contains("hev1") {
-                return 4
-            }
             if codecs.contains("dvh1") || codecs.contains("dvhe") {
+                return 5
+            }
+            if codecs.contains("hvc1") || codecs.contains("hev1") {
                 return 4
             }
             if codecs.contains("avc1") || codecs.contains("avc3") {
@@ -2036,14 +2198,37 @@ nonisolated struct HTTPByteRange: Hashable, Sendable {
             .trimmingCharacters(in: .whitespacesAndNewlines)
             .lowercased()
         guard normalizedValue.hasPrefix("bytes=") else { return nil }
-        self.init(rawValue: String(normalizedValue.dropFirst("bytes=".count)))
+        let payload = String(normalizedValue.dropFirst("bytes=".count))
+        if let range = HTTPByteRange(rawValue: payload) {
+            self = range
+            return
+        }
+        let parts = payload
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .split(separator: "-", maxSplits: 1, omittingEmptySubsequences: false)
+        guard parts.count == 2 else { return nil }
+        if parts[0].isEmpty,
+           let suffixLength = Int64(parts[1]),
+           suffixLength > 0 {
+            start = -suffixLength
+            endInclusive = -1
+            return
+        }
+        if parts[1].isEmpty,
+           let start = Int64(parts[0]),
+           start >= 0 {
+            self.start = start
+            endInclusive = Int64.max
+            return
+        }
+        return nil
     }
 
     nonisolated init?(rawValue: String?) {
         guard let rawValue else { return nil }
         let parts = rawValue
             .trimmingCharacters(in: .whitespacesAndNewlines)
-            .split(separator: "-", maxSplits: 1)
+            .split(separator: "-", maxSplits: 1, omittingEmptySubsequences: false)
         guard parts.count == 2,
               let start = Int64(parts[0]),
               let end = Int64(parts[1]),
@@ -2056,6 +2241,10 @@ nonisolated struct HTTPByteRange: Hashable, Sendable {
 
     nonisolated func clamped(toLength length: Int64) -> HTTPByteRange? {
         guard length > 0 else { return nil }
+        if start < 0, endInclusive == -1 {
+            let suffixLength = min(-start, length)
+            return HTTPByteRange(start: length - suffixLength, endInclusive: length - 1)
+        }
         let lowerBound = min(max(start, 0), length - 1)
         let upperBound = min(max(endInclusive, lowerBound), length - 1)
         return HTTPByteRange(start: lowerBound, endInclusive: upperBound)
@@ -6612,7 +6801,8 @@ nonisolated extension String {
             return normalized
         }
 
-        return normalized.biliImageView2URL(width: width, height: height)
+        let size = RemoteImageQualityPreference.effectiveThumbnailSize(width: width, height: height)
+        return normalized.biliImageView2URL(width: size.width, height: size.height)
     }
 
     func biliCoverThumbnailURL(
@@ -6642,7 +6832,7 @@ nonisolated extension String {
             return normalized
         }
 
-        let pixelSize = min(max(96, maxSide), 4096)
+        let pixelSize = min(RemoteImageQualityPreference.effectiveMaximumPixelLength(maxSide), 4096)
         return "\(normalized.biliImageBaseURL())?imageView2/2/w/\(pixelSize)/format/webp"
     }
 
@@ -6671,11 +6861,12 @@ nonisolated extension String {
             return base
         }
 
+        let sourcePixelBucket = normalized.biliImageURLPixelBucket.map { "#src-\($0)" } ?? ""
         if let ratio = normalized.biliImageURLAspectRatio {
             let ratioBucket = Int((ratio * 100).rounded())
-            return "\(base)#crop-\(ratioBucket)"
+            return "\(base)#crop-\(ratioBucket)\(sourcePixelBucket)"
         }
-        return "\(base)#fit"
+        return "\(base)#fit\(sourcePixelBucket)"
     }
 
     static func biliThumbnailMaxPixelSide(
@@ -6717,6 +6908,24 @@ nonisolated extension String {
         }
 
         return nil
+    }
+
+    var biliImageURLPixelBucket: Int? {
+        let pieces = normalizedBiliURL().split(separator: "/")
+        var pixelLengths = [Int]()
+        for index in pieces.indices {
+            let key = pieces[index].lowercased()
+            guard key == "w" || key == "h" else { continue }
+            let nextIndex = pieces.index(after: index)
+            guard nextIndex < pieces.endIndex,
+                  let value = Int(pieces[nextIndex]),
+                  value > 0
+            else { continue }
+            pixelLengths.append(value)
+        }
+        guard let maxSide = pixelLengths.max() else { return nil }
+        let bucket = 160
+        return ((maxSide + bucket - 1) / bucket) * bucket
     }
 
     private func biliImageView2URL(width: Int, height: Int) -> String {

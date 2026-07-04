@@ -15,6 +15,23 @@ struct LibraryLoadingRow: View {
     }
 }
 
+struct LibraryLoadMoreTriggerRow: View {
+    let title: String
+    let loadMore: () -> Void
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "arrow.down.circle")
+            Text(title)
+        }
+        .font(.caption)
+        .foregroundStyle(.secondary)
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 8)
+        .onAppear(perform: loadMore)
+    }
+}
+
 struct LibraryErrorRow: View {
     let title: String
     let message: String

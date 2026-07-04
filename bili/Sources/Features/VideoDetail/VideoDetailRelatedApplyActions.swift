@@ -2,8 +2,11 @@ import Foundation
 
 extension VideoDetailViewModel {
     func applyLoadedRelatedVideos(_ videos: [VideoItem]) {
-        let filtered = Array(videos
-            .filter { $0.bvid != detail.bvid }
+        let filtered = Array(VideoRecommendationFilter.filtered(
+            videos.filter { $0.bvid != detail.bvid },
+            configuration: libraryStore.videoRecommendationFilterConfiguration,
+            context: .related
+        )
             .prefix(Self.relatedRecommendationsLimit))
         guard !filtered.isEmpty || related.isEmpty else { return }
         related = filtered
@@ -25,12 +28,18 @@ extension VideoDetailViewModel {
               !isPlaybackInvalidatedForNavigation,
               detail.bvid == bvid
         else { return false }
-        guard !fallback.isEmpty else { return false }
-        related = fallback
+        let filteredFallback = Array(VideoRecommendationFilter.filtered(
+            fallback,
+            configuration: libraryStore.videoRecommendationFilterConfiguration,
+            context: .related
+        )
+            .prefix(Self.relatedRecommendationsLimit))
+        guard !filteredFallback.isEmpty else { return false }
+        related = filteredFallback
         lastRelatedLoadTimedOut = reason.localizedCaseInsensitiveContains("超时")
         relatedState = .loaded
-        prefetchRelatedArtwork(fallback)
-        scheduleRelatedPlaybackPreloadIfAppropriate(for: fallback)
+        prefetchRelatedArtwork(filteredFallback)
+        scheduleRelatedPlaybackPreloadIfAppropriate(for: filteredFallback)
         return true
     }
 

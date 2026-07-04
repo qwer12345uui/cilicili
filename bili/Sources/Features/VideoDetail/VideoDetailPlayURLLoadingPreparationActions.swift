@@ -17,6 +17,7 @@ extension VideoDetailViewModel {
     }
 
     func failPlayURLLoadingForMissingCID() {
+        currentPlayURLData = nil
         playVariants = []
         selectedPlayVariant = nil
         playURLElapsedMilliseconds = elapsedMilliseconds(since: playURLLoadStartTime)

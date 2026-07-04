@@ -43,6 +43,10 @@ nonisolated enum PlayURLMediaExpiration {
         return min(fallbackExpiration, mediaExpiration.addingTimeInterval(-safetyMargin))
     }
 
+    static func usesMediaURLExpiration(for data: PlayURLData) -> Bool {
+        earliestMediaURLExpirationDate(in: data) != nil
+    }
+
     static func isReusable(expirationDate: Date, now: Date = Date()) -> Bool {
         expirationDate.timeIntervalSince(now) > minimumReusableLifetime
     }
@@ -123,6 +127,7 @@ actor PlayURLCache {
         let scope: PlayURLCacheLoginScope
         let storedAt: Date
         let expiresAt: Date
+        let usesMediaURLExpiration: Bool
         var lastAccessedAt: Date
     }
 
@@ -151,17 +156,19 @@ actor PlayURLCache {
             misses += 1
             return nil
         }
-        guard Date().timeIntervalSince(entry.storedAt) < ttl else {
+        let now = Date()
+        guard now < entry.expiresAt else {
             entries[key] = nil
             misses += 1
             return nil
         }
-        guard PlayURLMediaExpiration.isReusable(expirationDate: entry.expiresAt) else {
+        guard !entry.usesMediaURLExpiration
+            || PlayURLMediaExpiration.isReusable(expirationDate: entry.expiresAt, now: now) else {
             entries[key] = nil
             misses += 1
             return nil
         }
-        entry.lastAccessedAt = Date()
+        entry.lastAccessedAt = now
         entries[key] = entry
         hits += 1
         return entry.data
@@ -175,8 +182,17 @@ actor PlayURLCache {
         guard shouldCache(data, scope: scope) else { return }
         let now = Date()
         let expiresAt = PlayURLMediaExpiration.expirationDate(for: data, storedAt: now, fallbackTTL: ttl)
-        guard PlayURLMediaExpiration.isReusable(expirationDate: expiresAt, now: now) else { return }
-        entries[key] = Entry(data: data, scope: scope, storedAt: now, expiresAt: expiresAt, lastAccessedAt: now)
+        let usesMediaURLExpiration = PlayURLMediaExpiration.usesMediaURLExpiration(for: data)
+        guard !usesMediaURLExpiration
+            || PlayURLMediaExpiration.isReusable(expirationDate: expiresAt, now: now) else { return }
+        entries[key] = Entry(
+            data: data,
+            scope: scope,
+            storedAt: now,
+            expiresAt: expiresAt,
+            usesMediaURLExpiration: usesMediaURLExpiration,
+            lastAccessedAt: now
+        )
         stores += 1
         trimIfNeeded()
     }
@@ -253,8 +269,9 @@ actor PlayURLCache {
     private func trimExpired(now: Date = Date()) {
         let oldCount = entries.count
         entries = entries.filter {
-            now.timeIntervalSince($0.value.storedAt) < ttl
-                && PlayURLMediaExpiration.isReusable(expirationDate: $0.value.expiresAt, now: now)
+            now < $0.value.expiresAt
+                && (!$0.value.usesMediaURLExpiration
+                    || PlayURLMediaExpiration.isReusable(expirationDate: $0.value.expiresAt, now: now))
         }
         evictions += max(0, oldCount - entries.count)
     }

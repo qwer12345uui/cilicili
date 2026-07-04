@@ -15,7 +15,6 @@ extension HomeFeedPreloadCoordinator {
                 cdnPreference: context.cdnPreference,
                 playbackAdaptationProfile: context.playbackAdaptationProfile
             )
-            await VideoPreloadCenter.shared.prioritizePlayback(for: video)
             await VideoPreloadCenter.shared.preloadPlayInfo(
                 video,
                 api: context.api,
@@ -26,6 +25,7 @@ extension HomeFeedPreloadCoordinator {
                 mediaWarmupDelay: 0,
                 playbackAdaptationProfile: context.playbackAdaptationProfile
             )
+            await VideoPreloadCenter.shared.prioritizePlayback(for: video)
         }
     }
 }

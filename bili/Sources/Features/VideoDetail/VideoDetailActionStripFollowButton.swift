@@ -17,7 +17,7 @@ struct VideoDetailActionStripFollowControl: View {
                 .disabled(!canFollow || isMutating)
                 .opacity((canFollow && !isMutating) ? 1 : 0.58)
                 .accessibilityLabel(isFollowing ? "已关注" : "关注")
-                    .buttonStyle(.glass)
+                .biliGlassButtonStyle()
             } else {
                 Button(action: action) {
                     VideoDetailActionStripFollowLabel(isFollowing: isFollowing)
@@ -27,7 +27,7 @@ struct VideoDetailActionStripFollowControl: View {
                 .disabled(!canFollow || isMutating)
                 .opacity((canFollow && !isMutating) ? 1 : 0.58)
                 .accessibilityLabel(isFollowing ? "已关注" : "关注")
-                    .buttonStyle(.glassProminent)
+                .biliGlassButtonStyle(prominent: true)
             }
         }
     }

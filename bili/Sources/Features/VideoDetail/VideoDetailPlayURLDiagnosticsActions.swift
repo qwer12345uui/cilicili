@@ -7,13 +7,14 @@ extension VideoDetailViewModel {
         note: String? = nil,
         error: Error? = nil
     ) -> String {
-        let playableVariants = data.playVariants(cdnPreference: libraryStore.effectivePlaybackCDNPreference)
+        let playableVariants = playVariants(from: data)
             .filter(\.isPlayable)
         var parts = [
             "source=\(diagnosticToken(source))",
             "variants=\(playableVariants.count)",
             "qualities=\(Self.qualitySummary(playableVariants))",
-            "cdn=\(diagnosticToken(libraryStore.effectivePlaybackCDNPreference.rawValue))"
+            "cdn=\(diagnosticToken(libraryStore.effectivePlaybackCDNPreference.rawValue))",
+            "forceHardware=\(libraryStore.forceHardwareDecodeEnabled ? "true" : "false")"
         ]
         if let note, !note.isEmpty {
             parts.append("note=\(diagnosticToken(note))")
