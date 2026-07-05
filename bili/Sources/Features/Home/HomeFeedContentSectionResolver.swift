@@ -11,8 +11,8 @@ struct HomeFeedContentSectionResolver: View {
         Group {
             if cells.isEmpty {
                 HomeFeedSkeletonSection(metrics: metrics)
-            } else if metrics.mode != .doubleColumn {
-                HomeFeedSingleColumnContent(
+            } else if metrics.mode.isDoubleColumn {
+                HomeFeedDoubleColumnContent(
                     metrics: metrics,
                     cells: cells,
                     lastSeenMarkerIndex: lastSeenMarkerIndex,
@@ -20,7 +20,7 @@ struct HomeFeedContentSectionResolver: View {
                     actions: actions
                 )
             } else {
-                HomeFeedDoubleColumnContent(
+                HomeFeedSingleColumnContent(
                     metrics: metrics,
                     cells: cells,
                     lastSeenMarkerIndex: lastSeenMarkerIndex,

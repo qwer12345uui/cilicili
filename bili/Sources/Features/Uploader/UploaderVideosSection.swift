@@ -5,14 +5,59 @@ struct UploaderVideosSection: View {
     let metrics: HomeFeedLayoutMetrics
 
     var body: some View {
-        if viewModel.videos.isEmpty && viewModel.state.isLoading {
+        VStack(alignment: .leading, spacing: 12) {
+            sortMenu
+
+            content
+        }
+    }
+
+    @ViewBuilder
+    private var content: some View {
+        if viewModel.videos.isEmpty {
+            emptyContent
+        } else {
+            videoGrid
+        }
+    }
+
+    private var sortMenu: some View {
+        HStack {
+            Menu {
+                ForEach(UploaderVideoOrder.allCases) { order in
+                    Button {
+                        Task { await viewModel.changeVideoOrder(order) }
+                    } label: {
+                        Label(order.title, systemImage: order == viewModel.videoOrder ? "checkmark" : "circle")
+                    }
+                }
+            } label: {
+                Label(viewModel.videoOrder.title, systemImage: "arrow.up.arrow.down.circle")
+                    .font(.subheadline.weight(.semibold))
+            }
+            .buttonStyle(.bordered)
+            .buttonBorderShape(.capsule)
+            .controlSize(.small)
+
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, metrics.feedHorizontalPadding)
+    }
+
+    @ViewBuilder
+    private var emptyContent: some View {
+        if viewModel.state.isLoading {
             UploaderVideosLoadingState()
-        } else if viewModel.videos.isEmpty {
+        } else if case .failed(let message) = viewModel.state {
+            ErrorStateView(title: "投稿加载失败", message: message) {
+                Task { await viewModel.refresh() }
+            }
+            .frame(maxWidth: .infinity)
+            .padding(.top, 60)
+        } else {
             EmptyStateView(title: "暂无投稿", systemImage: "film", message: "下拉刷新后再试。")
                 .frame(maxWidth: .infinity)
                 .padding(.top, 60)
-        } else {
-            videoGrid
         }
     }
 
@@ -27,15 +72,26 @@ struct UploaderVideosSection: View {
                 }
             }
 
-            if viewModel.state.isLoading {
-                ProgressView()
-                    .frame(maxWidth: .infinity)
-                    .gridCellColumns(metrics.feedColumns.count)
-                    .padding()
-            }
+            footer
+                .gridCellColumns(metrics.feedColumns.count)
         }
         .frame(maxWidth: .infinity)
         .padding(.horizontal, metrics.feedHorizontalPadding)
+    }
+
+    @ViewBuilder
+    private var footer: some View {
+        if viewModel.state.isLoading {
+            ProgressView()
+                .frame(maxWidth: .infinity)
+                .padding()
+        } else if !viewModel.hasMoreVideos {
+            Text("没有更多投稿了")
+                .font(.caption)
+                .foregroundStyle(.tertiary)
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 14)
+        }
     }
 }
 

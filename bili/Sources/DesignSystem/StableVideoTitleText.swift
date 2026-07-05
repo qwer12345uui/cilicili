@@ -170,8 +170,7 @@ private struct StableVideoTitleLabel: UIViewRepresentable {
     }
 
     private var titleLineBreakMode: NSLineBreakMode {
-        guard lineLimit != 1 else { return .byTruncatingTail }
-        return title.prefersCharacterWrappingForCJKText ? .byCharWrapping : .byWordWrapping
+        .byTruncatingTail
     }
 
     private var titleLineBreakStrategy: NSParagraphStyle.LineBreakStrategy {

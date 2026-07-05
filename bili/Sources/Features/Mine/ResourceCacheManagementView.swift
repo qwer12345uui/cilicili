@@ -1,6 +1,7 @@
 import SwiftUI
 
 struct ResourceCacheManagementView: View {
+    @EnvironmentObject private var libraryStore: LibraryStore
     @AppStorage(ResourceCacheLimitSettings.isEnabledKey) private var isCacheLimitEnabled = ResourceCacheLimitSettings.defaultIsEnabled
     @AppStorage(ResourceCacheLimitSettings.megabytesKey) private var cacheLimitMegabytes = ResourceCacheLimitSettings.defaultLimitMegabytes
     @State private var summary: ResourceCacheSummary?
@@ -21,6 +22,8 @@ struct ResourceCacheManagementView: View {
 
             ResourceCacheCleanupSection(performClear: performClear)
         }
+        .tint(libraryStore.appTintColor)
+        .listStyle(.insetGrouped)
         .nativeTopScrollEdgeEffect()
         .hiddenInlineNavigationTitle()
         .disabled(isWorking)

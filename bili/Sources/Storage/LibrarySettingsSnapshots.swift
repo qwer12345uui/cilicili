@@ -47,7 +47,7 @@ final class RootRuntimeSettingsStore: ObservableObject {
 }
 
 struct HomeRuntimeSettingsSnapshot: Equatable {
-    var homeFeedLayout: HomeFeedLayout = .singleColumn
+    var homeFeedLayout: HomeFeedLayout = LibraryStore.defaultHomeFeedLayout
     var homeRefreshTriggerDistance: Double = LibraryStore.defaultHomeRefreshTriggerDistance
 }
 

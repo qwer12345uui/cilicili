@@ -41,7 +41,7 @@ struct LiveStreamMenu: View {
                     .padding(.vertical, 6)
             }
             .biliPlayerGlassButtonStyle()
-            .foregroundStyle(.white)
+            .biliLiquidGlassForeground(shadowOpacity: 0.20)
         }
     }
 }
@@ -71,7 +71,7 @@ struct LiveQualityMenu: View {
                     .padding(.vertical, 6)
             }
             .biliPlayerGlassButtonStyle()
-            .foregroundStyle(.white)
+            .biliLiquidGlassForeground(shadowOpacity: 0.20)
         }
     }
 }

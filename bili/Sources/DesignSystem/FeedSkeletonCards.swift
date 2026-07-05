@@ -3,6 +3,7 @@ import SwiftUI
 struct VideoFeedSkeletonCard: View {
     enum Style {
         case singleColumn
+        case borderedSingleColumn(coverSize: CGSize)
         case grid
     }
 
@@ -12,6 +13,8 @@ struct VideoFeedSkeletonCard: View {
         switch style {
         case .singleColumn:
             singleColumnBody
+        case .borderedSingleColumn(let coverSize):
+            borderedSingleColumnBody(coverSize: coverSize)
         case .grid:
             gridBody
         }
@@ -59,6 +62,40 @@ struct VideoFeedSkeletonCard: View {
         .frame(maxWidth: .infinity, alignment: .topLeading)
         .accessibilityLabel("正在加载视频")
     }
+
+    private func borderedSingleColumnBody(coverSize: CGSize) -> some View {
+        HStack(alignment: .top, spacing: 12) {
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .fill(Color(.tertiarySystemFill))
+                .frame(width: coverSize.width, height: coverSize.height)
+
+            VStack(alignment: .leading, spacing: 6) {
+                VStack(alignment: .leading, spacing: 4) {
+                    SkeletonBlock(height: 15, shape: .rounded(5))
+                    SkeletonBlock(width: 136, height: 15, shape: .rounded(5))
+                }
+                .frame(minHeight: 38, alignment: .topLeading)
+
+                Spacer(minLength: 0)
+
+                SkeletonBlock(width: 118, height: 11, shape: .capsule)
+
+                HStack {
+                    SkeletonBlock(width: 62, height: 11, shape: .capsule)
+                    Spacer(minLength: 6)
+                    SkeletonBlock(width: 54, height: 11, shape: .capsule)
+                }
+            }
+            .padding(.vertical, 10)
+            .padding(.trailing, 10)
+            .frame(maxWidth: .infinity, minHeight: max(coverSize.height - 20, 1), alignment: .topLeading)
+        }
+        .frame(maxWidth: .infinity, minHeight: coverSize.height, alignment: .topLeading)
+        .videoCardBorderedSurface(cornerRadius: 18)
+        .padding(.vertical, 8)
+        .redacted(reason: .placeholder)
+        .accessibilityLabel("正在加载视频")
+    }
 }
 
 struct DynamicFeedSkeletonCard: View {
@@ -101,25 +138,29 @@ struct DynamicFeedSkeletonCard: View {
 
 struct LiveRoomSkeletonCard: View {
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            SkeletonAspectBlock(cornerRadius: 15)
+        VStack(alignment: .leading, spacing: 8) {
+            SkeletonAspectBlock(aspectRatio: 16 / 10, cornerRadius: 14)
+                .videoCardBorderedCover()
 
-            VStack(alignment: .leading, spacing: 7) {
-                SkeletonBlock(height: 18, shape: .rounded(5))
-                SkeletonBlock(width: 206, height: 17, shape: .rounded(5))
+            VStack(alignment: .leading, spacing: 4) {
+                VStack(alignment: .leading, spacing: 4) {
+                    SkeletonBlock(height: 15, shape: .rounded(5))
+                    SkeletonBlock(width: 104, height: 15, shape: .rounded(5))
+                }
+                .frame(minHeight: 36, alignment: .topLeading)
 
                 HStack(spacing: 6) {
-                    SkeletonBlock(width: 24, height: 24, shape: .circle)
-                    SkeletonBlock(width: 148, height: 12, shape: .capsule)
+                    SkeletonBlock(width: 14, height: 14, shape: .circle)
+                    SkeletonBlock(width: 72, height: 11, shape: .capsule)
+                    Spacer(minLength: 6)
+                    SkeletonBlock(width: 46, height: 11, shape: .capsule)
                 }
-                .padding(.top, 2)
-
-                SkeletonBlock(width: 112, height: 10, shape: .capsule)
             }
-            .padding(.horizontal, 2)
+            .padding(.horizontal, 10)
+            .padding(.bottom, 10)
         }
         .frame(maxWidth: .infinity, alignment: .topLeading)
-        .padding(.vertical, 14)
+        .videoCardBorderedSurface(cornerRadius: 18)
         .accessibilityLabel("正在加载直播间")
     }
 }

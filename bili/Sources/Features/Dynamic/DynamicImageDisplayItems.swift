@@ -42,7 +42,9 @@ enum DynamicImageDisplayItems {
             return ZoomyImagePreviewItem(
                 id: item.id,
                 fallbackURL: url,
-                viewerURL: url
+                viewerURL: url,
+                mediaBadgeText: item.image.mediaBadgeText,
+                liveVideoURL: item.image.normalizedLiveVideoURL.flatMap(URL.init(string:))
             )
         }
     }

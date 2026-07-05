@@ -7,17 +7,23 @@ struct ZoomyImagePreviewItem: Identifiable, Equatable {
     let thumbnailURL: URL?
     let fallbackURL: URL?
     let viewerURL: URL?
+    let mediaBadgeText: String?
+    let liveVideoURL: URL?
 
     init(
         id: String,
         thumbnailURL: URL? = nil,
         fallbackURL: URL? = nil,
-        viewerURL: URL? = nil
+        viewerURL: URL? = nil,
+        mediaBadgeText: String? = nil,
+        liveVideoURL: URL? = nil
     ) {
         self.id = id
         self.thumbnailURL = thumbnailURL
         self.fallbackURL = fallbackURL
         self.viewerURL = viewerURL
+        self.mediaBadgeText = mediaBadgeText
+        self.liveVideoURL = liveVideoURL
     }
 
     var displayURL: URL? {

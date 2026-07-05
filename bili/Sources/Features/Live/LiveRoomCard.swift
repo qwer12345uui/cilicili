@@ -8,18 +8,19 @@ struct LiveRoomCard: View {
             LiveRoomCardCover(
                 coverURL: coverURL,
                 fallbackCoverURL: fallbackCoverURL,
-                avatarCoverFallbackURL: avatarCoverFallbackURL,
-                onlineText: onlineText
+                avatarCoverFallbackURL: avatarCoverFallbackURL
             )
+            .videoCardBorderedCover()
 
             LiveRoomCardMetadataRow(
                 room: room,
                 title: title,
+                anchorName: anchorName,
                 metadataText: metadataText
             )
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.horizontal, 2)
+        .videoCardBorderedSurface(cornerRadius: 18)
         .contentShape(Rectangle())
         .accessibilityElement(children: .combine)
         .accessibilityLabel(accessibilityLabel)
@@ -71,7 +72,7 @@ struct LiveRoomCard: View {
     }
 
     private var metadataText: String {
-        [anchorName, areaText, onlineText.map { "\($0)人在线" }]
+        [areaText, onlineText.map { "\($0)在线" }]
             .compactMap { value in
                 guard let value, !value.isEmpty else { return nil }
                 return value

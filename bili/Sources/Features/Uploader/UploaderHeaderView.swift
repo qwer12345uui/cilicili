@@ -2,7 +2,7 @@ import SwiftUI
 
 struct UploaderHeaderView: View {
     let owner: VideoOwner
-    let viewModel: UploaderViewModel
+    @ObservedObject var viewModel: UploaderViewModel
 
     private var card: UploaderCard? {
         viewModel.profile?.card
@@ -18,7 +18,6 @@ struct UploaderHeaderView: View {
         }
         .padding()
         .biliGlassEffect(
-            tint: Color(.secondarySystemBackground).opacity(0.18),
             interactive: false,
             in: RoundedRectangle(cornerRadius: 18, style: .continuous)
         )

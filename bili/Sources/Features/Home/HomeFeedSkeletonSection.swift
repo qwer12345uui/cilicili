@@ -4,13 +4,26 @@ struct HomeFeedSkeletonSection: View {
     let metrics: HomeFeedLayoutMetrics
 
     var body: some View {
-        if metrics.mode == .doubleColumn {
+        if metrics.mode.isDoubleColumn {
             LazyVGrid(columns: metrics.doubleColumns, spacing: metrics.feedSpacing) {
                 ForEach(0..<6, id: \.self) { _ in
                     VideoFeedSkeletonCard(style: .grid)
                 }
             }
             .padding(.horizontal, metrics.feedHorizontalPadding)
+            .padding(.top, 2)
+            .allowsHitTesting(false)
+        } else if metrics.mode == .borderedSingleColumn {
+            LazyVStack(spacing: 0) {
+                ForEach(0..<5, id: \.self) { _ in
+                    VideoFeedSkeletonCard(
+                        style: .borderedSingleColumn(
+                            coverSize: metrics.borderedSingleColumnCoverSize ?? CGSize(width: 140, height: 88)
+                        )
+                    )
+                }
+            }
+            .padding(.horizontal, metrics.singleColumnHorizontalPadding)
             .padding(.top, 2)
             .allowsHitTesting(false)
         } else {

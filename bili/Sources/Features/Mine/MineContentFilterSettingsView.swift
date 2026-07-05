@@ -30,13 +30,11 @@ struct MineContentFilterSettingsView: View {
                 NavigationLink {
                     DynamicKeywordFilterSettingsView(libraryStore: libraryStore)
                 } label: {
-                    HStack {
-                        Label("自定义动态关键词", systemImage: "line.3.horizontal.decrease.circle")
-                        Spacer()
-                        Text("\(libraryStore.blockedDynamicKeywords.count) 个")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
+                    SettingsNavigationRow(
+                        title: "自定义动态关键词",
+                        subtitle: "\(libraryStore.blockedDynamicKeywords.count) 个关键词",
+                        systemImage: "line.3.horizontal.decrease.circle"
+                    )
                 }
 
                 Text("广告动态会按常见推广关键词过滤；带货动态会按 B 站商品组件和商品元数据过滤；自定义关键词会匹配动态正文、标题和转发内容。")
@@ -81,13 +79,11 @@ struct MineContentFilterSettingsView: View {
                 NavigationLink {
                     RecommendKeywordFilterSettingsView(libraryStore: libraryStore)
                 } label: {
-                    HStack {
-                        Label("标题关键词", systemImage: "text.badge.minus")
-                        Spacer()
-                        Text("\(libraryStore.blockedRecommendKeywords.count) 个")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
+                    SettingsNavigationRow(
+                        title: "标题关键词",
+                        subtitle: "\(libraryStore.blockedRecommendKeywords.count) 个关键词",
+                        systemImage: "text.badge.minus"
+                    )
                 }
 
                 Toggle(isOn: Binding(
@@ -102,6 +98,8 @@ struct MineContentFilterSettingsView: View {
                     .foregroundStyle(.secondary)
             }
         }
+        .tint(libraryStore.appTintColor)
+        .formStyle(.grouped)
         .nativeTopScrollEdgeEffect()
         .hiddenInlineNavigationTitle()
     }

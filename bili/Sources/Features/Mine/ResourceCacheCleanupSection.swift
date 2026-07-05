@@ -26,7 +26,7 @@ struct ResourceCacheCleanupSection: View {
                     await ResourceCacheCenter.clearAPI()
                 }
             } label: {
-                Label("清理 API 缓存", systemImage: "network.badge.shield.half.filled")
+                Label("清理 API 缓存", systemImage: "network")
             }
 
             Button {

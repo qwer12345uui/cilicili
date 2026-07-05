@@ -1,22 +1,45 @@
 import SwiftUI
 
+struct DynamicTopUploaderStripItem: Identifiable, Hashable {
+    let owner: VideoOwner
+    let liveRoom: LiveRoom?
+
+    var id: String {
+        if owner.mid > 0 {
+            return "up-\(owner.mid)"
+        }
+        if let liveRoom {
+            return "live-\(liveRoom.roomID)"
+        }
+        return "up-\(owner.name)"
+    }
+
+    var isLive: Bool {
+        liveRoom != nil
+    }
+}
+
 struct FollowedLiveStrip: View {
-    let rooms: [LiveRoom]
+    let items: [DynamicTopUploaderStripItem]
+    let isLoading: Bool
 
     var body: some View {
-        if !rooms.isEmpty {
+        if !items.isEmpty || isLoading {
             VStack(alignment: .leading, spacing: 8) {
-                Text("正在直播")
+                Text("最常访问")
                     .font(.subheadline.weight(.semibold))
                     .padding(.horizontal, 2)
 
                 ScrollView(.horizontal) {
                     LazyHStack(spacing: 10) {
-                        ForEach(rooms) { room in
-                            NavigationLink(value: room) {
-                                FollowedLiveAvatar(room: room)
+                        if items.isEmpty {
+                            ForEach(0..<10, id: \.self) { _ in
+                                FollowedLiveAvatarPlaceholder()
                             }
-                            .buttonStyle(.plain)
+                        } else {
+                            ForEach(items) { item in
+                                stripItemLink(item)
+                            }
                         }
                     }
                     .padding(.horizontal, 2)
@@ -29,17 +52,47 @@ struct FollowedLiveStrip: View {
             .transition(.opacity.combined(with: .move(edge: .top)))
         }
     }
+
+    @ViewBuilder
+    private func stripItemLink(_ item: DynamicTopUploaderStripItem) -> some View {
+        if let liveRoom = item.liveRoom {
+            NavigationLink(value: liveRoom) {
+                FollowedLiveAvatar(item: item)
+            }
+            .buttonStyle(.plain)
+        } else if item.owner.mid > 0 {
+            NavigationLink(value: item.owner) {
+                FollowedLiveAvatar(item: item)
+            }
+            .buttonStyle(.plain)
+        } else {
+            FollowedLiveAvatar(item: item)
+        }
+    }
+}
+
+private struct FollowedLiveAvatarPlaceholder: View {
+    var body: some View {
+        VStack(spacing: 5) {
+            SkeletonBlock(width: 48, height: 48, shape: .circle)
+                .mediaShadow(.regular)
+
+            SkeletonBlock(width: 42, height: 10, shape: .capsule)
+        }
+        .frame(width: 60)
+        .accessibilityHidden(true)
+    }
 }
 
 private struct FollowedLiveAvatar: View {
     @Environment(\.appThemeTintColor) private var appTintColor
 
-    let room: LiveRoom
+    let item: DynamicTopUploaderStripItem
 
     var body: some View {
         VStack(spacing: 5) {
             ZStack(alignment: .bottom) {
-                AvatarRemoteImage(urlString: room.face, pixelSize: 96) {
+                AvatarRemoteImage(urlString: item.owner.face, pixelSize: 96) {
                     Image(systemName: "person.crop.circle.fill")
                         .font(.system(size: 44))
                         .foregroundStyle(.tertiary)
@@ -52,13 +105,15 @@ private struct FollowedLiveAvatar: View {
                 }
                 .mediaShadow(.regular)
 
-                Text("直播中")
-                    .font(.system(size: 8, weight: .bold))
-                    .foregroundStyle(.primary)
-                    .padding(.horizontal, 5)
-                    .padding(.vertical, 2.5)
-                    .biliRegularGlassEffect(in: Capsule())
-                    .offset(y: 4)
+                if item.isLive {
+                    Text("直播中")
+                        .font(.system(size: 8, weight: .bold))
+                        .foregroundStyle(.primary)
+                        .padding(.horizontal, 5)
+                        .padding(.vertical, 2.5)
+                        .videoCoverBadgeBackground(style: .regular, in: Capsule())
+                        .offset(y: 4)
+                }
             }
 
             Text(anchorName)
@@ -69,11 +124,11 @@ private struct FollowedLiveAvatar: View {
         }
         .frame(width: 60)
         .accessibilityElement(children: .combine)
-        .accessibilityLabel("\(anchorName) 正在直播")
+        .accessibilityLabel(item.isLive ? "\(anchorName) 正在直播" : anchorName)
     }
 
     private var anchorName: String {
-        let trimmedName = room.uname.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmedName = item.owner.name.trimmingCharacters(in: .whitespacesAndNewlines)
         return trimmedName.isEmpty ? "UP 主" : trimmedName
     }
 }

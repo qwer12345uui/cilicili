@@ -2,6 +2,7 @@ import SwiftUI
 
 struct MineHomeRecommendDiagnosticsView: View {
     @EnvironmentObject private var diagnosticsStore: HomeRecommendDiagnosticsStore
+    @EnvironmentObject private var libraryStore: LibraryStore
     @ObservedObject private var feedbackStore = HomeRecommendFeedbackCenter.shared
 
     private var snapshot: HomeRecommendDiagnosticsSnapshot {
@@ -109,6 +110,8 @@ struct MineHomeRecommendDiagnosticsView: View {
                 LabeledContent("反馈", value: HomeRecommendFeedbackCenter.latestSnapshotURL.lastPathComponent)
             }
         }
+        .tint(libraryStore.appTintColor)
+        .formStyle(.grouped)
         .nativeTopScrollEdgeEffect()
         .hiddenInlineNavigationTitle()
     }

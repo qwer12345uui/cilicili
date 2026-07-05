@@ -41,7 +41,10 @@ private struct DynamicFeedBodyContent: View {
 
     var body: some View {
         LazyVStack(spacing: 0) {
-            FollowedLiveStrip(rooms: viewModel.followedLiveRooms)
+            FollowedLiveStrip(
+                items: viewModel.topUploaderStripItems,
+                isLoading: isLoggedIn && viewModel.isTopUploaderStripLoading
+            )
 
             if !isLoggedIn {
                 DynamicLoginEmptyState()

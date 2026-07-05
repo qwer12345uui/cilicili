@@ -4,9 +4,14 @@ struct LiveFeedSkeletonList: View {
     var horizontalPadding: CGFloat = 16
     var topPadding: CGFloat = 10
 
+    private let columns = [
+        GridItem(.flexible(), spacing: 12),
+        GridItem(.flexible(), spacing: 12)
+    ]
+
     var body: some View {
-        LazyVStack(spacing: 0) {
-            ForEach(0..<4, id: \.self) { _ in
+        LazyVGrid(columns: columns, spacing: 18) {
+            ForEach(0..<6, id: \.self) { _ in
                 LiveRoomSkeletonCard()
             }
         }

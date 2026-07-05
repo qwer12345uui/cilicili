@@ -39,7 +39,8 @@ final class DynamicViewModelHolder: ObservableObject {
 private struct DynamicRenderSnapshot: Equatable {
     let state: LoadingState
     let hasMoreItems: Bool
-    let followedLiveRoomsRevision: Int
+    let topUploaderStripRevision: Int
+    let isTopUploaderStripLoading: Bool
     let itemCount: Int
     let firstItemID: String?
     let lastItemID: String?
@@ -48,7 +49,8 @@ private struct DynamicRenderSnapshot: Equatable {
     init(_ viewModel: DynamicViewModel) {
         state = viewModel.state
         hasMoreItems = viewModel.hasMoreItems
-        followedLiveRoomsRevision = viewModel.followedLiveRoomsRevision
+        topUploaderStripRevision = viewModel.topUploaderStripRevision
+        isTopUploaderStripLoading = viewModel.isTopUploaderStripLoading
         itemCount = viewModel.items.count
         firstItemID = viewModel.items.first?.id
         lastItemID = viewModel.items.last?.id

@@ -74,7 +74,6 @@ extension View {
     func dynamicCommentGlassCard() -> some View {
         clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
             .biliGlassEffect(
-                tint: Color(.secondarySystemBackground).opacity(0.18),
                 interactive: false,
                 in: RoundedRectangle(cornerRadius: 18, style: .continuous)
             )

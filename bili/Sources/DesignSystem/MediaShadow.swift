@@ -84,13 +84,17 @@ extension View {
     func videoCoverSurface(
         cornerRadius: CGFloat,
         shadowLevel: MediaShadowLevel? = nil,
-        emphasizesBorder: Bool = false
+        emphasizesBorder: Bool = false,
+        shadowOpacityScale: Double = 1,
+        borderOpacityScale: Double = 1
     ) -> some View {
         modifier(
             VideoCoverSurfaceModifier(
                 cornerRadius: cornerRadius,
                 shadowLevel: shadowLevel,
-                emphasizesBorder: emphasizesBorder
+                emphasizesBorder: emphasizesBorder,
+                shadowOpacityScale: shadowOpacityScale,
+                borderOpacityScale: borderOpacityScale
             )
         )
     }
@@ -101,6 +105,8 @@ private struct VideoCoverSurfaceModifier: ViewModifier {
     let cornerRadius: CGFloat
     let shadowLevel: MediaShadowLevel?
     let emphasizesBorder: Bool
+    let shadowOpacityScale: Double
+    let borderOpacityScale: Double
 
     @ViewBuilder
     func body(content: Content) -> some View {
@@ -118,7 +124,7 @@ private struct VideoCoverSurfaceModifier: ViewModifier {
             }
 
         if let shadowLevel {
-            surfaced.mediaShadow(shadowLevel)
+            surfaced.mediaShadow(shadowLevel, opacityScale: shadowOpacityScale)
         } else {
             surfaced
         }
@@ -128,18 +134,18 @@ private struct VideoCoverSurfaceModifier: ViewModifier {
         let opacity = emphasizesBorder ? 1.18 : 1
         switch colorScheme {
         case .dark:
-            return Color.white.opacity(0.18 * opacity)
+            return Color.white.opacity(0.18 * opacity * borderOpacityScale)
         default:
-            return Color.black.opacity(0.10 * opacity)
+            return Color.black.opacity(0.10 * opacity * borderOpacityScale)
         }
     }
 
     private var innerStrokeColor: Color {
         switch colorScheme {
         case .dark:
-            return Color.white.opacity(0.10)
+            return Color.white.opacity(0.10 * borderOpacityScale)
         default:
-            return Color.white.opacity(0.34)
+            return Color.white.opacity(0.34 * borderOpacityScale)
         }
     }
 }

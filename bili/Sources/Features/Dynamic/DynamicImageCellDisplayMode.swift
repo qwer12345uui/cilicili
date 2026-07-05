@@ -21,6 +21,13 @@ extension DynamicImageCellDisplayMode {
         }
     }
 
+    var isLongImage: Bool {
+        if case .longImage = self {
+            return true
+        }
+        return false
+    }
+
     var thumbnailContentMode: ZoomyImageContentMode {
         switch self {
         case .fixedHeight:
@@ -69,19 +76,59 @@ extension DynamicImageCell {
 }
 
 struct LongImageBadge: View {
+    var body: some View {
+        GlassEffectContainer(spacing: 8) {
+            DynamicImageLongBadgeContent()
+        }
+    }
+}
+
+struct DynamicImageBadgeRow: View {
+    let mediaBadgeText: String?
+    let showsLongImage: Bool
+
+    var body: some View {
+        if mediaBadgeText != nil || showsLongImage {
+            GlassEffectContainer(spacing: 6) {
+                HStack(spacing: 6) {
+                    if let mediaBadgeText {
+                        DynamicImageMediaBadge(title: mediaBadgeText)
+                    }
+                    if showsLongImage {
+                        DynamicImageLongBadgeContent()
+                    }
+                }
+            }
+        }
+    }
+}
+
+struct DynamicImageMediaBadge: View {
+    let title: String
     @AppStorage(VideoCoverBadgeShadow.storageKey) private var shadowOpacity = VideoCoverBadgeShadow.defaultOpacity
 
     var body: some View {
-        GlassEffectContainer(spacing: 8) {
-            Label("长图", systemImage: "scroll")
-                .font(.caption2.weight(.semibold))
-                .labelStyle(.titleAndIcon)
-                .foregroundStyle(.white)
-                .videoCoverBadgeForegroundShadow(opacity: shadowOpacity)
-                .padding(.horizontal, 8)
-                .padding(.vertical, 5)
-                .biliPlayerClearGlass(interactive: false, in: Capsule())
-                .accessibilityLabel("长图")
-        }
+        Text(title)
+            .font(.caption2.weight(.semibold))
+            .videoCoverBadgeForeground(opacity: shadowOpacity)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 5)
+            .videoCoverBadgeBackground(style: .clear, in: Capsule())
+            .accessibilityLabel(title)
+    }
+}
+
+private struct DynamicImageLongBadgeContent: View {
+    @AppStorage(VideoCoverBadgeShadow.storageKey) private var shadowOpacity = VideoCoverBadgeShadow.defaultOpacity
+
+    var body: some View {
+        Label("长图", systemImage: "scroll")
+            .font(.caption2.weight(.semibold))
+            .labelStyle(.titleAndIcon)
+            .videoCoverBadgeForeground(opacity: shadowOpacity)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 5)
+            .videoCoverBadgeBackground(style: .clear, in: Capsule())
+            .accessibilityLabel("长图")
     }
 }

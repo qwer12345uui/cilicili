@@ -13,8 +13,8 @@ struct PlayerStartupLoadingChrome: View {
 
             Text(isBuffering ? "缓冲中" : "加载中")
                 .font(.caption2.weight(.semibold))
-                .foregroundStyle(.white.opacity(0.92))
         }
+        .biliLiquidGlassForeground(shadowOpacity: 0.20)
         .padding(.horizontal, 14)
         .padding(.vertical, 9)
         .biliPlayerClearGlass(interactive: false, in: Capsule())

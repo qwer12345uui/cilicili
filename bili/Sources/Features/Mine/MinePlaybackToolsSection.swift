@@ -23,7 +23,7 @@ struct MinePlaybackToolsSection: View {
                 get: { libraryStore.playerControlEdgeScrimEnabled },
                 set: { libraryStore.setPlayerControlEdgeScrimEnabled($0) }
             )) {
-                Label("播放控件边缘遮罩", systemImage: "rectangle.topthird.inset.filled")
+                Label("播放控件边缘遮罩", systemImage: "rectangle.dashed")
             }
 
             Toggle(isOn: Binding(
@@ -43,13 +43,21 @@ struct MinePlaybackToolsSection: View {
             NavigationLink {
                 PlayerPerformanceLogView()
             } label: {
-                Label("播放性能日志", systemImage: "speedometer")
+                SettingsNavigationRow(
+                    title: "播放性能日志",
+                    subtitle: "首帧、缓冲、自动优化记录",
+                    systemImage: "speedometer"
+                )
             }
 
             NavigationLink {
                 ResourceCacheManagementView()
             } label: {
-                Label("资源缓存", systemImage: "internaldrive")
+                SettingsNavigationRow(
+                    title: "资源缓存",
+                    subtitle: "图片、接口、视频分片缓存",
+                    systemImage: "internaldrive"
+                )
             }
         }
     }

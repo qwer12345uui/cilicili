@@ -8,14 +8,15 @@ final class DynamicViewModel: ObservableObject {
             itemsRevision &+= 1
         }
     }
-    @Published private(set) var followedLiveRooms: [LiveRoom] = [] {
+    @Published private(set) var topUploaderStripItems: [DynamicTopUploaderStripItem] = [] {
         didSet {
-            followedLiveRoomsRevision &+= 1
+            topUploaderStripRevision &+= 1
         }
     }
+    @Published private(set) var isTopUploaderStripLoading = false
     @Published var state: LoadingState = .idle
     @Published private(set) var itemsRevision = 0
-    @Published private(set) var followedLiveRoomsRevision = 0
+    @Published private(set) var topUploaderStripRevision = 0
 
     private let lifecycleCoordinator: DynamicFeedLifecycleCoordinator
     private var filterCancellable: AnyCancellable?
@@ -57,9 +58,9 @@ final class DynamicViewModel: ObservableObject {
             return
         }
         state = .loading
+        refreshTopUploaderStrip()
         do {
             items = try await lifecycleCoordinator.loadInitialPage()
-            refreshFollowedLiveRooms()
             state = .loaded
         } catch {
             state = .failed(error.localizedDescription)
@@ -72,9 +73,9 @@ final class DynamicViewModel: ObservableObject {
             return
         }
         state = .loading
+        refreshTopUploaderStrip()
         do {
             items = try await lifecycleCoordinator.refreshPage()
-            refreshFollowedLiveRooms()
             state = .loaded
         } catch {
             state = .failed(error.localizedDescription)
@@ -104,7 +105,8 @@ final class DynamicViewModel: ObservableObject {
     private func prepareLoggedOutState() {
         lifecycleCoordinator.prepareLoggedOutState()
         items = []
-        followedLiveRooms = []
+        topUploaderStripItems = []
+        isTopUploaderStripLoading = false
         state = .idle
     }
 
@@ -112,9 +114,11 @@ final class DynamicViewModel: ObservableObject {
         items = lifecycleCoordinator.filteredCurrentItems()
     }
 
-    private func refreshFollowedLiveRooms() {
-        lifecycleCoordinator.refreshFollowedLiveRooms { [weak self] rooms in
-            self?.followedLiveRooms = rooms
+    private func refreshTopUploaderStrip() {
+        isTopUploaderStripLoading = true
+        lifecycleCoordinator.refreshTopUploaderStripItems { [weak self] items in
+            self?.topUploaderStripItems = items
+            self?.isTopUploaderStripLoading = false
         }
     }
 }

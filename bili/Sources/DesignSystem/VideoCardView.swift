@@ -4,6 +4,7 @@ struct VideoCardView: View, Equatable {
     enum SurfaceStyle: Equatable {
         case elevated
         case blended
+        case bordered
     }
 
     let display: VideoCardDisplayModel
@@ -11,6 +12,7 @@ struct VideoCardView: View, Equatable {
     private let showsAuthorIdentity: Bool
     private let showsCoverViewCountBadge: Bool
     private let surfaceStyle: SurfaceStyle
+    private let coverAspectRatio: CGFloat
     private let fixedCoverSize: CGSize?
     private let coverMaximumPixelLength: Int
     @State private var coverLoadedState = VideoCoverLoadedState()
@@ -21,6 +23,7 @@ struct VideoCardView: View, Equatable {
         showsAuthorIdentity: Bool = true,
         showsCoverViewCountBadge: Bool = true,
         surfaceStyle: SurfaceStyle = .elevated,
+        coverAspectRatio: CGFloat = 16.0 / 9.0,
         fixedCoverSize: CGSize? = nil,
         coverMaximumPixelLength: Int = 1280
     ) {
@@ -29,6 +32,7 @@ struct VideoCardView: View, Equatable {
         self.showsAuthorIdentity = showsAuthorIdentity
         self.showsCoverViewCountBadge = showsCoverViewCountBadge
         self.surfaceStyle = surfaceStyle
+        self.coverAspectRatio = coverAspectRatio
         self.fixedCoverSize = fixedCoverSize
         self.coverMaximumPixelLength = coverMaximumPixelLength
     }
@@ -39,6 +43,7 @@ struct VideoCardView: View, Equatable {
         showsAuthorIdentity: Bool = true,
         showsCoverViewCountBadge: Bool = true,
         surfaceStyle: SurfaceStyle = .elevated,
+        coverAspectRatio: CGFloat = 16.0 / 9.0,
         fixedCoverSize: CGSize? = nil,
         coverMaximumPixelLength: Int = 1280
     ) {
@@ -47,6 +52,7 @@ struct VideoCardView: View, Equatable {
         self.showsAuthorIdentity = showsAuthorIdentity
         self.showsCoverViewCountBadge = showsCoverViewCountBadge
         self.surfaceStyle = surfaceStyle
+        self.coverAspectRatio = coverAspectRatio
         self.fixedCoverSize = fixedCoverSize
         self.coverMaximumPixelLength = coverMaximumPixelLength
     }
@@ -57,6 +63,7 @@ struct VideoCardView: View, Equatable {
             && lhs.showsAuthorIdentity == rhs.showsAuthorIdentity
             && lhs.showsCoverViewCountBadge == rhs.showsCoverViewCountBadge
             && lhs.surfaceStyle == rhs.surfaceStyle
+            && lhs.coverAspectRatio == rhs.coverAspectRatio
             && lhs.fixedCoverSize == rhs.fixedCoverSize
             && lhs.coverMaximumPixelLength == rhs.coverMaximumPixelLength
     }
@@ -68,6 +75,8 @@ struct VideoCardView: View, Equatable {
                 elevatedBody
             case .blended:
                 blendedBody
+            case .bordered:
+                borderedBody
             }
         }
         .frame(maxWidth: .infinity, alignment: .topLeading)
@@ -92,9 +101,18 @@ struct VideoCardView: View, Equatable {
         )
     }
 
+    private var borderedBody: some View {
+        VideoCardBorderedBody(
+            display: display,
+            cover: cover,
+            showsPublishTimeInAuthorRow: showsPublishTimeInAuthorRow,
+            showsAuthorIdentity: showsAuthorIdentity
+        )
+    }
+
     private var cover: some View {
         Color.clear
-            .aspectRatio(16.0 / 9.0, contentMode: .fit)
+            .aspectRatio(coverAspectRatio, contentMode: .fit)
             .overlay {
                 ZStack(alignment: .bottom) {
                     coverImage

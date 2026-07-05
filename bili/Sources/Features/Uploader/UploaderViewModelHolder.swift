@@ -29,9 +29,15 @@ private struct UploaderRenderSnapshot: Equatable {
     let profileState: LoadingState
     let profileRevision: Int
     let videosRevision: Int
+    let videoOrder: UploaderVideoOrder
+    let hasMoreVideos: Bool
+    let dynamicItemsRevision: Int
     let videoCount: Int
+    let dynamicItemCount: Int
     let firstVideoID: String?
     let lastVideoID: String?
+    let firstDynamicItemID: String?
+    let lastDynamicItemID: String?
     let isFollowing: Bool
     let followerCount: Int?
     let followingCount: Int?
@@ -39,15 +45,22 @@ private struct UploaderRenderSnapshot: Equatable {
     let archiveCount: Int?
     let isMutatingFollow: Bool
     let followMessage: String?
+    let dynamicState: LoadingState
 
     init(_ viewModel: UploaderViewModel) {
         state = viewModel.state
         profileState = viewModel.profileState
         profileRevision = viewModel.profileRevision
         videosRevision = viewModel.videosRevision
+        videoOrder = viewModel.videoOrder
+        hasMoreVideos = viewModel.hasMoreVideos
+        dynamicItemsRevision = viewModel.dynamicItemsRevision
         videoCount = viewModel.videos.count
+        dynamicItemCount = viewModel.dynamicItems.count
         firstVideoID = viewModel.videos.first?.id
         lastVideoID = viewModel.videos.last?.id
+        firstDynamicItemID = viewModel.dynamicItems.first?.id
+        lastDynamicItemID = viewModel.dynamicItems.last?.id
         isFollowing = viewModel.isFollowing
         followerCount = viewModel.followerCount
         followingCount = viewModel.followingCount
@@ -55,5 +68,6 @@ private struct UploaderRenderSnapshot: Equatable {
         archiveCount = viewModel.archiveCount
         isMutatingFollow = viewModel.isMutatingFollow
         followMessage = viewModel.followMessage
+        dynamicState = viewModel.dynamicState
     }
 }

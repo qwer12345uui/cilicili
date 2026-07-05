@@ -3,35 +3,45 @@ import SwiftUI
 struct LiveRoomCardMetadataRow: View {
     let room: LiveRoom
     let title: String
+    let anchorName: String
     let metadataText: String
 
-    private static let avatarSide: CGFloat = 34
-
     var body: some View {
-        HStack(alignment: .center, spacing: 9) {
-            AvatarRemoteImage(urlString: room.face, pixelSize: 56) {
-                Image(systemName: "person.crop.circle.fill")
-                    .font(.system(size: 24, weight: .medium))
-                    .foregroundStyle(.tertiary)
-            }
-            .frame(width: Self.avatarSide, height: Self.avatarSide)
-            .clipShape(Circle())
-            .mediaShadow(.subtle)
+        VStack(alignment: .leading, spacing: 4) {
+            StableVideoTitleText(title, style: .compactCard)
+                .frame(minHeight: 36, alignment: .topLeading)
+                .frame(maxWidth: .infinity, alignment: .leading)
 
-            VStack(alignment: .leading, spacing: 1) {
-                StableVideoTitleText(title, style: .feedHeadline, lineLimit: 1)
-                    .frame(maxWidth: .infinity, alignment: .leading)
+            HStack(spacing: 4) {
+                AvatarRemoteImage(urlString: room.face, pixelSize: 48) {
+                    Image(systemName: "person.crop.circle.fill")
+                        .font(.system(size: 13, weight: .medium))
+                        .foregroundStyle(.tertiary)
+                }
+                .frame(width: 14, height: 14)
+                .clipShape(Circle())
+                .mediaShadow(.subtle)
 
-                Text(metadataText)
-                    .font(.caption.weight(.medium))
+                Text(anchorName)
+                    .font(.caption2)
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
-                    .truncationMode(.tail)
-                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .minimumScaleFactor(0.85)
+
+                if !metadataText.isEmpty {
+                    Spacer(minLength: 6)
+
+                    Text(metadataText)
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.85)
+                }
             }
-            .frame(height: Self.avatarSide, alignment: .center)
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .frame(height: Self.avatarSide)
         .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, 10)
+        .padding(.bottom, 10)
     }
 }

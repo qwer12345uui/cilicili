@@ -1,62 +1,22 @@
 import SwiftUI
 
-struct LiveRoomCoverOverlay: View {
-    let onlineText: String?
-
-    var body: some View {
-        GlassEffectContainer(spacing: 8) {
-            ZStack {
-                LiveRoomStatusBadge()
-                    .padding(8)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-
-                if let onlineText {
-                    LiveRoomOnlineBadge(text: onlineText)
-                        .padding(12)
-                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)
-                }
-            }
-        }
-        .accessibilityHidden(true)
-    }
-}
-
 struct LiveRoomStatusBadge: View {
+    @AppStorage(VideoCoverBadgeShadow.storageKey) private var shadowOpacity = VideoCoverBadgeShadow.defaultOpacity
+
     var body: some View {
         Label("直播中", systemImage: "dot.radiowaves.left.and.right")
             .font(.system(size: 10.5, weight: .bold))
-            .foregroundStyle(.white)
+            .videoCoverBadgeForeground(opacity: shadowOpacity)
             .labelStyle(.titleAndIcon)
             .lineLimit(1)
             .minimumScaleFactor(0.72)
             .allowsTightening(true)
             .padding(.horizontal, 6)
             .padding(.vertical, 4)
-            .biliPlayerClearGlass(interactive: false, in: Capsule())
+            .videoCoverBadgeBackground(style: .clear, in: Capsule())
             .liveRoomCoverControlShadow()
             .fixedSize(horizontal: true, vertical: false)
             .frame(maxWidth: 76, alignment: .leading)
-            .clipped()
-    }
-}
-
-struct LiveRoomOnlineBadge: View {
-    let text: String
-
-    var body: some View {
-        Label(text, systemImage: "person.2.fill")
-            .font(.system(size: 10.5, weight: .semibold))
-            .foregroundStyle(.white)
-            .labelStyle(.titleAndIcon)
-            .lineLimit(1)
-            .minimumScaleFactor(0.72)
-            .allowsTightening(true)
-            .padding(.horizontal, 6)
-            .padding(.vertical, 4)
-            .biliPlayerClearGlass(interactive: false, in: Capsule())
-            .liveRoomCoverControlShadow()
-            .fixedSize(horizontal: true, vertical: false)
-            .frame(maxWidth: 86, alignment: .leading)
             .clipped()
     }
 }

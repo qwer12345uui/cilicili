@@ -5,6 +5,10 @@ struct CompactDynamicImageDisplayItem: Identifiable {
     let index: Int
     let image: DynamicImageItem
     let aspectRatio: CGFloat
+
+    var isLongImage: Bool {
+        aspectRatio < 0.62
+    }
 }
 
 enum CompactDynamicImageDisplayItems {
@@ -38,7 +42,9 @@ enum CompactDynamicImageDisplayItems {
             return ZoomyImagePreviewItem(
                 id: item.id,
                 fallbackURL: url,
-                viewerURL: url
+                viewerURL: url,
+                mediaBadgeText: item.image.mediaBadgeText,
+                liveVideoURL: item.image.normalizedLiveVideoURL.flatMap(URL.init(string:))
             )
         }
     }

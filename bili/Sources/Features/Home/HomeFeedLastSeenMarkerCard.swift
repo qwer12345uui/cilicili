@@ -14,6 +14,10 @@ struct HomeFeedLastSeenMarkerCard: View {
                 singleColumnLabel
             case .doubleColumn:
                 doubleColumnLabel
+            case .borderedDoubleColumn:
+                borderedDoubleColumnLabel
+            case .borderedSingleColumn:
+                borderedSingleColumnLabel
             }
         }
         .buttonStyle(.plain)
@@ -76,10 +80,101 @@ struct HomeFeedLastSeenMarkerCard: View {
         .contentShape(Rectangle())
     }
 
-    private func cover(cornerRadius: CGFloat) -> some View {
+    private var borderedDoubleColumnLabel: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            cover(cornerRadius: 14, aspectRatio: 16 / 10)
+                .videoCardBorderedCover()
+
+            VStack(alignment: .leading, spacing: 4) {
+                StableVideoTitleText("上次看到这里", style: .compactCard)
+                    .frame(minHeight: 36, alignment: .topLeading)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+
+                HStack(spacing: 4) {
+                    markerAvatar(size: 14, iconSize: 8)
+
+                    Text("点击刷新")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+
+                    Spacer(minLength: 6)
+
+                    Text("推荐")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .padding(.horizontal, 10)
+            .padding(.bottom, 10)
+        }
+        .videoCardBorderedSurface(cornerRadius: 18)
+        .contentShape(Rectangle())
+    }
+
+    private var borderedSingleColumnLabel: some View {
+        let coverSize = metrics.borderedSingleColumnCoverSize ?? CGSize(width: 140, height: 88)
+
+        return HStack(alignment: .top, spacing: 12) {
+            borderedSingleColumnCover(size: coverSize)
+
+            VStack(alignment: .leading, spacing: 6) {
+                StableVideoTitleText("上次看到这里", style: .compactCard, lineLimit: 2)
+                    .frame(minHeight: 38, alignment: .topLeading)
+
+                Spacer(minLength: 0)
+
+                HStack(spacing: 5) {
+                    markerAvatar(size: 14, iconSize: 8)
+
+                    Text("点击刷新推荐")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+            }
+            .padding(.vertical, 10)
+            .padding(.trailing, 10)
+            .frame(maxWidth: .infinity, minHeight: max(coverSize.height - 20, 1), alignment: .topLeading)
+        }
+        .frame(maxWidth: .infinity, minHeight: coverSize.height, alignment: .topLeading)
+        .videoCardBorderedSurface(cornerRadius: 18)
+        .contentShape(Rectangle())
+    }
+
+    private func borderedSingleColumnCover(size: CGSize) -> some View {
+        let shape = RoundedRectangle(cornerRadius: 18, style: .continuous)
+
+        return Color.clear
+            .frame(width: size.width, height: size.height)
+            .overlay {
+                ZStack {
+                    shape
+                        .fill(Color(.secondarySystemGroupedBackground).opacity(0.92))
+
+                    shape
+                        .fill(Color(.tertiarySystemFill).opacity(0.55))
+
+                    VStack(spacing: 6) {
+                        Image(systemName: "arrow.clockwise")
+                            .font(.system(size: 20, weight: .semibold))
+
+                        Text("刷新")
+                            .font(.caption.weight(.semibold))
+                    }
+                    .foregroundStyle(appTintColor)
+                }
+                .biliPlayerClearGlass(interactive: true, in: shape)
+            }
+            .videoCardBorderedCover(cornerRadius: 18)
+    }
+
+    private func cover(cornerRadius: CGFloat, aspectRatio: CGFloat = 16.0 / 9.0) -> some View {
         let shape = RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
         return Color.clear
-            .aspectRatio(16.0 / 9.0, contentMode: .fit)
+            .aspectRatio(aspectRatio, contentMode: .fit)
             .overlay {
                 ZStack {
                     shape

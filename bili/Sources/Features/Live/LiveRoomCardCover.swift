@@ -4,18 +4,18 @@ struct LiveRoomCardCover: View {
     let coverURL: URL?
     let fallbackCoverURL: URL?
     let avatarCoverFallbackURL: URL?
-    let onlineText: String?
 
     var body: some View {
         Color.gray.opacity(0.14)
-            .aspectRatio(16 / 9, contentMode: .fit)
+            .aspectRatio(16 / 10, contentMode: .fit)
             .overlay {
                 coverImage
             }
-            .overlay {
-                LiveRoomCoverOverlay(onlineText: onlineText)
+            .overlay(alignment: .topLeading) {
+                LiveRoomStatusBadge()
+                    .padding(8)
+                    .accessibilityHidden(true)
             }
-            .videoCoverSurface(cornerRadius: 18, shadowLevel: .control)
     }
 
     private var coverImage: some View {

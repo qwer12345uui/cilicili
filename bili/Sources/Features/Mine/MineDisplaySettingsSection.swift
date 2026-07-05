@@ -13,30 +13,11 @@ struct MineDisplaySettingsSection: View {
                     Text(mode.title).tag(mode)
                 }
             } label: {
-                Label("外观", systemImage: "circle.lefthalf.filled")
+                Label("外观", systemImage: "sun.max")
             }
             .tint(libraryStore.appTintColor)
 
             MineThemeColorControl(libraryStore: libraryStore)
-
-            Picker(selection: Binding(
-                get: { libraryStore.liquidGlassStylePreference },
-                set: { libraryStore.setLiquidGlassStylePreference($0) }
-            )) {
-                ForEach(AppLiquidGlassStylePreference.allCases) { preference in
-                    Text(preference.title).tag(preference)
-                }
-            } label: {
-                VStack(alignment: .leading, spacing: 4) {
-                    Label("液态玻璃", systemImage: "sparkles")
-
-                    Text(libraryStore.liquidGlassStylePreference.detail)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-            }
-            .pickerStyle(.navigationLink)
 
             Picker(selection: Binding(
                 get: { libraryStore.remoteImageQualityPreference },
@@ -79,6 +60,13 @@ struct MineDisplaySettingsSection: View {
             }
 
             Toggle(isOn: Binding(
+                get: { libraryStore.videoCoverBottomScrimEnabled },
+                set: { libraryStore.setVideoCoverBottomScrimEnabled($0) }
+            )) {
+                Label("视频封面底部渐变遮罩", systemImage: "rectangle")
+            }
+
+            Toggle(isOn: Binding(
                 get: { libraryStore.minimizesTabBarOnScroll },
                 set: { libraryStore.setMinimizesTabBarOnScroll($0) }
             )) {
@@ -93,7 +81,7 @@ struct MineDisplaySettingsSection: View {
                     Text(preference.title).tag(preference)
                 }
             } label: {
-                Label("滚动边缘效果", systemImage: "rectangle.topthird.inset.filled")
+                Label("滚动边缘效果", systemImage: "rectangle.dashed")
             }
             .pickerStyle(.navigationLink)
 
@@ -184,7 +172,7 @@ private struct MineThemeColorControl: View {
                     ),
                     supportsOpacity: false
                 ) {
-                    Label("直接从色板选", systemImage: "eyedropper.full")
+                    Label("直接从色板选", systemImage: "eyedropper")
                 }
 
                 HStack(spacing: 10) {

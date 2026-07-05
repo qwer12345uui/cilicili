@@ -5,7 +5,7 @@ struct PlayerSpeedBoostIndicator: View {
         Label("2.0x", systemImage: "forward.fill")
             .font(.caption.weight(.bold))
             .labelStyle(.titleAndIcon)
-            .foregroundStyle(.white)
+            .biliLiquidGlassForeground(shadowOpacity: 0.20)
             .padding(.horizontal, 12)
             .frame(height: 30)
             .biliPlayerClearGlass(interactive: false, in: Capsule())

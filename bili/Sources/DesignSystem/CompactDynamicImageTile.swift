@@ -37,6 +37,13 @@ struct CompactDynamicImageTile: View {
         .overlay {
             overflowOverlay
         }
+        .overlay(alignment: .bottomTrailing) {
+            DynamicImageBadgeRow(
+                mediaBadgeText: item.image.mediaBadgeText,
+                showsLongImage: item.isLongImage
+            )
+            .padding(6)
+        }
         .accessibilityLabel(accessibilityTitle(for: item.index))
     }
 
@@ -45,12 +52,12 @@ struct CompactDynamicImageTile: View {
         if item.index == 8, context.imageCount > 9 {
             ZStack {
                 Color.clear
-                Text("+\(context.imageCount - 8)")
+                Text("+\(context.imageCount - 9)")
                     .font(.headline.weight(.semibold))
                     .foregroundStyle(.primary)
                     .padding(.horizontal, 12)
                     .padding(.vertical, 7)
-                    .biliRegularGlassEffect(in: Capsule())
+                    .videoCoverBadgeBackground(style: .regular, in: Capsule())
             }
             .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
         }

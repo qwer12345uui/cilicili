@@ -128,6 +128,7 @@ final class LibraryStore: ObservableObject {
     @Published private(set) var liquidGlassStylePreference: AppLiquidGlassStylePreference
     @Published private(set) var remoteImageQualityPreference: RemoteImageQualityPreference
     @Published private(set) var videoCoverBadgeShadowOpacity: Double
+    @Published private(set) var videoCoverBottomScrimEnabled: Bool
     @Published private(set) var force120HzScrollingEnabled: Bool
     @Published private(set) var visibleRootTabs: [AppTab]
     @Published private(set) var homeRefreshTriggerDistance: Double
@@ -180,6 +181,7 @@ final class LibraryStore: ObservableObject {
     private static let liquidGlassStylePreferenceKey = AppLiquidGlassStylePreference.storageKey
     private static let remoteImageQualityPreferenceKey = RemoteImageQualityPreference.storageKey
     private static let videoCoverBadgeShadowOpacityKey = VideoCoverBadgeShadow.storageKey
+    private static let videoCoverBottomScrimEnabledKey = VideoCoverBottomScrimSettings.storageKey
     private static let force120HzScrollingEnabledKey = RefreshRateManager.isEnabledKey
     private static let visibleRootTabsKey = "cc.bili.display.visibleRootTabs.v1"
     private static let homeRefreshTriggerDistanceKey = "cc.bili.home.refreshTriggerDistance.v1"
@@ -192,6 +194,7 @@ final class LibraryStore: ObservableObject {
     nonisolated static let defaultAppTintColorHex = AppThemeTintColor.defaultHex
     nonisolated static let defaultPlaybackStreamSourcePreference: PlaybackStreamSourcePreference = .app
     nonisolated static let defaultHomeRecommendFeedSourcePreference: HomeRecommendFeedSourcePreference = .app
+    nonisolated static let defaultHomeFeedLayout: HomeFeedLayout = .singleColumn
     nonisolated static let supportedVideoQualities = BiliVideoQuality.supportedQualities
     nonisolated static let playbackCDNProbeRefreshIntervalRange: ClosedRange<Int> = 15...1440
     nonisolated static let defaultPlaybackCDNProbeRefreshIntervalMinutes = 120
@@ -382,6 +385,8 @@ final class LibraryStore: ObservableObject {
             userDefaults.object(forKey: Self.videoCoverBadgeShadowOpacityKey) as? Double
                 ?? VideoCoverBadgeShadow.defaultOpacity
         )
+        self.videoCoverBottomScrimEnabled = userDefaults.object(forKey: Self.videoCoverBottomScrimEnabledKey) as? Bool
+            ?? VideoCoverBottomScrimSettings.defaultIsEnabled
         self.force120HzScrollingEnabled = userDefaults.object(forKey: Self.force120HzScrollingEnabledKey) as? Bool ?? false
         self.visibleRootTabs = Self.normalizedVisibleRootTabs(
             userDefaults.stringArray(forKey: Self.visibleRootTabsKey)
@@ -391,7 +396,7 @@ final class LibraryStore: ObservableObject {
         )
         self.homeFeedLayout = HomeFeedLayout(
             rawValue: userDefaults.string(forKey: Self.homeFeedLayoutKey) ?? ""
-        ) ?? .singleColumn
+        ) ?? Self.defaultHomeFeedLayout
         self.homeRecommendFeedSourcePreference = HomeRecommendFeedSourcePreference(
             rawValue: userDefaults.string(forKey: Self.homeRecommendFeedSourcePreferenceKey) ?? ""
         ) ?? Self.defaultHomeRecommendFeedSourcePreference
@@ -834,6 +839,11 @@ final class LibraryStore: ObservableObject {
         userDefaults.set(normalizedOpacity, forKey: Self.videoCoverBadgeShadowOpacityKey)
     }
 
+    func setVideoCoverBottomScrimEnabled(_ isEnabled: Bool) {
+        videoCoverBottomScrimEnabled = isEnabled
+        userDefaults.set(isEnabled, forKey: Self.videoCoverBottomScrimEnabledKey)
+    }
+
     func setForce120HzScrollingEnabled(_ isEnabled: Bool) {
         force120HzScrollingEnabled = isEnabled
         RefreshRateManager.shared.setForce120HzEnabled(isEnabled)
@@ -1047,14 +1057,29 @@ enum AppScrollEdgeEffectPreference: String, CaseIterable, Identifiable {
 
 enum HomeFeedLayout: String, CaseIterable, Identifiable {
     case doubleColumn
+    case borderedDoubleColumn
+    case borderedSingleColumn
     case singleColumn
 
     var id: String { rawValue }
+
+    var isDoubleColumn: Bool {
+        switch self {
+        case .doubleColumn, .borderedDoubleColumn:
+            return true
+        case .borderedSingleColumn, .singleColumn:
+            return false
+        }
+    }
 
     var title: String {
         switch self {
         case .doubleColumn:
             return "双列"
+        case .borderedDoubleColumn:
+            return "有边框双列"
+        case .borderedSingleColumn:
+            return "有边框单列"
         case .singleColumn:
             return "单列"
         }
@@ -1064,6 +1089,10 @@ enum HomeFeedLayout: String, CaseIterable, Identifiable {
         switch self {
         case .doubleColumn:
             return "square.grid.2x2"
+        case .borderedDoubleColumn:
+            return "square.grid.2x2.fill"
+        case .borderedSingleColumn:
+            return "rectangle.grid.1x2.fill"
         case .singleColumn:
             return "rectangle.grid.1x2"
         }

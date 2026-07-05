@@ -127,36 +127,53 @@ extension View {
             }
             .contentShape(Capsule())
     }
+
+    func biliLiquidGlassForeground(shadowOpacity: Double = 0.20) -> some View {
+        modifier(BiliLiquidGlassForegroundModifier(shadowOpacity: shadowOpacity))
+    }
+}
+
+private struct BiliLiquidGlassForegroundModifier: ViewModifier {
+    let shadowOpacity: Double
+
+    private var foregroundColor: Color {
+        .white
+    }
+
+    private var shadowColor: Color {
+        .black
+    }
+
+    private var normalizedShadowOpacity: Double {
+        min(max(shadowOpacity, 0), 1)
+    }
+
+    func body(content: Content) -> some View {
+        content
+            .foregroundStyle(foregroundColor)
+            .shadow(
+                color: shadowColor.opacity(normalizedShadowOpacity),
+                radius: 2.5,
+                x: 0,
+                y: 1
+            )
+    }
 }
 
 private struct BiliGlassEffectModifier<GlassShape: Shape>: ViewModifier {
-    @AppStorage(AppLiquidGlassStylePreference.storageKey) private var rawPreference = AppLiquidGlassStylePreference.defaultValue.rawValue
     let tint: Color
     let interactive: Bool
     let shape: GlassShape
 
-    private var preference: AppLiquidGlassStylePreference {
-        AppLiquidGlassStylePreference(storedRawValue: rawPreference)
-    }
-
     @ViewBuilder
     func body(content: Content) -> some View {
         if #available(iOS 26, *) {
-            switch preference {
-            case .current:
-                content.glassEffect(
-                    .regular
-                        .tint(tint)
-                        .interactive(interactive),
-                    in: shape
-                )
-            case .appleRecommended:
-                content.glassEffect(
-                    .regular
-                        .interactive(interactive),
-                    in: shape
-                )
-            }
+            content.glassEffect(
+                .regular
+                    .tint(tint)
+                    .interactive(interactive),
+                in: shape
+            )
         } else {
             content.background(.ultraThinMaterial, in: shape)
         }
@@ -172,6 +189,7 @@ private struct BiliRegularGlassEffectModifier<GlassShape: Shape>: ViewModifier {
         if #available(iOS 26, *) {
             content.glassEffect(
                 .regular
+                    .tint(Color(.systemBackground).opacity(0.18))
                     .interactive(interactive),
                 in: shape
             )
@@ -187,9 +205,11 @@ private struct BiliGlassButtonStyleModifier: ViewModifier {
     @ViewBuilder
     func body(content: Content) -> some View {
         if prominent {
-            content.buttonStyle(.glassProminent)
+            content
+                .buttonStyle(.glassProminent)
         } else {
-            content.buttonStyle(.glass)
+            content
+                .buttonStyle(.glass)
         }
     }
 }

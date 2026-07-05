@@ -40,7 +40,7 @@ struct PlayerNativePlaybackControls: View {
             .frame(maxWidth: .infinity)
         }
         .frame(maxWidth: .infinity)
-        .foregroundStyle(.white)
+        .biliLiquidGlassForeground(shadowOpacity: 0.20)
         .controlSize(.mini)
     }
 }

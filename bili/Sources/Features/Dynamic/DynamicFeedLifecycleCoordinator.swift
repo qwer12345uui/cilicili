@@ -9,7 +9,7 @@ final class DynamicFeedLifecycleCoordinator {
     private var rawItems: [DynamicFeedItem] = []
     private var offset = ""
     private var hasMore = true
-    private var followedLiveTask: Task<Void, Never>?
+    private var topUploaderStripTask: Task<Void, Never>?
 
     var isLoggedIn: Bool {
         sessionStore.isLoggedIn
@@ -32,12 +32,12 @@ final class DynamicFeedLifecycleCoordinator {
     }
 
     deinit {
-        followedLiveTask?.cancel()
+        topUploaderStripTask?.cancel()
     }
 
     func prepareLoggedOutState() {
-        followedLiveTask?.cancel()
-        followedLiveTask = nil
+        topUploaderStripTask?.cancel()
+        topUploaderStripTask = nil
         rawItems = []
         offset = ""
         hasMore = false
@@ -71,20 +71,18 @@ final class DynamicFeedLifecycleCoordinator {
         contentFilter.filtered(rawItems)
     }
 
-    func refreshFollowedLiveRooms(setRooms: @escaping ([LiveRoom]) -> Void) {
-        followedLiveTask?.cancel()
-        followedLiveTask = Task { [api] in
-            do {
-                let rooms = try await api.fetchFollowedLiveRooms(page: 1, pageSize: 20)
-                guard !Task.isCancelled else { return }
-                await MainActor.run {
-                    setRooms(Array(rooms.prefix(12)))
-                }
-            } catch {
-                guard !Task.isCancelled else { return }
-                await MainActor.run {
-                    setRooms([])
-                }
+    func refreshTopUploaderStripItems(setItems: @escaping ([DynamicTopUploaderStripItem]) -> Void) {
+        topUploaderStripTask?.cancel()
+        topUploaderStripTask = Task { [api] in
+            let portal = try? await api.fetchDynamicPortal()
+            guard !Task.isCancelled else { return }
+
+            let items = Self.makeTopUploaderStripItems(
+                portal: portal,
+                limit: 10
+            )
+            await MainActor.run {
+                setItems(items)
             }
         }
     }
@@ -101,5 +99,29 @@ final class DynamicFeedLifecycleCoordinator {
         offset = page.offset ?? ""
         hasMore = page.hasMore ?? false
         return filteredItems
+    }
+
+    private nonisolated static func makeTopUploaderStripItems(
+        portal: DynamicPortalData?,
+        limit: Int
+    ) -> [DynamicTopUploaderStripItem] {
+        var items: [DynamicTopUploaderStripItem] = []
+        var usedMIDs = Set<Int>()
+
+        for liveUser in portal?.liveUsers?.items ?? [] {
+            let owner = liveUser.owner
+            guard owner.mid <= 0 || usedMIDs.insert(owner.mid).inserted else { continue }
+            items.append(DynamicTopUploaderStripItem(owner: owner, liveRoom: liveUser.liveRoom))
+            guard items.count < limit else { return items }
+        }
+
+        for upItem in portal?.upList?.items ?? [] {
+            let owner = upItem.owner
+            guard owner.mid > 0, usedMIDs.insert(owner.mid).inserted else { continue }
+            items.append(DynamicTopUploaderStripItem(owner: owner, liveRoom: nil))
+            guard items.count < limit else { break }
+        }
+
+        return items
     }
 }

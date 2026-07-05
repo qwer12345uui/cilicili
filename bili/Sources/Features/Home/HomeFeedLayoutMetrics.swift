@@ -9,17 +9,20 @@ struct HomeFeedLayoutMetrics {
     let singleColumnHorizontalPadding: CGFloat
     let singleColumnFixedCoverSize: CGSize?
     let doubleColumnFixedCoverSize: CGSize?
+    let borderedSingleColumnCoverSize: CGSize?
 
     init(mode: HomeFeedLayout, containerWidth: CGFloat) {
         self.mode = mode
+        let doubleColumnSpacing: CGFloat = mode == .borderedDoubleColumn ? 12 : 14
+        let doubleColumnCoverHeightRatio: CGFloat = mode == .borderedDoubleColumn ? 10 / 16 : 9 / 16
         doubleColumns = [
-            GridItem(.flexible(), spacing: 14),
-            GridItem(.flexible(), spacing: 14)
+            GridItem(.flexible(), spacing: doubleColumnSpacing),
+            GridItem(.flexible(), spacing: doubleColumnSpacing)
         ]
         singleColumnHorizontalPadding = 12
 
         switch mode {
-        case .singleColumn:
+        case .singleColumn, .borderedSingleColumn:
             feedColumns = [
                 GridItem(.flexible(minimum: 0), spacing: 0)
             ]
@@ -29,6 +32,10 @@ struct HomeFeedLayoutMetrics {
             feedColumns = doubleColumns
             feedSpacing = 22
             feedHorizontalPadding = 16
+        case .borderedDoubleColumn:
+            feedColumns = doubleColumns
+            feedSpacing = 18
+            feedHorizontalPadding = 12
         }
 
         let singleWidth = containerWidth - singleColumnHorizontalPadding * 2
@@ -38,11 +45,18 @@ struct HomeFeedLayoutMetrics {
             singleColumnFixedCoverSize = nil
         }
 
-        let doubleWidth = (containerWidth - (feedHorizontalPadding * 2) - 14) / 2
+        let doubleWidth = (containerWidth - (feedHorizontalPadding * 2) - doubleColumnSpacing) / 2
         if doubleWidth > 0 {
-            doubleColumnFixedCoverSize = CGSize(width: doubleWidth, height: doubleWidth * 9 / 16)
+            doubleColumnFixedCoverSize = CGSize(width: doubleWidth, height: doubleWidth * doubleColumnCoverHeightRatio)
         } else {
             doubleColumnFixedCoverSize = nil
+        }
+
+        if singleWidth > 0 {
+            let coverWidth = min(max(singleWidth * 0.50, 148), 180)
+            borderedSingleColumnCoverSize = CGSize(width: coverWidth, height: coverWidth * 10 / 16)
+        } else {
+            borderedSingleColumnCoverSize = nil
         }
     }
 }

@@ -19,7 +19,7 @@ struct DynamicKeywordFilterSettingsView: View {
                 Button {
                     addKeyword()
                 } label: {
-                    Label("添加关键词", systemImage: "plus.circle.fill")
+                    Label("添加关键词", systemImage: "plus.circle")
                 }
                 .disabled(normalizedDraftKeyword == nil)
             } header: {
@@ -43,7 +43,7 @@ struct DynamicKeywordFilterSettingsView: View {
                             Button(role: .destructive) {
                                 libraryStore.removeBlockedDynamicKeyword(keyword)
                             } label: {
-                                Image(systemName: "minus.circle.fill")
+                                Image(systemName: "minus.circle")
                             }
                             .buttonStyle(.plain)
                             .accessibilityLabel("删除 \(keyword)")
@@ -62,6 +62,8 @@ struct DynamicKeywordFilterSettingsView: View {
                 Text("已屏蔽关键词")
             }
         }
+        .tint(libraryStore.appTintColor)
+        .listStyle(.insetGrouped)
         .nativeTopScrollEdgeEffect()
         .hiddenInlineNavigationTitle()
         .toolbar {

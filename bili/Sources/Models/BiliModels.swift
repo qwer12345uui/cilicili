@@ -359,6 +359,33 @@ nonisolated struct UploaderProfile: Decodable, Hashable {
         self.archiveCount = archiveCount
     }
 
+    nonisolated var visibleFollowerCount: Int? {
+        follower ?? card?.fans
+    }
+
+    nonisolated var visibleFollowingCount: Int? {
+        card?.attention
+    }
+
+    nonisolated var visibleLikeCount: Int? {
+        likeNum ?? card?.likes?.likeNum
+    }
+
+    nonisolated var visibleArchiveCount: Int? {
+        archiveCount
+    }
+
+    nonisolated var hasVisibleStats: Bool {
+        visibleFollowerCount != nil
+            || visibleFollowingCount != nil
+            || visibleLikeCount != nil
+            || visibleArchiveCount != nil
+    }
+
+    nonisolated var hasProfileContent: Bool {
+        hasVisibleStats || card?.hasProfileContent == true || following != nil
+    }
+
     func merged(with other: UploaderProfile?) -> UploaderProfile {
         guard let other else { return self }
         return UploaderProfile(
@@ -415,7 +442,7 @@ nonisolated struct UploaderCard: Decodable, Hashable {
     let likes: UploaderLikes?
 
     enum CodingKeys: String, CodingKey {
-        case mid, name, face, sign, fans, attention, relation, likes
+        case mid, name, face, sign, fans, attention, friend, relation, likes
     }
 
     init(
@@ -446,6 +473,7 @@ nonisolated struct UploaderCard: Decodable, Hashable {
         sign = try container.decodeIfPresent(String.self, forKey: .sign)
         fans = container.decodeLossyIntIfPresent(forKey: .fans)
         attention = container.decodeLossyIntIfPresent(forKey: .attention)
+            ?? container.decodeLossyIntIfPresent(forKey: .friend)
         relation = try container.decodeIfPresent(UploaderRelationState.self, forKey: .relation)
         likes = try container.decodeIfPresent(UploaderLikes.self, forKey: .likes)
     }
@@ -462,6 +490,17 @@ nonisolated struct UploaderCard: Decodable, Hashable {
             relation: other.relation ?? relation,
             likes: other.likes ?? likes
         )
+    }
+
+    nonisolated var hasProfileContent: Bool {
+        mid != nil
+            || name?.isEmpty == false
+            || face?.isEmpty == false
+            || sign?.isEmpty == false
+            || fans != nil
+            || attention != nil
+            || relation != nil
+            || likes?.likeNum != nil
     }
 }
 
@@ -526,11 +565,23 @@ nonisolated struct UploaderLikes: Decodable, Hashable {
 
     enum CodingKeys: String, CodingKey {
         case likeNum = "like_num"
+        case count, likes
+    }
+
+    init(likeNum: Int?) {
+        self.likeNum = likeNum
     }
 
     init(from decoder: Decoder) throws {
+        if let single = try? decoder.singleValueContainer(),
+           let value = try? single.decode(Int.self) {
+            likeNum = value
+            return
+        }
         let container = try decoder.container(keyedBy: CodingKeys.self)
         likeNum = container.decodeLossyIntIfPresent(forKey: .likeNum)
+            ?? container.decodeLossyIntIfPresent(forKey: .count)
+            ?? container.decodeLossyIntIfPresent(forKey: .likes)
     }
 }
 
@@ -539,11 +590,21 @@ nonisolated struct UploaderArchiveStats: Decodable, Hashable {
 
     enum CodingKeys: String, CodingKey {
         case count
+        case archiveCount = "archive_count"
+        case item, items
     }
 
     init(from decoder: Decoder) throws {
+        if let single = try? decoder.singleValueContainer(),
+           let value = try? single.decode(Int.self) {
+            count = value
+            return
+        }
         let container = try decoder.container(keyedBy: CodingKeys.self)
         count = container.decodeLossyIntIfPresent(forKey: .count)
+            ?? container.decodeLossyIntIfPresent(forKey: .archiveCount)
+            ?? (try? container.decodeIfPresent([DynamicJSONValue].self, forKey: .item))?.count
+            ?? (try? container.decodeIfPresent([DynamicJSONValue].self, forKey: .items))?.count
     }
 }
 
@@ -588,7 +649,10 @@ nonisolated struct UploaderUpStat: Decodable, Hashable {
 
     enum CodingKeys: String, CodingKey {
         case likes
+        case like
+        case likeNum = "like_num"
         case archive
+        case archiveCount = "archive_count"
     }
 
     enum ArchiveCodingKeys: String, CodingKey {
@@ -598,8 +662,14 @@ nonisolated struct UploaderUpStat: Decodable, Hashable {
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         likes = container.decodeLossyIntIfPresent(forKey: .likes)
-        if let archive = try? container.nestedContainer(keyedBy: ArchiveCodingKeys.self, forKey: .archive) {
+            ?? container.decodeLossyIntIfPresent(forKey: .like)
+            ?? container.decodeLossyIntIfPresent(forKey: .likeNum)
+        if let archiveCount = container.decodeLossyIntIfPresent(forKey: .archiveCount) {
+            self.archiveCount = archiveCount
+        } else if let archive = try? container.nestedContainer(keyedBy: ArchiveCodingKeys.self, forKey: .archive) {
             archiveCount = archive.decodeLossyIntIfPresent(forKey: .count)
+        } else if let archive = try? container.decodeIfPresent(Int.self, forKey: .archive) {
+            archiveCount = archive
         } else {
             archiveCount = nil
         }
@@ -640,9 +710,413 @@ nonisolated struct UploaderVideoPageInfo: Decodable, Hashable {
     }
 }
 
-nonisolated struct UploaderVideoPageResult: Hashable {
+nonisolated struct UploaderVideoPageResult: Hashable, Sendable {
     let videos: [VideoItem]
     let totalCount: Int?
+    let hasMore: Bool
+    let nextCursor: UploaderVideoPageCursor?
+}
+
+nonisolated struct UploaderVideoPageCursor: Hashable, Sendable {
+    let aid: String?
+    let next: Int?
+
+    var isEmpty: Bool {
+        (aid?.isEmpty ?? true) && next == nil
+    }
+}
+
+nonisolated struct UploaderAppArchiveData: Decodable {
+    let count: Int?
+    let item: [UploaderAppArchiveItem]?
+    let hasNext: Bool?
+    let next: Int?
+
+    enum CodingKeys: String, CodingKey {
+        case count, item, next
+        case hasNext = "has_next"
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        count = container.decodeLossyIntIfPresent(forKey: .count)
+        item = try container.decodeIfPresent([UploaderAppArchiveItem].self, forKey: .item)
+        hasNext = container.decodeLossyBoolIfPresent(forKey: .hasNext)
+        next = container.decodeLossyIntIfPresent(forKey: .next)
+    }
+}
+
+extension UploaderAppArchiveData {
+    nonisolated func pageCursor() -> UploaderVideoPageCursor? {
+        let cursor = UploaderVideoPageCursor(
+            aid: item?.last?.param,
+            next: next
+        )
+        return cursor.isEmpty ? nil : cursor
+    }
+}
+
+nonisolated struct UploaderAppArchiveItem: Decodable, Hashable {
+    let title: String
+    let cover: String?
+    let param: String?
+    let uri: String?
+    let bvid: String?
+    let cid: Int?
+    let duration: Int?
+    let length: String?
+    let author: String?
+    let play: Int?
+    let danmaku: Int?
+    let pubdate: Int?
+
+    enum CodingKeys: String, CodingKey {
+        case title, cover, param, uri, bvid, duration, length, author, play, danmaku, ctime, pubdate
+        case cid = "first_cid"
+        case publishTime = "publish_time"
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        title = container.decodeLossyStringIfPresent(forKey: .title) ?? "Untitled"
+        cover = container.decodeLossyStringIfPresent(forKey: .cover)
+        param = container.decodeLossyStringIfPresent(forKey: .param)
+        uri = container.decodeLossyStringIfPresent(forKey: .uri)
+        bvid = container.decodeLossyStringIfPresent(forKey: .bvid)
+        cid = container.decodeLossyIntIfPresent(forKey: .cid)
+        duration = container.decodeLossyIntIfPresent(forKey: .duration)
+            ?? Self.durationSeconds(container.decodeLossyStringIfPresent(forKey: .length))
+        length = container.decodeLossyStringIfPresent(forKey: .length)
+        author = container.decodeLossyStringIfPresent(forKey: .author)
+        play = container.decodeLossyIntIfPresent(forKey: .play)
+        danmaku = container.decodeLossyIntIfPresent(forKey: .danmaku)
+        pubdate = container.decodeLossyIntIfPresent(forKey: .pubdate)
+            ?? container.decodeLossyIntIfPresent(forKey: .publishTime)
+            ?? container.decodeLossyIntIfPresent(forKey: .ctime)
+    }
+
+    func asVideoItem(defaultMID: Int) -> VideoItem? {
+        let aid = param.flatMap(Int.init)
+        let resolvedBVID = resolvedVideoID(aid: aid)
+        guard !resolvedBVID.isEmpty else { return nil }
+        return VideoItem(
+            bvid: resolvedBVID,
+            aid: aid,
+            title: title,
+            pic: cover?.normalizedBiliURL(),
+            desc: nil,
+            duration: duration,
+            pubdate: pubdate,
+            owner: VideoOwner(mid: defaultMID, name: author ?? "", face: nil),
+            stat: VideoStat(view: play, reply: nil, like: nil, coin: nil, favorite: nil),
+            cid: cid,
+            pages: nil,
+            dimension: nil
+        )
+    }
+
+    private func resolvedVideoID(aid: Int?) -> String {
+        if let bvid, !bvid.isEmpty {
+            return bvid
+        }
+        if let uri, let range = uri.range(of: #"BV[A-Za-z0-9]+"#, options: .regularExpression) {
+            return String(uri[range])
+        }
+        guard let aid, aid > 0 else { return "" }
+        return "av\(aid)"
+    }
+
+    private static func durationSeconds(_ value: String?) -> Int? {
+        guard let value, !value.isEmpty else { return nil }
+        let parts = value.split(separator: ":").compactMap { Int($0) }
+        if parts.count == 2 {
+            return parts[0] * 60 + parts[1]
+        }
+        if parts.count == 3 {
+            return parts[0] * 3600 + parts[1] * 60 + parts[2]
+        }
+        return nil
+    }
+}
+
+nonisolated struct UploaderSeasonSeriesResponse: Decodable, Hashable, Sendable {
+    let itemsLists: UploaderSeasonSeriesData?
+
+    enum CodingKeys: String, CodingKey {
+        case itemsLists = "items_lists"
+    }
+}
+
+nonisolated struct UploaderSeasonSeriesData: Decodable, Hashable, Sendable {
+    let page: UploaderSeasonSeriesPage?
+    let seasonsList: [UploaderSeasonSeriesItem]
+    let seriesList: [UploaderSeasonSeriesItem]
+
+    enum CodingKeys: String, CodingKey {
+        case page
+        case seasonsList = "seasons_list"
+        case seriesList = "series_list"
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        page = try container.decodeIfPresent(UploaderSeasonSeriesPage.self, forKey: .page)
+        seasonsList = try container.decodeIfPresent([UploaderSeasonSeriesItem].self, forKey: .seasonsList) ?? []
+        seriesList = try container.decodeIfPresent([UploaderSeasonSeriesItem].self, forKey: .seriesList) ?? []
+    }
+
+    var items: [UploaderSeasonSeriesItem] {
+        seasonsList + seriesList
+    }
+}
+
+nonisolated struct UploaderSeasonSeriesPage: Decodable, Hashable, Sendable {
+    let pageNum: Int?
+    let pageSize: Int?
+    let total: Int?
+
+    enum CodingKeys: String, CodingKey {
+        case pageNum = "page_num"
+        case pageSize = "page_size"
+        case total
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        pageNum = container.decodeLossyIntIfPresent(forKey: .pageNum)
+        pageSize = container.decodeLossyIntIfPresent(forKey: .pageSize)
+        total = container.decodeLossyIntIfPresent(forKey: .total)
+    }
+
+    func hasMore(afterPage requestedPage: Int, receivedCount: Int, fallbackPageSize: Int = 10) -> Bool {
+        let currentPage = pageNum ?? requestedPage
+        let size = pageSize ?? fallbackPageSize
+        if let total {
+            return currentPage * size < total
+        }
+        return receivedCount >= size
+    }
+}
+
+nonisolated enum UploaderSeasonSeriesKind: Hashable, Sendable {
+    case season(Int)
+    case series(Int)
+
+    var id: Int {
+        switch self {
+        case .season(let id), .series(let id):
+            return id
+        }
+    }
+
+    var title: String {
+        switch self {
+        case .season:
+            return "合集"
+        case .series:
+            return "列表"
+        }
+    }
+}
+
+enum UploaderSeasonSeriesArchiveSort: String, CaseIterable, Identifiable, Sendable {
+    case desc
+    case asc
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .desc:
+            return "最新发布"
+        case .asc:
+            return "最早发布"
+        }
+    }
+}
+
+nonisolated struct UploaderSeasonSeriesItem: Identifiable, Decodable, Hashable, Sendable {
+    let meta: UploaderSeasonSeriesMeta?
+    let archives: [UploaderSeasonSeriesArchive]
+
+    enum CodingKeys: String, CodingKey {
+        case meta, archives
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        meta = try container.decodeIfPresent(UploaderSeasonSeriesMeta.self, forKey: .meta)
+        archives = try container.decodeIfPresent([UploaderSeasonSeriesArchive].self, forKey: .archives) ?? []
+    }
+
+    var id: String {
+        if let seasonID = meta?.seasonID {
+            return "season-\(seasonID)"
+        }
+        if let seriesID = meta?.seriesID {
+            return "series-\(seriesID)"
+        }
+        return "unknown-\(title)-\(meta?.ptime ?? 0)"
+    }
+
+    var title: String {
+        meta?.displayTitle ?? "未命名合集"
+    }
+
+    var cover: String? {
+        meta?.cover?.normalizedBiliURL()
+    }
+
+    var kindTitle: String {
+        meta?.seasonID != nil ? "合集" : "列表"
+    }
+
+    var detailKind: UploaderSeasonSeriesKind? {
+        if let seasonID = meta?.seasonID {
+            return .season(seasonID)
+        }
+        if let seriesID = meta?.seriesID {
+            return .series(seriesID)
+        }
+        return nil
+    }
+
+    var total: Int? {
+        meta?.total
+    }
+
+    var updateTime: Int? {
+        meta?.ptime
+    }
+
+    var previewArchive: UploaderSeasonSeriesArchive? {
+        archives.first
+    }
+}
+
+nonisolated struct UploaderSeasonSeriesMeta: Decodable, Hashable, Sendable {
+    let cover: String?
+    let name: String?
+    let title: String?
+    let ptime: Int?
+    let total: Int?
+    let seasonID: Int?
+    let seriesID: Int?
+
+    enum CodingKeys: String, CodingKey {
+        case cover, name, title, ptime, total
+        case seasonID = "season_id"
+        case seriesID = "series_id"
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        cover = container.decodeLossyStringIfPresent(forKey: .cover)
+        name = container.decodeLossyStringIfPresent(forKey: .name)
+        title = container.decodeLossyStringIfPresent(forKey: .title)
+        ptime = container.decodeLossyIntIfPresent(forKey: .ptime)
+        total = container.decodeLossyIntIfPresent(forKey: .total)
+        seasonID = container.decodeLossyIntIfPresent(forKey: .seasonID)
+        seriesID = container.decodeLossyIntIfPresent(forKey: .seriesID)
+    }
+
+    var displayTitle: String? {
+        [name, title]
+            .compactMap { $0?.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .first { !$0.isEmpty }
+    }
+}
+
+nonisolated struct UploaderSeasonSeriesArchiveData: Decodable, Hashable, Sendable {
+    let archives: [UploaderSeasonSeriesArchive]
+    let page: UploaderSeasonSeriesPage?
+
+    enum CodingKeys: String, CodingKey {
+        case archives, page
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        archives = try container.decodeIfPresent([UploaderSeasonSeriesArchive].self, forKey: .archives) ?? []
+        page = try container.decodeIfPresent(UploaderSeasonSeriesPage.self, forKey: .page)
+    }
+}
+
+nonisolated struct UploaderSeasonSeriesArchivePageResult: Hashable, Sendable {
+    let videos: [VideoItem]
+    let totalCount: Int?
+    let hasMore: Bool
+}
+
+nonisolated struct UploaderSeasonSeriesArchive: Decodable, Hashable, Sendable {
+    let aid: Int?
+    let bvid: String?
+    let title: String
+    let pic: String?
+    let duration: Int?
+    let pubdate: Int?
+    let ctime: Int?
+    let upMID: Int?
+    let stat: UploaderSeasonSeriesArchiveStat?
+
+    enum CodingKeys: String, CodingKey {
+        case aid, bvid, title, pic, duration, pubdate, ctime, stat
+        case upMID = "upMid"
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        aid = container.decodeLossyIntIfPresent(forKey: .aid)
+        bvid = container.decodeLossyStringIfPresent(forKey: .bvid)
+        title = container.decodeLossyStringIfPresent(forKey: .title) ?? "Untitled"
+        pic = container.decodeLossyStringIfPresent(forKey: .pic)
+        duration = container.decodeLossyIntIfPresent(forKey: .duration)
+        pubdate = container.decodeLossyIntIfPresent(forKey: .pubdate)
+        ctime = container.decodeLossyIntIfPresent(forKey: .ctime)
+        upMID = container.decodeLossyIntIfPresent(forKey: .upMID)
+        stat = try container.decodeIfPresent(UploaderSeasonSeriesArchiveStat.self, forKey: .stat)
+    }
+
+    func asVideoItem(defaultOwner: VideoOwner) -> VideoItem? {
+        let resolvedBVID: String
+        if let bvid, !bvid.isEmpty {
+            resolvedBVID = bvid
+        } else if let aid, aid > 0 {
+            resolvedBVID = "av\(aid)"
+        } else {
+            return nil
+        }
+
+        return VideoItem(
+            bvid: resolvedBVID,
+            aid: aid,
+            title: title,
+            pic: pic?.normalizedBiliURL(),
+            desc: nil,
+            duration: duration,
+            pubdate: pubdate ?? ctime,
+            owner: VideoOwner(mid: upMID ?? defaultOwner.mid, name: defaultOwner.name, face: defaultOwner.face),
+            stat: VideoStat(view: stat?.view, reply: stat?.danmaku, like: nil, coin: nil, favorite: nil),
+            cid: nil,
+            pages: nil,
+            dimension: nil
+        )
+    }
+}
+
+nonisolated struct UploaderSeasonSeriesArchiveStat: Decodable, Hashable, Sendable {
+    let view: Int?
+    let danmaku: Int?
+
+    enum CodingKeys: String, CodingKey {
+        case view, danmaku
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        view = container.decodeLossyIntIfPresent(forKey: .view)
+        danmaku = container.decodeLossyIntIfPresent(forKey: .danmaku)
+    }
 }
 
 nonisolated struct UploaderVideoItem: Decodable, Hashable {
@@ -4027,6 +4501,22 @@ nonisolated enum DynamicJSONValue: Codable, Hashable {
                 object["size"],
                 object["img_size"],
                 object["image_size"]
+            ]),
+            mediaType: firstNonBlankDynamicText([
+                object["media_type"]?.textValue,
+                object["mime_type"]?.textValue,
+                object["image_type"]?.textValue,
+                object["img_type"]?.textValue,
+                object["picture_type"]?.textValue,
+                object["type"]?.textValue,
+                object["format"]?.textValue,
+                object["live_photo"]?.textValue
+            ]),
+            liveVideoURL: firstNonBlankDynamicText([
+                object["live_video_url"]?.textValue,
+                object["video_url"]?.textValue,
+                object["video_src"]?.textValue,
+                object["live_url"]?.textValue
             ])
         )
     }
@@ -4105,6 +4595,133 @@ nonisolated struct DynamicFeedData: Decodable, Hashable {
         items = try container.decodeIfPresent([DynamicFeedItem].self, forKey: .items)
         hasMore = container.decodeLossyBoolIfPresent(forKey: .hasMore)
         offset = container.decodeLossyStringIfPresent(forKey: .offset)
+    }
+}
+
+nonisolated struct DynamicPortalData: Decodable, Hashable {
+    let liveUsers: DynamicPortalLiveUsers?
+    let upList: DynamicPortalUpList?
+
+    enum CodingKeys: String, CodingKey {
+        case liveUsers = "live_users"
+        case upList = "up_list"
+    }
+}
+
+nonisolated struct DynamicPortalLiveUsers: Decodable, Hashable {
+    let count: Int?
+    let items: [DynamicPortalLiveUser]
+
+    enum CodingKeys: String, CodingKey {
+        case count, items
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        count = container.decodeLossyIntIfPresent(forKey: .count)
+        items = try container.decodeIfPresent([DynamicPortalLiveUser].self, forKey: .items) ?? []
+    }
+}
+
+nonisolated struct DynamicPortalUpList: Decodable, Hashable {
+    let items: [DynamicPortalUpItem]
+    let hasMore: Bool?
+    let offset: String?
+
+    enum CodingKeys: String, CodingKey {
+        case items, offset
+        case hasMore = "has_more"
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        items = try container.decodeIfPresent([DynamicPortalUpItem].self, forKey: .items) ?? []
+        hasMore = container.decodeLossyBoolIfPresent(forKey: .hasMore)
+        offset = container.decodeLossyStringIfPresent(forKey: .offset)
+    }
+}
+
+nonisolated struct DynamicPortalUpItem: Decodable, Hashable {
+    let mid: Int
+    let uname: String
+    let face: String?
+    let hasUpdate: Bool?
+
+    enum CodingKeys: String, CodingKey {
+        case mid, uname, name, face
+        case hasUpdate = "has_update"
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        mid = container.decodeLossyIntIfPresent(forKey: .mid) ?? 0
+        uname = container.decodeLossyStringIfPresent(forKey: .uname)
+            ?? container.decodeLossyStringIfPresent(forKey: .name)
+            ?? ""
+        face = container.decodeLossyStringIfPresent(forKey: .face)?.normalizedBiliURL()
+        hasUpdate = container.decodeLossyBoolIfPresent(forKey: .hasUpdate)
+    }
+
+    var owner: VideoOwner {
+        VideoOwner(mid: mid, name: uname, face: face)
+    }
+}
+
+nonisolated struct DynamicPortalLiveUser: Decodable, Hashable {
+    let mid: Int
+    let uname: String
+    let face: String?
+    let roomID: Int?
+    let title: String?
+
+    enum CodingKeys: String, CodingKey {
+        case mid, uname, name, face, title
+        case roomID = "room_id"
+        case roomIDAlt = "roomid"
+        case roomIDCamel = "roomId"
+        case jumpURL = "jump_url"
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        mid = container.decodeLossyIntIfPresent(forKey: .mid) ?? 0
+        uname = container.decodeLossyStringIfPresent(forKey: .uname)
+            ?? container.decodeLossyStringIfPresent(forKey: .name)
+            ?? ""
+        face = container.decodeLossyStringIfPresent(forKey: .face)?.normalizedBiliURL()
+        title = container.decodeLossyStringIfPresent(forKey: .title)
+        roomID = container.decodeLossyIntIfPresent(forKey: .roomID)
+            ?? container.decodeLossyIntIfPresent(forKey: .roomIDAlt)
+            ?? container.decodeLossyIntIfPresent(forKey: .roomIDCamel)
+            ?? Self.roomID(from: container.decodeLossyStringIfPresent(forKey: .jumpURL))
+    }
+
+    var owner: VideoOwner {
+        VideoOwner(mid: mid, name: uname, face: face)
+    }
+
+    var liveRoom: LiveRoom? {
+        guard let roomID, roomID > 0 else { return nil }
+        let roomTitle = title?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return LiveRoom(
+            roomID: roomID,
+            title: roomTitle.isEmpty ? uname : roomTitle,
+            uname: uname,
+            uid: mid > 0 ? mid : nil,
+            face: face,
+            cover: nil,
+            keyframe: nil,
+            online: nil,
+            areaName: nil,
+            parentAreaName: nil,
+            liveStatus: 1
+        )
+    }
+
+    private static func roomID(from text: String?) -> Int? {
+        guard let text else { return nil }
+        guard let range = text.range(of: #"\d+"#, options: .regularExpression) else { return nil }
+        return Int(text[range])
     }
 }
 
@@ -5518,9 +6135,21 @@ nonisolated struct DynamicImageItem: Decodable, Hashable {
     let width: Int?
     let height: Int?
     let size: Double?
+    let mediaType: String?
+    let liveVideoURL: String?
 
     enum CodingKeys: String, CodingKey {
         case src, url, width, height, size
+        case type, format
+        case mediaType = "media_type"
+        case mimeType = "mime_type"
+        case imageType = "image_type"
+        case imgType = "img_type"
+        case pictureType = "picture_type"
+        case livePhoto = "live_photo"
+        case liveVideoURL = "live_video_url"
+        case videoURL = "video_url"
+        case videoSrc = "video_src"
         case imgSrc = "img_src"
         case imgWidth = "img_width"
         case imgHeight = "img_height"
@@ -5535,11 +6164,20 @@ nonisolated struct DynamicImageItem: Decodable, Hashable {
         case heightShort = "h"
     }
 
-    init(url: String, width: Int?, height: Int?, size: Double?) {
+    init(
+        url: String,
+        width: Int?,
+        height: Int?,
+        size: Double?,
+        mediaType: String? = nil,
+        liveVideoURL: String? = nil
+    ) {
         self.url = url
         self.width = width
         self.height = height
         self.size = size
+        self.mediaType = mediaType
+        self.liveVideoURL = liveVideoURL
     }
 
     init(from decoder: Decoder) throws {
@@ -5564,6 +6202,22 @@ nonisolated struct DynamicImageItem: Decodable, Hashable {
             ?? (try? container.decodeIfPresent(Double.self, forKey: .imgSize))
             ?? container.decodeLossyStringIfPresent(forKey: .size).flatMap(Double.init)
             ?? container.decodeLossyStringIfPresent(forKey: .imgSize).flatMap(Double.init)
+        let decodedMediaType = [
+            container.decodeLossyStringIfPresent(forKey: .mediaType),
+            container.decodeLossyStringIfPresent(forKey: .mimeType),
+            container.decodeLossyStringIfPresent(forKey: .imageType),
+            container.decodeLossyStringIfPresent(forKey: .imgType),
+            container.decodeLossyStringIfPresent(forKey: .pictureType),
+            container.decodeLossyStringIfPresent(forKey: .type),
+            container.decodeLossyStringIfPresent(forKey: .format)
+        ]
+        .compactMap { $0?.trimmingCharacters(in: .whitespacesAndNewlines) }
+        .first { !$0.isEmpty }
+        liveVideoURL = container.decodeLossyStringIfPresent(forKey: .liveVideoURL)
+            ?? container.decodeLossyStringIfPresent(forKey: .videoURL)
+            ?? container.decodeLossyStringIfPresent(forKey: .videoSrc)
+        let liveFlag = container.decodeLossyStringIfPresent(forKey: .livePhoto)
+        mediaType = decodedMediaType ?? liveFlag
     }
 
     var normalizedURL: String? {
@@ -5579,6 +6233,27 @@ nonisolated struct DynamicImageItem: Decodable, Hashable {
             return ratio
         }
         return 1
+    }
+
+    var normalizedLiveVideoURL: String? {
+        let normalized = liveVideoURL?.trimmingCharacters(in: .whitespacesAndNewlines).normalizedBiliURL() ?? ""
+        return normalized.isEmpty ? nil : normalized
+    }
+
+    var isAnimatedGIF: Bool {
+        let text = "\(mediaType ?? "") \(normalizedURL ?? url)".lowercased()
+        return text.contains("gif")
+    }
+
+    var isLiveImage: Bool {
+        let text = (mediaType ?? "").lowercased()
+        return text.contains("live") || text.contains("实况") || normalizedLiveVideoURL != nil
+    }
+
+    var mediaBadgeText: String? {
+        if isLiveImage { return "LIVE" }
+        if isAnimatedGIF { return "GIF" }
+        return nil
     }
 }
 

@@ -25,6 +25,19 @@ extension RootTabView {
         }
     }
 
+    func openStartupUploaderIfNeeded() {
+        guard !didConsumeStartupUploader,
+              let startUploaderMID,
+              startUploaderMID > 0
+        else { return }
+
+        didConsumeStartupUploader = true
+        selectedTab = .home
+        DispatchQueue.main.async {
+            navigationPath.append(Self.seedUploader(mid: startUploaderMID))
+        }
+    }
+
     func openAppURL(_ url: URL) {
         guard AppLinkRouter.canHandle(url) else { return }
 

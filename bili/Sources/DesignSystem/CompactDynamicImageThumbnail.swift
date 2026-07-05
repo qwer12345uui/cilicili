@@ -8,7 +8,6 @@ struct CompactDynamicImageThumbnail: View {
     let imageCount: Int
     let placeholderFill: Color
     @State private var thumbnailShadowOpacityScale = 1.0
-    @State private var thumbnailStrokeOpacityScale = 1.0
     private let normalizedURLString: String?
     private let thumbnailSize: CGSize
     @Environment(\.displayScale) private var displayScale
@@ -54,23 +53,21 @@ struct CompactDynamicImageThumbnail: View {
                 .background(placeholderFill)
         }
         .frame(width: thumbnailSize.width, height: thumbnailSize.height)
-        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
-        .mediaShadow(.subtle, opacityScale: thumbnailShadowOpacityScale)
-        .overlay {
-            RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .stroke(Color(.separator).opacity(0.10 * thumbnailStrokeOpacityScale), lineWidth: 0.6)
-        }
+        .videoCoverSurface(
+            cornerRadius: 8,
+            shadowLevel: .subtle,
+            shadowOpacityScale: thumbnailShadowOpacityScale,
+            borderOpacityScale: thumbnailShadowOpacityScale
+        )
         .contentShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
     }
 
     private func updateThumbnailShadowVisibility(isViewerPresented: Bool) {
         if isViewerPresented {
             thumbnailShadowOpacityScale = 0
-            thumbnailStrokeOpacityScale = 0
         } else {
             withAnimation(.easeOut(duration: 0.18)) {
                 thumbnailShadowOpacityScale = 1
-                thumbnailStrokeOpacityScale = 1
             }
         }
     }

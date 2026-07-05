@@ -24,12 +24,12 @@ struct DynamicImageGridTile: View {
         if item.index == 8, imagesCount > 9 {
             ZStack {
                 Color.clear
-                Text("+\(imagesCount - 8)")
+                Text("+\(imagesCount - 9)")
                     .font(.title3.weight(.bold))
                     .foregroundStyle(.primary)
                     .padding(.horizontal, 14)
                     .padding(.vertical, 7)
-                    .biliRegularGlassEffect(in: Capsule())
+                    .videoCoverBadgeBackground(style: .regular, in: Capsule())
             }
         }
     }

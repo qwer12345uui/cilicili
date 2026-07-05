@@ -5,7 +5,7 @@ extension HomeFeedImagePrefetchPlan {
         switch layout {
         case .singleColumn:
             return (720, 64)
-        case .doubleColumn:
+        case .borderedSingleColumn, .doubleColumn, .borderedDoubleColumn:
             return (480, 48)
         }
     }
@@ -21,6 +21,9 @@ extension HomeFeedImagePrefetchPlan {
             urlString = source.biliImageThumbnailURL(maxSide: targetPixelSize)
         case .doubleColumn:
             let coverHeight = Int(Double(targetPixelSize) * 9.0 / 16.0)
+            urlString = source.biliCoverThumbnailURL(width: targetPixelSize, height: coverHeight)
+        case .borderedSingleColumn, .borderedDoubleColumn:
+            let coverHeight = Int(Double(targetPixelSize) * 10.0 / 16.0)
             urlString = source.biliCoverThumbnailURL(width: targetPixelSize, height: coverHeight)
         }
         guard let url = URL(string: urlString) else { return nil }

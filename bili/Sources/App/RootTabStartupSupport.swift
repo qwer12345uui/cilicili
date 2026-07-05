@@ -57,4 +57,8 @@ extension RootTabView {
             liveStatus: 1
         )
     }
+
+    nonisolated static func seedUploader(mid: Int) -> VideoOwner {
+        VideoOwner(mid: mid, name: "用户主页", face: nil)
+    }
 }

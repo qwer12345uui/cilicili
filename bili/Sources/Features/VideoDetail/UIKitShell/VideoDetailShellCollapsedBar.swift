@@ -41,10 +41,9 @@ struct VideoDetailShellCollapsedBar: View {
             .buttonStyle(.plain)
             .accessibilityLabel("全屏")
         }
-        .foregroundStyle(.white)
+        .biliLiquidGlassForeground(shadowOpacity: 0.20)
         .padding(.horizontal, 12)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(.black)
         .biliRegularGlassEffect(in: Rectangle())
         .contentShape(Rectangle())
     }

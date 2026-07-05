@@ -41,31 +41,17 @@ extension View {
 }
 
 private struct BiliPlayerClearGlassModifier<GlassShape: Shape>: ViewModifier {
-    @AppStorage(AppLiquidGlassStylePreference.storageKey) private var rawPreference = AppLiquidGlassStylePreference.defaultValue.rawValue
     let interactive: Bool
     let shape: GlassShape
-
-    private var preference: AppLiquidGlassStylePreference {
-        AppLiquidGlassStylePreference(storedRawValue: rawPreference)
-    }
 
     @ViewBuilder
     func body(content: Content) -> some View {
         if #available(iOS 26, *) {
-            switch preference {
-            case .current:
-                content.glassEffect(
-                    .clear
-                        .interactive(interactive),
-                    in: shape
-                )
-            case .appleRecommended:
-                content.glassEffect(
-                    .regular
-                        .interactive(interactive),
-                    in: shape
-                )
-            }
+            content.glassEffect(
+                .clear
+                    .interactive(interactive),
+                in: shape
+            )
         } else {
             content.background(.ultraThinMaterial, in: shape)
         }

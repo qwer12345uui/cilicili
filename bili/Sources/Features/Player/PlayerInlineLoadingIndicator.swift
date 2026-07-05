@@ -13,8 +13,8 @@ struct PlayerInlineLoadingIndicator: View {
 
             Text(message)
                 .font(.caption2.weight(.semibold))
-                .foregroundStyle(.white.opacity(0.92))
         }
+        .biliLiquidGlassForeground(shadowOpacity: 0.20)
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
         .frame(height: 30)

@@ -63,6 +63,8 @@ struct PlayerPerformanceLogView: View {
                 }
             }
         }
+        .tint(libraryStore.appTintColor)
+        .listStyle(.insetGrouped)
         .nativeTopScrollEdgeEffect()
         .hiddenInlineNavigationTitle()
         .toolbar {

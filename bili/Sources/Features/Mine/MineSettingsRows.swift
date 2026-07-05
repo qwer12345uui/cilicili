@@ -7,15 +7,16 @@ struct SettingsNavigationRow: View {
     let systemImage: String
 
     var body: some View {
-        HStack(spacing: 12) {
+        HStack(spacing: 13) {
             Image(systemName: systemImage)
-                .font(.system(size: 16, weight: .semibold))
+                .font(.system(size: 19, weight: .regular))
+                .symbolRenderingMode(.monochrome)
                 .foregroundStyle(appTintColor)
-                .frame(width: 28, height: 28)
+                .frame(width: 30, height: 30)
 
             VStack(alignment: .leading, spacing: 2) {
                 Text(title)
-                    .font(.subheadline)
+                    .font(.subheadline.weight(.semibold))
                     .foregroundStyle(.primary)
 
                 Text(subtitle)

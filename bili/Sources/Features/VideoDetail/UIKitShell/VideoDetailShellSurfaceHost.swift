@@ -1468,7 +1468,6 @@ private extension View {
         self
             .background(Color(.systemBackground).opacity(0.22), in: shape)
             .biliGlassEffect(
-                tint: Color(.systemBackground).opacity(0.18),
                 interactive: false,
                 in: shape
             )

@@ -70,19 +70,29 @@ private struct LiveFeedEmptyState: View {
 private struct LiveFeedRoomList: View {
     @ObservedObject var viewModel: LiveViewModel
 
+    private let columns = [
+        GridItem(.flexible(), spacing: 12),
+        GridItem(.flexible(), spacing: 12)
+    ]
+
     var body: some View {
-        LazyVStack(spacing: 0) {
-            ForEach(viewModel.rooms) { room in
-                LiveFeedRoomLink(room: room, viewModel: viewModel)
+        VStack(spacing: 0) {
+            LazyVGrid(columns: columns, spacing: 18) {
+                ForEach(viewModel.rooms) { room in
+                    LiveFeedRoomLink(room: room, viewModel: viewModel)
+                }
+
+                if viewModel.isLoadingMore {
+                    ForEach(0..<2, id: \.self) { _ in
+                        LiveRoomSkeletonCard()
+                            .allowsHitTesting(false)
+                    }
+                }
             }
 
-            if viewModel.isLoadingMore {
-                ForEach(0..<2, id: \.self) { _ in
-                    LiveRoomSkeletonCard()
-                        .allowsHitTesting(false)
-                }
-            } else if let message = viewModel.loadMoreMessage {
+            if !viewModel.isLoadingMore, let message = viewModel.loadMoreMessage {
                 LiveFeedFooter(text: message, showsProgress: false)
+                    .padding(.top, 8)
             }
         }
     }
@@ -97,8 +107,6 @@ private struct LiveFeedRoomLink: View {
             LiveRoomCard(room: room)
         }
         .buttonStyle(.plain)
-        .padding(.top, 9)
-        .padding(.bottom, 14)
         .onAppear {
             Task { await viewModel.loadMoreIfNeeded(current: room) }
         }

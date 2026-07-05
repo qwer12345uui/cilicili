@@ -19,6 +19,7 @@ struct RootTabView: View {
     @State var searchNavigationPath = NavigationPath()
     @State var didConsumeStartupVideo = false
     @State var didConsumeStartupLiveRoom = false
+    @State var didConsumeStartupUploader = false
     @State var isClosingVideo = false
     @State var videoPresentationGeneration = 0
     @State var closeVideoFallbackTask: Task<Void, Never>?
@@ -27,6 +28,7 @@ struct RootTabView: View {
     let shouldStartDetail = ProcessInfo.processInfo.arguments.contains("--start-detail")
     let startBVID = Self.argumentValue(after: "--start-bvid")
     let startLiveRoomID = Self.argumentInt(after: "--start-live-room")
+    let startUploaderMID = Self.argumentInt(after: "--start-uploader-mid")
 
     var body: some View {
         ZStack {
@@ -121,6 +123,7 @@ struct RootTabView: View {
             runtimeSettings.bind(dependencies.libraryStore)
             openStartupVideoIfNeeded()
             openStartupLiveRoomIfNeeded()
+            openStartupUploaderIfNeeded()
             dependencies.scheduleDeferredStartupWorkIfNeeded()
         }
         .onChange(of: runtimeSettings.visibleRootTabs) { _, tabs in

@@ -3,7 +3,7 @@ import SwiftUI
 struct UploaderIdentityRow: View {
     let owner: VideoOwner
     let card: UploaderCard?
-    let viewModel: UploaderViewModel
+    @ObservedObject var viewModel: UploaderViewModel
 
     var body: some View {
         HStack(alignment: .center, spacing: 14) {

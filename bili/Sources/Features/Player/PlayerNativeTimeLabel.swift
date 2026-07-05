@@ -10,7 +10,7 @@ struct PlayerNativeTimeLabel: View {
             Text(currentText)
         }
         .font(metrics.timeFont)
-        .foregroundStyle(.white)
+        .biliLiquidGlassForeground(shadowOpacity: 0.20)
         .lineLimit(1)
         .minimumScaleFactor(0.82)
         .accessibilityLabel("播放时间 \(fullTimeText)")

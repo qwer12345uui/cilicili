@@ -6,12 +6,22 @@ struct MineSettingsSection: View {
     var body: some View {
         Section("设置") {
             NavigationLink {
-                MineDisplayAndHomeSettingsView(libraryStore: libraryStore)
+                MineInterfaceSettingsView(libraryStore: libraryStore)
             } label: {
                 SettingsNavigationRow(
-                    title: "显示与首页",
-                    subtitle: visibleTabSummary,
-                    systemImage: "rectangle.3.group"
+                    title: "界面显示",
+                    subtitle: interfaceSettingsSummary,
+                    systemImage: "paintpalette"
+                )
+            }
+
+            NavigationLink {
+                MineHomeAndSearchSettingsView(libraryStore: libraryStore)
+            } label: {
+                SettingsNavigationRow(
+                    title: "首页与搜索",
+                    subtitle: homeAndSearchSummary,
+                    systemImage: "house"
                 )
             }
 
@@ -47,11 +57,17 @@ struct MineSettingsSection: View {
         }
     }
 
-    private var visibleTabSummary: String {
-        libraryStore.visibleRootTabs
+    private var interfaceSettingsSummary: String {
+        let tabs = libraryStore.visibleRootTabs
             .filter(\.participatesInRootTabVisibilitySettings)
             .map(\.title)
             .joined(separator: "、")
+        return "\(libraryStore.appearanceMode.title) · \(tabs)"
+    }
+
+    private var homeAndSearchSummary: String {
+        let hotSearch = libraryStore.showsHotSearches ? "热搜开启" : "热搜关闭"
+        return "\(libraryStore.homeFeedLayout.title) · \(libraryStore.homeRecommendFeedSourcePreference.title) · \(hotSearch)"
     }
 
     private var privacySummary: String {

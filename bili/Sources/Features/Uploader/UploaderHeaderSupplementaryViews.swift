@@ -39,7 +39,7 @@ struct UploaderProfileStatusMessage: View {
 }
 
 struct UploaderStatsRow: View {
-    let viewModel: UploaderViewModel
+    @ObservedObject var viewModel: UploaderViewModel
     let card: UploaderCard?
 
     var body: some View {

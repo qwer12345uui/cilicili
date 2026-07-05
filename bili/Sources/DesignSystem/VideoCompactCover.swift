@@ -30,16 +30,16 @@ struct VideoCompactCover: View, Equatable {
         .frame(width: size.width, height: size.height)
         .overlay {
             if coverLoadedState.isLoaded(identity: display.coverLoadIdentity), !display.durationText.isEmpty {
-                ZStack(alignment: .bottomTrailing) {
-                    VideoCoverBottomScrim()
-
-                    VideoCoverDurationBadge(
-                        display.durationText,
-                        maxWidth: max(size.width - badgeInset * 2, 1)
-                    )
-                    .padding(badgeInset)
-                }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                VideoCoverBottomScrim()
+            }
+        }
+        .overlay(alignment: .bottomTrailing) {
+            if coverLoadedState.isLoaded(identity: display.coverLoadIdentity), !display.durationText.isEmpty {
+                VideoCoverDurationBadge(
+                    display.durationText,
+                    maxWidth: max(size.width - badgeInset * 2, 1)
+                )
+                .padding(badgeInset)
             }
         }
         .clipped()

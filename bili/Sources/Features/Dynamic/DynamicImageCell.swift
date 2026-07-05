@@ -28,45 +28,73 @@ struct DynamicImageCell: View {
     }
 
     var body: some View {
+        baseImageContent
+            .overlay(alignment: .bottomTrailing) {
+                DynamicImageBadgeRow(
+                    mediaBadgeText: image.mediaBadgeText,
+                    showsLongImage: displayMode.isLongImage
+                )
+                .padding(8)
+            }
+    }
+
+    @ViewBuilder
+    private var baseImageContent: some View {
         switch displayMode {
         case .single:
             imageContent
                 .aspectRatio(displayAspectRatio, contentMode: .fit)
                 .frame(maxWidth: .infinity)
                 .clipped()
-                .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
-                .mediaShadow(.regular, opacityScale: thumbnailShadowOpacityScale)
+                .videoCoverSurface(
+                    cornerRadius: 8,
+                    shadowLevel: .regular,
+                    shadowOpacityScale: thumbnailShadowOpacityScale,
+                    borderOpacityScale: thumbnailShadowOpacityScale
+                )
         case .longImage(let cornerRadius):
             imageContent
                 .aspectRatio(9 / 16, contentMode: .fill)
                 .frame(maxWidth: .infinity)
                 .clipped()
-                .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
-                .mediaShadow(.regular, opacityScale: thumbnailShadowOpacityScale)
-                .overlay(alignment: .bottomTrailing) {
-                    LongImageBadge()
-                        .padding(8)
-                }
+                .videoCoverSurface(
+                    cornerRadius: cornerRadius,
+                    shadowLevel: .regular,
+                    shadowOpacityScale: thumbnailShadowOpacityScale,
+                    borderOpacityScale: thumbnailShadowOpacityScale
+                )
         case .square(let cornerRadius):
             imageContent
                 .aspectRatio(1, contentMode: .fill)
                 .clipped()
-                .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
-                .mediaShadow(.subtle, opacityScale: thumbnailShadowOpacityScale)
+                .videoCoverSurface(
+                    cornerRadius: cornerRadius,
+                    shadowLevel: .subtle,
+                    shadowOpacityScale: thumbnailShadowOpacityScale,
+                    borderOpacityScale: thumbnailShadowOpacityScale
+                )
         case .hero(let aspectRatio, let cornerRadius):
             imageContent
                 .aspectRatio(aspectRatio, contentMode: .fit)
                 .frame(maxWidth: .infinity)
                 .clipped()
-                .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
-                .mediaShadow(.regular, opacityScale: thumbnailShadowOpacityScale)
+                .videoCoverSurface(
+                    cornerRadius: cornerRadius,
+                    shadowLevel: .regular,
+                    shadowOpacityScale: thumbnailShadowOpacityScale,
+                    borderOpacityScale: thumbnailShadowOpacityScale
+                )
         case .fixedHeight(let height, let cornerRadius):
             imageContent
                 .frame(maxWidth: .infinity, minHeight: height, maxHeight: height)
                 .frame(height: height)
                 .clipped()
-                .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
-                .mediaShadow(.regular, opacityScale: thumbnailShadowOpacityScale)
+                .videoCoverSurface(
+                    cornerRadius: cornerRadius,
+                    shadowLevel: .regular,
+                    shadowOpacityScale: thumbnailShadowOpacityScale,
+                    borderOpacityScale: thumbnailShadowOpacityScale
+                )
         }
     }
 

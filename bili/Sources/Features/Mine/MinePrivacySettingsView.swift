@@ -25,6 +25,8 @@ struct MinePrivacySettingsView: View {
                     .foregroundStyle(.secondary)
             }
         }
+        .tint(libraryStore.appTintColor)
+        .formStyle(.grouped)
         .nativeTopScrollEdgeEffect()
         .hiddenInlineNavigationTitle()
     }

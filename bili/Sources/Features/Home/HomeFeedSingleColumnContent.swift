@@ -27,8 +27,8 @@ struct HomeFeedSingleColumnContent: View {
                         metrics: metrics,
                         action: actions.onRefreshFromLastSeenMarker
                     )
-                    .padding(.top, 9)
-                    .padding(.bottom, 14)
+                    .padding(.top, metrics.mode == .borderedSingleColumn ? 8 : 9)
+                    .padding(.bottom, metrics.mode == .borderedSingleColumn ? 8 : 14)
                 }
 
                 HomeFeedSingleColumnCard(
@@ -41,7 +41,7 @@ struct HomeFeedSingleColumnContent: View {
             }
 
             if isLoadingMore {
-                VideoFeedSkeletonCard(style: .singleColumn)
+                VideoFeedSkeletonCard(style: loadingMoreSkeletonStyle)
                     .allowsHitTesting(false)
             }
         }
@@ -49,5 +49,16 @@ struct HomeFeedSingleColumnContent: View {
         .padding(.horizontal, metrics.singleColumnHorizontalPadding)
         .padding(.top, 0)
         .padding(.bottom, 18)
+    }
+
+    private var loadingMoreSkeletonStyle: VideoFeedSkeletonCard.Style {
+        switch metrics.mode {
+        case .borderedSingleColumn:
+            return .borderedSingleColumn(
+                coverSize: metrics.borderedSingleColumnCoverSize ?? CGSize(width: 140, height: 88)
+            )
+        case .singleColumn, .doubleColumn, .borderedDoubleColumn:
+            return .singleColumn
+        }
     }
 }

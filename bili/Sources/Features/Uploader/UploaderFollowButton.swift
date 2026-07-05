@@ -3,7 +3,7 @@ import SwiftUI
 struct UploaderFollowButton: View {
     @Environment(\.appThemeTintColor) private var appTintColor
     let owner: VideoOwner
-    let viewModel: UploaderViewModel
+    @ObservedObject var viewModel: UploaderViewModel
 
     var body: some View {
         Group {
