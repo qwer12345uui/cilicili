@@ -17,6 +17,7 @@ struct MinePlaybackPreferenceSection<ProbeSummary: View>: View {
             playbackPreferenceSummary
             playbackAutoOptimizationPicker
             pictureInPictureToggle
+            playbackHistorySyncThresholdPicker
             preferredVideoQualityPicker
             cellularPreferredVideoQualityPicker
             videoCodecPreferencePicker
@@ -26,7 +27,7 @@ struct MinePlaybackPreferenceSection<ProbeSummary: View>: View {
         } header: {
             Text("播放体验")
         } footer: {
-            Text("默认保持智能播放加速开启，普通观看不需要调整高级线路。")
+            Text("播放满 \(libraryStore.playbackHistorySyncThresholdSeconds) 秒后同步观看记录并用于下次续播；未满不会上报。默认保持智能播放加速开启。")
         }
 
         Section {
@@ -103,6 +104,20 @@ struct MinePlaybackPreferenceSection<ProbeSummary: View>: View {
         )) {
             Label("画中画播放", systemImage: "pip")
         }
+    }
+
+    private var playbackHistorySyncThresholdPicker: some View {
+        Picker(selection: Binding<Int>(
+            get: { libraryStore.playbackHistorySyncThresholdSeconds },
+            set: { libraryStore.setPlaybackHistorySyncThresholdSeconds($0) }
+        )) {
+            ForEach(LibraryStore.supportedPlaybackHistorySyncThresholdSeconds, id: \.self) { seconds in
+                Text("\(seconds) 秒").tag(seconds)
+            }
+        } label: {
+            Label("观看记录同步门槛", systemImage: "clock.arrow.circlepath")
+        }
+        .pickerStyle(.navigationLink)
     }
 
     private var preferredVideoQualityPicker: some View {

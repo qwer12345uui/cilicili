@@ -7,7 +7,7 @@ struct LiveFeedView: View {
         ScrollView {
             LiveFeedContent(viewModel: viewModel)
             .padding(.horizontal, 12)
-            .padding(.top, 2)
+            .padding(.top, 18)
             .padding(.bottom, 22)
         }
         .nativeTopScrollEdgeEffect()
@@ -83,7 +83,7 @@ private struct LiveFeedRoomList: View {
                 }
 
                 if viewModel.isLoadingMore {
-                    ForEach(0..<2, id: \.self) { _ in
+                    ForEach(0..<4, id: \.self) { _ in
                         LiveRoomSkeletonCard()
                             .allowsHitTesting(false)
                     }

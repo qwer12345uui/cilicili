@@ -188,12 +188,23 @@ nonisolated struct VideoItem: Identifiable, Decodable, Hashable, Sendable {
             guard let owner else { return detailOwner }
             return owner.mergingFilledValues(from: detailOwner)
         }()
+        let mergedDescription: String? = {
+            let detailDescription = fullDetail.desc?.trimmingCharacters(in: .whitespacesAndNewlines)
+            if let detailDescription, !detailDescription.isEmpty {
+                return fullDetail.desc
+            }
+            let currentDescription = desc?.trimmingCharacters(in: .whitespacesAndNewlines)
+            if let currentDescription, !currentDescription.isEmpty {
+                return desc
+            }
+            return fullDetail.desc ?? desc
+        }()
         return VideoItem(
             bvid: fullDetail.bvid.isEmpty ? bvid : fullDetail.bvid,
             aid: fullDetail.aid ?? aid,
             title: fullDetail.title.isEmpty ? title : fullDetail.title,
             pic: fullDetail.pic ?? pic,
-            desc: fullDetail.desc ?? desc,
+            desc: mergedDescription,
             duration: fullDetail.duration ?? duration,
             pubdate: fullDetail.pubdate ?? pubdate,
             owner: mergedOwner,
@@ -210,7 +221,11 @@ nonisolated struct VideoItem: Identifiable, Decodable, Hashable, Sendable {
     }
 
     nonisolated var isPGCEpisode: Bool {
-        pgcEpisodeID != nil || pgcSeasonID != nil
+        if pgcEpisodeID != nil || pgcSeasonID != nil {
+            return true
+        }
+        guard bvid.hasPrefix("ep") else { return false }
+        return Int(bvid.dropFirst(2)) != nil
     }
 }
 
@@ -1635,7 +1650,10 @@ nonisolated struct PlayURLData: Decodable, Sendable {
         )
     }
 
-    nonisolated func resumeTime(duration: TimeInterval?) -> TimeInterval? {
+    nonisolated func resumeTime(
+        duration: TimeInterval?,
+        minimumProgress: TimeInterval = TimeInterval(LibraryStore.defaultPlaybackHistorySyncThresholdSeconds)
+    ) -> TimeInterval? {
         guard let lastPlayTime, lastPlayTime > 0 else { return nil }
         let seconds: TimeInterval
         if let duration, lastPlayTime <= duration + 1 {
@@ -1643,7 +1661,7 @@ nonisolated struct PlayURLData: Decodable, Sendable {
         } else {
             seconds = lastPlayTime / 1000
         }
-        guard seconds >= 10 else { return nil }
+        guard seconds >= minimumProgress else { return nil }
         if let duration, duration > 0 {
             let remaining = duration - seconds
             guard remaining > 15, seconds / duration < 0.96 else { return nil }
@@ -2999,7 +3017,9 @@ nonisolated struct AccountVideoEntry: Identifiable, Hashable {
     }
 
     var resumeTime: TimeInterval? {
-        guard let playbackTime, playbackTime >= 10 else { return nil }
+        guard let playbackTime,
+              playbackTime >= TimeInterval(LibraryStore.defaultPlaybackHistorySyncThresholdSeconds)
+        else { return nil }
         if let playbackDuration, playbackDuration > 0 {
             let remaining = playbackDuration - playbackTime
             guard remaining > 15, playbackTime / playbackDuration < 0.96 else { return nil }
@@ -3031,8 +3051,11 @@ nonisolated struct VideoHistoryProgress: Decodable, Hashable {
             ?? container.decodeLossyIntIfPresent(forKey: .cid)
     }
 
-    func resumeTime(duration: TimeInterval?) -> TimeInterval? {
-        guard let progress, progress >= 10 else { return nil }
+    func resumeTime(
+        duration: TimeInterval?,
+        minimumProgress: TimeInterval = TimeInterval(LibraryStore.defaultPlaybackHistorySyncThresholdSeconds)
+    ) -> TimeInterval? {
+        guard let progress, progress >= minimumProgress else { return nil }
         if let duration, duration > 0 {
             let remaining = duration - progress
             guard remaining > 15, progress / duration < 0.96 else { return nil }

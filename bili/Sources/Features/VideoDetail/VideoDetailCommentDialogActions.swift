@@ -23,12 +23,11 @@ extension VideoDetailViewModel {
     }
 
     func loadDialogPage(for root: Comment, reply: Comment) async {
-        guard let aid = detail.aid else {
-            dialogThreadStates[dialogKey(root: root, reply: reply)] = .failed("没有找到视频 AV 号，无法加载对话")
+        guard let target = commentTarget else {
+            dialogThreadStates[dialogKey(root: root, reply: reply)] = .failed("没有找到评论对象，无法加载对话")
             return
         }
 
-        let bvid = detail.bvid
         let key = dialogKey(root: root, reply: reply)
         let token = beginDialogThreadLoad(for: key)
         defer {
@@ -37,7 +36,7 @@ extension VideoDetailViewModel {
         let fallbackReplies = filteredComments(localDialogReplies(root: root, reply: reply))
 
         guard let dialogID = reply.dialogID, dialogID > 0 else {
-            guard isCurrentDialogThreadLoad(key: key, rootID: root.id, token: token, aid: aid, bvid: bvid) else {
+            guard isCurrentDialogThreadLoad(key: key, rootID: root.id, token: token, target: target) else {
                 return
             }
             dialogThreads[key] = fallbackReplies
@@ -47,15 +46,20 @@ extension VideoDetailViewModel {
 
         dialogThreadStates[key] = .loading
         do {
-            let page = try await api.fetchCommentDialog(aid: aid, root: root.rpid, dialog: dialogID)
-            guard isCurrentDialogThreadLoad(key: key, rootID: root.id, token: token, aid: aid, bvid: bvid) else {
+            let page = try await api.fetchCommentDialog(
+                oid: target.oid,
+                type: target.type,
+                root: root.rpid,
+                dialog: dialogID
+            )
+            guard isCurrentDialogThreadLoad(key: key, rootID: root.id, token: token, target: target) else {
                 return
             }
             let replies = uniqueComments(filteredComments(page.replies ?? []) + fallbackReplies)
             dialogThreads[key] = replies.isEmpty ? fallbackReplies : replies
             dialogThreadStates[key] = .loaded
         } catch {
-            guard isCurrentDialogThreadLoad(key: key, rootID: root.id, token: token, aid: aid, bvid: bvid) else {
+            guard isCurrentDialogThreadLoad(key: key, rootID: root.id, token: token, target: target) else {
                 return
             }
             dialogThreads[key] = fallbackReplies

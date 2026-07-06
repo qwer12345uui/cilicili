@@ -78,7 +78,7 @@ struct RootTabView: View {
 
                 Tab(AppTab.search.title, systemImage: AppTab.search.systemImage, value: AppTab.search, role: .search) {
                     NavigationStack(path: $searchNavigationPath) {
-                        SearchView()
+                        SearchView(showsBottomControls: searchNavigationPath.isEmpty)
                             .videoDestinations()
                     }
                 }
@@ -99,6 +99,8 @@ struct RootTabView: View {
         }
         .environment(\.openVideoAction, openVideo)
         .environment(\.prewarmVideoRouteAction, beginPlaybackPreload)
+        .environment(\.openPgcSeasonRouteAction, openPgcSeasonRoute)
+        .environment(\.openVideoOwnerRouteAction, openVideoOwnerRoute)
         .environment(\.openAppURLAction, openAppURL)
         .environment(\.appThemeTintColor, libraryStore.appTintColor)
         .environment(\.scrollEdgeEffectPreference, runtimeSettings.scrollEdgeEffectPreference)
@@ -170,7 +172,7 @@ struct RootTabView: View {
         } else {
             ProgressView()
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .background(Color(.systemGroupedBackground))
+                .background(Color(.systemBackground))
                 .task {
                     homeViewModelHolder.configure(
                         api: dependencies.api,

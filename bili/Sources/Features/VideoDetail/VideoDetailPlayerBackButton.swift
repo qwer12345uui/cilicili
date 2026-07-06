@@ -3,6 +3,7 @@ import SwiftUI
 struct VideoDetailPlayerBackButton: View {
     @Environment(\.playerNativeControlMetrics) private var controlMetrics
     let action: () -> Void
+    var usesGlass = true
 
     var body: some View {
         Button(action: {
@@ -17,7 +18,7 @@ struct VideoDetailPlayerBackButton: View {
                     height: controlMetrics.controlHeight
                 )
         }
-        .biliPlayerCompactGlassCircle(metrics: controlMetrics)
+        .modifier(VideoDetailPlayerBackButtonSurface(usesGlass: usesGlass, metrics: controlMetrics))
         .frame(width: 44, height: controlMetrics.controlHeight, alignment: .leading)
         .biliPlayerExpandedHitTarget(horizontal: 0, vertical: verticalHitPadding)
         .accessibilityLabel("返回")
@@ -25,5 +26,20 @@ struct VideoDetailPlayerBackButton: View {
 
     private var verticalHitPadding: CGFloat {
         max((44 - controlMetrics.controlHeight) / 2, 8)
+    }
+}
+
+private struct VideoDetailPlayerBackButtonSurface: ViewModifier {
+    let usesGlass: Bool
+    let metrics: PlayerNativeControlMetrics
+
+    func body(content: Content) -> some View {
+        if usesGlass {
+            content.biliPlayerCompactGlassCircle(metrics: metrics)
+        } else {
+            content
+                .buttonStyle(.plain)
+                .contentShape(Circle())
+        }
     }
 }

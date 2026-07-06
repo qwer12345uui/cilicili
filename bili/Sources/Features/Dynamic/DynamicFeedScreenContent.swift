@@ -32,5 +32,6 @@ struct DynamicFeedScreenContent: View {
                 contentWidth: contentWidth
             )
         }
+        .background(Color(.systemBackground))
     }
 }

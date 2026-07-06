@@ -249,6 +249,14 @@ private struct SurfaceOnlyPlayerOverlayRoot: View {
         )
         let visibilityActions = renderState.visibilityActions
         let speedActions = renderState.speedBoostActions
+        let nativeActions = BiliPlayerNativeControlsActionBuilder(
+            viewModel: viewModel,
+            configuration: renderContext.configuration,
+            visibilityActions: visibilityActions,
+            holdCurrentFrameForSeek: holdCurrentFrameForSeek,
+            prepareUserSeekWarmup: prepareUserSeekWarmupIfNeeded,
+            resetPreparedScrubProgress: { lastPreparedScrubProgress = -1 }
+        ).actions
 
         GeometryReader { proxy in
             let videoInsets = visibleVideoInsets(in: proxy.size)
@@ -265,7 +273,10 @@ private struct SurfaceOnlyPlayerOverlayRoot: View {
                             .frame(maxWidth: .infinity, maxHeight: .infinity),
                         visibilityActions: visibilityActions,
                         speedBoostActions: speedActions,
-                        viewModel: viewModel
+                        viewModel: viewModel,
+                        holdCurrentFrameForSeek: holdCurrentFrameForSeek,
+                        prepareUserSeekWarmup: prepareUserSeekWarmupIfNeeded,
+                        resetPreparedScrubProgress: { lastPreparedScrubProgress = -1 }
                     )
                     .zIndex(1)
 
@@ -286,7 +297,8 @@ private struct SurfaceOnlyPlayerOverlayRoot: View {
                         playbackControls: AnyView(
                             BiliPlayerNativeControlsHost(
                                 context: renderContext,
-                                renderState: renderState
+                                renderState: renderState,
+                                actions: nativeActions
                             )
                         )
                     )
@@ -320,6 +332,7 @@ private struct SurfaceOnlyPlayerOverlayRoot: View {
         .background(Color.clear)
         .environmentObject(dependencies)
         .environmentObject(libraryStore)
+        .environment(\.appThemeTintColor, libraryStore.appTintColor)
         .biliPlayerLifecycle(
             isFullscreenActive: configuration.isFullscreenActive,
             presentation: configuration.presentation,
@@ -363,7 +376,10 @@ private struct SurfaceOnlyPlayerOverlayRoot: View {
     }
 
     private var backButton: some View {
-        VideoDetailPlayerSurfaceBackButtonHost(action: handleBackButton)
+        VideoDetailPlayerSurfaceBackButtonHost(
+            action: handleBackButton,
+            usesGlass: !showsPausedThemeMask
+        )
             .environment(\.playerNativeControlMetrics, controlMetrics)
     }
 
@@ -444,7 +460,7 @@ private struct SurfaceOnlyPlayerOverlayRoot: View {
                 .foregroundStyle(.white)
                 .frame(width: moreControlsButtonWidth, height: controlMetrics.controlHeight)
         }
-        .biliPlayerCompactGlassCapsule(metrics: controlMetrics)
+        .modifier(SurfaceOnlyMoreControlsButtonSurface(usesGlass: !showsPausedThemeMask, metrics: controlMetrics))
         .frame(width: 44, height: controlMetrics.controlHeight, alignment: .trailing)
         .biliPlayerExpandedHitTarget(horizontal: 0, vertical: moreControlsVerticalHitPadding)
         .accessibilityLabel("更多播放设置")
@@ -456,6 +472,14 @@ private struct SurfaceOnlyPlayerOverlayRoot: View {
 
     private var moreControlsVerticalHitPadding: CGFloat {
         max((44 - controlMetrics.controlHeight) / 2, 8)
+    }
+
+    private var showsPausedThemeMask: Bool {
+        surfaceState.hasPresentedPlayback
+            && !surfaceState.isPlaying
+            && !surfaceState.isUserSeeking
+            && !surfaceState.isBuffering
+            && surfaceState.errorMessage == nil
     }
 
     private func persistentMoreControlsButton(contentInsets: EdgeInsets) -> some View {
@@ -583,6 +607,8 @@ private struct SurfaceOnlyPlayerOverlayRoot: View {
             showsPlayerLoadingChrome: renderState.showsPlayerLoadingChrome
                 && !detailViewModel.isSwitchingPlayQuality,
             isBuffering: context.surfaceState.isBuffering,
+            isPlaying: context.surfaceState.isPlaying,
+            hasPresentedPlayback: context.surfaceState.hasPresentedPlayback,
             showsInlineLoadingProgress: renderState.showsInlineLoadingProgress,
             isUserSeeking: context.surfaceState.isUserSeeking,
             isSpeedBoostActive: context.speedBoostModel.isActive,
@@ -1459,6 +1485,21 @@ private struct SurfaceOnlyDanmakuSettingsPage: View {
                 detailViewModel.updateDanmakuSettings(settings)
             }
         )
+    }
+}
+
+private struct SurfaceOnlyMoreControlsButtonSurface: ViewModifier {
+    let usesGlass: Bool
+    let metrics: PlayerNativeControlMetrics
+
+    func body(content: Content) -> some View {
+        if usesGlass {
+            content.biliPlayerCompactGlassCapsule(metrics: metrics)
+        } else {
+            content
+                .buttonStyle(.plain)
+                .contentShape(Capsule())
+        }
     }
 }
 

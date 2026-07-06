@@ -6,6 +6,8 @@ struct VideoCompactCover: View, Equatable {
     let maximumPixelLength: Int
     let cornerRadius: CGFloat
     let showsBorder: Bool
+    var borderOpacityScale: Double = 1
+    var showsShadow = true
     private let badgeInset: CGFloat = 7
     @State private var coverLoadedState = VideoCoverLoadedState()
 
@@ -15,6 +17,8 @@ struct VideoCompactCover: View, Equatable {
             && lhs.maximumPixelLength == rhs.maximumPixelLength
             && lhs.cornerRadius == rhs.cornerRadius
             && lhs.showsBorder == rhs.showsBorder
+            && lhs.borderOpacityScale == rhs.borderOpacityScale
+            && lhs.showsShadow == rhs.showsShadow
     }
 
     var body: some View {
@@ -45,8 +49,9 @@ struct VideoCompactCover: View, Equatable {
         .clipped()
         .videoCoverSurface(
             cornerRadius: cornerRadius,
-            shadowLevel: .subtle,
-            emphasizesBorder: showsBorder
+            shadowLevel: showsShadow ? .subtle : nil,
+            emphasizesBorder: showsBorder,
+            borderOpacityScale: borderOpacityScale
         )
     }
 }

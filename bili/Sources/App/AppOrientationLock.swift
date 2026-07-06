@@ -105,9 +105,7 @@ final class AppDelegate: NSObject, UIApplicationDelegate {
 @MainActor
 enum LaunchAppearance {
     static let backgroundColor = UIColor(named: "CiliciliDynamicLaunchBackground") ?? UIColor { traitCollection in
-        traitCollection.userInterfaceStyle == .dark
-            ? UIColor(red: 0.047, green: 0.051, blue: 0.055, alpha: 1)
-            : UIColor(red: 0.965, green: 0.973, blue: 0.984, alpha: 1)
+        UIColor.systemBackground.resolvedColor(with: traitCollection)
     }
 
     static func apply(to window: UIWindow?) {

@@ -26,10 +26,7 @@ struct VideoDetailRelatedPlaceholderContent: View {
             .padding(.horizontal, layout.horizontalPadding)
             .padding(.vertical, VideoDetailRelatedStyle.retryVerticalPadding)
         } else {
-            VideoDetailRelatedPlaceholderList(
-                layout: layout,
-                isLoading: state.isLoading
-            )
+            VideoDetailRelatedPlaceholderList(layout: layout)
             .padding(.horizontal, layout.horizontalPadding)
             .allowsHitTesting(false)
         }

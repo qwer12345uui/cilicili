@@ -10,7 +10,7 @@ struct InitialRelatedSection: View {
             VideoDetailRelatedHeader(isLoading: true)
                 .padding(.horizontal, layout.horizontalPadding)
 
-            VideoDetailRelatedPlaceholderList(layout: layout, isLoading: true)
+            VideoDetailRelatedPlaceholderList(layout: layout)
                 .padding(.horizontal, layout.horizontalPadding)
         }
         .frame(width: layoutWidth, alignment: .leading)

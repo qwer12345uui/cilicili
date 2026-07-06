@@ -3,8 +3,13 @@ import SwiftUI
 struct SearchView: View {
     @EnvironmentObject private var dependencies: AppDependencies
     @EnvironmentObject private var libraryStore: LibraryStore
+    let showsBottomControls: Bool
     @StateObject private var holder = SearchViewModelHolder()
     @State private var showsAllHotSearches = false
+
+    init(showsBottomControls: Bool = true) {
+        self.showsBottomControls = showsBottomControls
+    }
 
     var body: some View {
         Group {
@@ -12,6 +17,7 @@ struct SearchView: View {
                 SearchContentView(
                     viewModel: viewModel,
                     showsHotSearches: libraryStore.showsHotSearches,
+                    showsBottomControls: showsBottomControls,
                     showsAllHotSearches: $showsAllHotSearches
                 )
             } else {
@@ -21,11 +27,7 @@ struct SearchView: View {
                     }
             }
         }
-        .rootNavigationTitle("搜索") {
-            if let viewModel = holder.viewModel {
-                SearchScopeMenu(viewModel: viewModel)
-            }
-        }
+        .rootNavigationTitle("搜索")
         .nativeTopNavigationChrome()
     }
 }

@@ -28,7 +28,7 @@ struct InitialCommentsSection: View {
             }
             .padding(.horizontal, CommentSectionStyle.plain.horizontalPadding)
 
-            CommentsSkeletonContent(rowCount: 2, horizontalPadding: CommentSectionStyle.plain.horizontalPadding)
+            CommentsSkeletonContent(rowCount: 4, horizontalPadding: CommentSectionStyle.plain.horizontalPadding)
         }
         .padding(.vertical, 10)
         .allowsHitTesting(false)

@@ -59,7 +59,6 @@ struct VideoCompactListRow: View, Equatable {
 struct VideoCompactListPlaceholderRow: View {
     let coverSize: CGSize
     var fill: Color = Color(.secondarySystemGroupedBackground)
-    var isLoading = false
     var cornerRadius: CGFloat = 10
     var titleMinHeight: CGFloat = 36
     var authorStyle: VideoCompactListRow.AuthorStyle = .plain
@@ -81,17 +80,7 @@ struct VideoCompactListPlaceholderRow: View {
             .frame(maxWidth: .infinity, minHeight: coverSize.height, alignment: .topLeading)
         }
         .frame(maxWidth: .infinity, alignment: .topLeading)
-        .redacted(reason: .placeholder)
-        .overlay(alignment: .center) {
-            if isLoading {
-                ProgressView()
-                    .progressViewStyle(.circular)
-                    .controlSize(.regular)
-                    .tint(.secondary)
-                    .padding(10)
-                    .accessibilityLabel("正在加载视频列表")
-            }
-        }
+        .accessibilityLabel("正在加载视频列表")
     }
 
     private var titlePlaceholder: some View {

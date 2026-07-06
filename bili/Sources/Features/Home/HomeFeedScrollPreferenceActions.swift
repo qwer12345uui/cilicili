@@ -8,16 +8,7 @@ extension HomeFeedScrollPreferenceModifier {
     func updateViewportHeight(_ height: CGFloat) {
         viewportState = scrollActions.updateViewportHeight(
             height,
-            state: viewportState,
-            preloadActions: preloadActions
-        )
-    }
-
-    func updateVisiblePreloadFrames(_ frames: [HomeVisibleVideoFrame]) {
-        scrollActions.updateVisiblePreloadFrames(
-            frames,
-            context: preloadContext,
-            preloadActions: preloadActions
+            state: viewportState
         )
     }
 

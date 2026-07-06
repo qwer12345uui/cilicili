@@ -40,14 +40,13 @@ extension VideoDetailViewModel {
     }
 
     func isCurrentCommentPageLoad(
-        aid: Int,
-        bvid: String,
+        target: VideoDetailCommentTarget,
         sort: CommentSort,
         generation: Int
     ) -> Bool {
         commentPageLoadGeneration == generation
             && selectedCommentSort == sort
-            && isCurrentVideoContext(aid: aid, bvid: bvid)
+            && isCurrentCommentTarget(target)
     }
 
     func clearDanmakuStartupLoadTaskIfCurrent(_ token: UUID) {

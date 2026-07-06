@@ -1,5 +1,6 @@
 import Foundation
 import Combine
+import SwiftUI
 
 enum SearchSortOrder: String, CaseIterable, Identifiable, Hashable {
     case comprehensive
@@ -50,6 +51,7 @@ enum SearchSortOrder: String, CaseIterable, Identifiable, Hashable {
 }
 
 enum SearchScope: String, CaseIterable, Identifiable, Hashable {
+    case comprehensive
     case video
     case bangumi
     case movie
@@ -59,6 +61,8 @@ enum SearchScope: String, CaseIterable, Identifiable, Hashable {
 
     var title: String {
         switch self {
+        case .comprehensive:
+            return "综合"
         case .video:
             return "视频"
         case .bangumi:
@@ -72,6 +76,8 @@ enum SearchScope: String, CaseIterable, Identifiable, Hashable {
 
     var systemImage: String {
         switch self {
+        case .comprehensive:
+            return "magnifyingglass"
         case .video:
             return "play.rectangle"
         case .bangumi:
@@ -84,7 +90,7 @@ enum SearchScope: String, CaseIterable, Identifiable, Hashable {
     }
 
     var supportsOrder: Bool {
-        self == .video
+        self == .comprehensive || self == .video
     }
 }
 
@@ -114,7 +120,7 @@ enum SearchResultItem: Identifiable, Hashable {
 @MainActor
 final class SearchViewModel: ObservableObject {
     @Published var query = ""
-    @Published var selectedScope: SearchScope = .video
+    @Published var selectedScope: SearchScope = .comprehensive
     @Published var selectedOrder: SearchSortOrder = .comprehensive
     @Published var hotSearches: [HotSearchItem] = []
     @Published var suggestions: [SearchSuggestItem] = []
@@ -143,8 +149,12 @@ final class SearchViewModel: ObservableObject {
         results.isEmpty && !lastKeyword.isEmpty && state == .loaded
     }
 
-    var resultSectionTitle: String {
-        "\(selectedScope.title)结果"
+    var searchPrompt: String {
+        selectedScope == .comprehensive ? "搜索" : "搜索\(selectedScope.title)"
+    }
+
+    var emptyResultsTitle: String {
+        selectedScope == .comprehensive ? "没有找到相关内容" : "没有找到\(selectedScope.title)"
     }
 
     func loadHotSearch() async {
@@ -207,9 +217,21 @@ final class SearchViewModel: ObservableObject {
         }
     }
 
-    func selectScope(_ scope: SearchScope) async {
+    func searchHotSearch(_ item: HotSearchItem) async {
+        selectedScope = .comprehensive
+        selectedOrder = .comprehensive
+        await search(item.keyword)
+    }
+
+    func selectScope(_ scope: SearchScope, animation: Animation? = nil) async {
         guard selectedScope != scope else { return }
-        selectedScope = scope
+        if let animation {
+            withAnimation(animation) {
+                selectedScope = scope
+            }
+        } else {
+            selectedScope = scope
+        }
         guard !lastKeyword.isEmpty else { return }
         await search(lastKeyword)
     }
@@ -245,6 +267,14 @@ final class SearchViewModel: ObservableObject {
 
     private func fetchResults(keyword: String, page: Int) async throws -> [SearchResultItem] {
         switch selectedScope {
+        case .comprehensive:
+            let videos = try await api.searchVideos(keyword: keyword, page: page, order: selectedOrder.apiValue)
+                .map(SearchResultItem.video)
+            guard page == 1 else { return videos }
+            let users = ((try? await api.searchUsers(keyword: keyword, page: 1)) ?? [])
+                .prefix(3)
+                .map(SearchResultItem.user)
+            return users + videos
         case .video:
             return try await api.searchVideos(keyword: keyword, page: page, order: selectedOrder.apiValue)
                 .map(SearchResultItem.video)

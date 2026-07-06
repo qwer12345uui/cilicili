@@ -91,6 +91,7 @@ struct DynamicOriginalPreview: View {
                         preferredWidth: originalTextWidth
                     )
                         .frame(maxWidth: .infinity, alignment: .leading)
+                        .dynamicCopyableText(topLevelDisplayText)
                 }
 
                 if let paidContent, paidContentRendersAsTextOnly {

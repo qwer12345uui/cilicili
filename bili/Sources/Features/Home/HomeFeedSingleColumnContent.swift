@@ -21,8 +21,8 @@ struct HomeFeedSingleColumnContent: View {
 
     var body: some View {
         LazyVStack(spacing: 0) {
-            ForEach(Array(cells.enumerated()), id: \.element.id) { index, cell in
-                if visibleLastSeenMarkerIndex == index {
+            ForEach(cells) { cell in
+                if visibleLastSeenMarkerIndex == cell.index {
                     HomeFeedLastSeenMarkerCard(
                         metrics: metrics,
                         action: actions.onRefreshFromLastSeenMarker
@@ -34,15 +34,16 @@ struct HomeFeedSingleColumnContent: View {
                 HomeFeedSingleColumnCard(
                     metrics: metrics,
                     cell: cell,
-                    index: index,
                     loadMoreTriggerCellID: loadMoreTriggerCellID,
                     actions: actions
                 )
             }
 
             if isLoadingMore {
-                VideoFeedSkeletonCard(style: loadingMoreSkeletonStyle)
-                    .allowsHitTesting(false)
+                ForEach(0..<2, id: \.self) { _ in
+                    VideoFeedSkeletonCard(style: loadingMoreSkeletonStyle)
+                        .allowsHitTesting(false)
+                }
             }
         }
         .frame(maxWidth: .infinity)

@@ -3,6 +3,7 @@ import SwiftUI
 struct BiliPlayerNativeControlsHost: View {
     let context: BiliPlayerViewRenderContext
     let renderState: BiliPlayerViewRenderState
+    var actions: PlayerNativePlaybackControlsActions?
 
     var body: some View {
         PlayerNativePlaybackControls(
@@ -15,7 +16,7 @@ struct BiliPlayerNativeControlsHost: View {
             canToggleFullscreen: context.configuration.canToggleFullscreen,
             isFullscreenActive: context.configuration.isFullscreenActive,
             controlsAccessory: context.configuration.controlsAccessory,
-            actions: nativePlaybackControlsActions
+            actions: actions ?? nativePlaybackControlsActions
         )
     }
 

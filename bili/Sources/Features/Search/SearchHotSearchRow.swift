@@ -27,13 +27,9 @@ struct SearchHotSearchRow: View {
 struct SearchHotSearchSkeletonRow: View {
     var body: some View {
         HStack(spacing: 12) {
-            Circle()
-                .fill(Color(.tertiarySystemFill))
-                .frame(width: 22, height: 22)
+            SkeletonBlock(width: 22, height: 22, shape: .circle)
 
-            RoundedRectangle(cornerRadius: 4, style: .continuous)
-                .fill(Color(.tertiarySystemFill))
-                .frame(width: 142, height: 15)
+            SkeletonBlock(width: 142, height: 15, shape: .rounded(4))
 
             Spacer(minLength: 8)
 
@@ -42,7 +38,6 @@ struct SearchHotSearchSkeletonRow: View {
                 .foregroundStyle(.tertiary)
         }
         .frame(maxWidth: .infinity, minHeight: 38, alignment: .leading)
-        .redacted(reason: .placeholder)
         .accessibilityHidden(true)
     }
 }

@@ -6,7 +6,6 @@ struct HomeFeedScreenBody: View {
     @ObservedObject var libraryStore: LibraryStore
     @Binding var viewportState: HomeFeedViewportState
     @Binding var detailPath: NavigationPath
-    let preloadContext: HomeFeedPreloadContext
     let contentActions: HomeFeedContentActions
     let actionStore: HomeFeedScreenActionStore
     let launchConfiguration: HomeFeedLaunchConfiguration
@@ -16,9 +15,7 @@ struct HomeFeedScreenBody: View {
             viewModel: viewModel,
             runtimeSettings: runtimeSettings,
             viewportState: $viewportState,
-            preloadContext: preloadContext,
             scrollActions: actionStore.scroll,
-            preloadActions: actionStore.preload,
             refreshActions: actionStore.refresh
         ) {
             HomeFeedContentSection(
@@ -30,7 +27,7 @@ struct HomeFeedScreenBody: View {
             )
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(Color.homeAdaptiveBackground)
+        .background(Color(.systemBackground))
         .homeFeedScreenLifecycle(
             viewModel: viewModel,
             runtimeSettings: runtimeSettings,

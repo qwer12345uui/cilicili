@@ -8,6 +8,14 @@ private struct PrewarmVideoRouteActionKey: EnvironmentKey {
     static let defaultValue: ((VideoItem) -> Void)? = nil
 }
 
+private struct OpenPgcSeasonRouteActionKey: EnvironmentKey {
+    static let defaultValue: ((PgcSeasonRoute) -> Void)? = nil
+}
+
+private struct OpenVideoOwnerRouteActionKey: EnvironmentKey {
+    static let defaultValue: ((VideoOwner) -> Void)? = nil
+}
+
 extension EnvironmentValues {
     var openVideoAction: ((VideoItem) -> Void)? {
         get { self[OpenVideoActionKey.self] }
@@ -17,6 +25,16 @@ extension EnvironmentValues {
     var prewarmVideoRouteAction: ((VideoItem) -> Void)? {
         get { self[PrewarmVideoRouteActionKey.self] }
         set { self[PrewarmVideoRouteActionKey.self] = newValue }
+    }
+
+    var openPgcSeasonRouteAction: ((PgcSeasonRoute) -> Void)? {
+        get { self[OpenPgcSeasonRouteActionKey.self] }
+        set { self[OpenPgcSeasonRouteActionKey.self] = newValue }
+    }
+
+    var openVideoOwnerRouteAction: ((VideoOwner) -> Void)? {
+        get { self[OpenVideoOwnerRouteActionKey.self] }
+        set { self[OpenVideoOwnerRouteActionKey.self] = newValue }
     }
 }
 

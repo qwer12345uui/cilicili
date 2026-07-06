@@ -2,13 +2,12 @@ import Foundation
 
 extension VideoDetailViewModel {
     func loadCommentsPage(presentsErrors: Bool, emptyPageSkipLimit: Int = 0) async {
-        guard let aid = detail.aid else {
+        guard let target = commentTarget else {
             if comments.isEmpty {
                 commentState = .idle
             }
             return
         }
-        let bvid = detail.bvid
         let sort = selectedCommentSort
         let generation = advanceCommentPageLoadGeneration()
         let isInitialPage = comments.isEmpty && commentCursor.isEmpty
@@ -18,19 +17,19 @@ extension VideoDetailViewModel {
         beginCommentPageLoad(isLoadingMore: isLoadingMore)
         defer {
             if !didResolveLoadingState,
-               isCurrentCommentPageLoad(aid: aid, bvid: bvid, sort: sort, generation: generation) {
+               isCurrentCommentPageLoad(target: target, sort: sort, generation: generation) {
                 resetCommentStateAfterCancellation(isInitialPage: isInitialPage, wasLoadingMore: isLoadingMore)
             }
         }
         while true {
-            guard isCurrentCommentPageLoad(aid: aid, bvid: bvid, sort: sort, generation: generation) else {
+            guard isCurrentCommentPageLoad(target: target, sort: sort, generation: generation) else {
                 return
             }
             let previousCount = comments.count
             let previousCursor = commentCursor
             do {
-                let page = try await fetchCommentsWithTimeout(aid: aid, cursor: commentCursor, sort: sort)
-                guard isCurrentCommentPageLoad(aid: aid, bvid: bvid, sort: sort, generation: generation) else {
+                let page = try await fetchCommentsWithTimeout(target: target, cursor: commentCursor, sort: sort)
+                guard isCurrentCommentPageLoad(target: target, sort: sort, generation: generation) else {
                     return
                 }
                 guard !Task.isCancelled else {
@@ -55,14 +54,14 @@ extension VideoDetailViewModel {
                 remainingEmptyPageSkips -= 1
                 continueCommentPageLoadAfterEmptySkip(isLoadingMore: isLoadingMore)
             } catch is CancellationError {
-                guard isCurrentCommentPageLoad(aid: aid, bvid: bvid, sort: sort, generation: generation) else {
+                guard isCurrentCommentPageLoad(target: target, sort: sort, generation: generation) else {
                     return
                 }
                 didResolveLoadingState = true
                 resetCommentStateAfterCancellation(isInitialPage: isInitialPage, wasLoadingMore: isLoadingMore)
                 return
             } catch {
-                guard isCurrentCommentPageLoad(aid: aid, bvid: bvid, sort: sort, generation: generation) else {
+                guard isCurrentCommentPageLoad(target: target, sort: sort, generation: generation) else {
                     return
                 }
                 guard !Task.isCancelled else {

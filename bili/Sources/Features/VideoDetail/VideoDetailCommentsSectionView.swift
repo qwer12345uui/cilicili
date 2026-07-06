@@ -28,7 +28,12 @@ struct CommentsSectionView: View {
     }
 
     private var commentsLoadTaskID: String {
-        "\(store.detail?.aid ?? 0)-\(autoLoads)"
+        [
+            store.detail?.bvid ?? "",
+            store.detail?.cid.map(String.init) ?? "cid-",
+            store.detail?.pgcEpisodeID.map { "ep\($0)" } ?? "ep-",
+            String(autoLoads)
+        ].joined(separator: "|")
     }
 
     var body: some View {

@@ -28,7 +28,6 @@ struct HomeFeedScreenContent: View {
             libraryStore: dependencies.libraryStore,
             viewportState: $viewportState,
             detailPath: $detailPath,
-            preloadContext: renderPack.preloadContext,
             contentActions: renderPack.contentActions,
             actionStore: actionStore,
             launchConfiguration: launchConfiguration

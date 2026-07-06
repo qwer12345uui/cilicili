@@ -14,12 +14,6 @@ struct CommentsSkeletonContent: View {
                     .padding(.leading, 58)
             }
         }
-        .redacted(reason: .placeholder)
-        .overlay(alignment: .center) {
-            NativeLoadingIndicator()
-                .controlSize(.regular)
-                .tint(.secondary)
-                .accessibilityLabel("正在加载评论")
-        }
+        .accessibilityLabel("正在加载评论")
     }
 }

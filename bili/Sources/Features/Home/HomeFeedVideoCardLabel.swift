@@ -20,6 +20,7 @@ struct HomeFeedVideoCardLabel: View {
                 display: display,
                 coverSize: metrics.borderedSingleColumnCoverSize ?? CGSize(width: 140, height: 88)
             )
+            .equatable()
         case .doubleColumn:
             VideoCardView(
                 display: display,

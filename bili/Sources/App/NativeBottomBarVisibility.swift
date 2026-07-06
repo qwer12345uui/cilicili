@@ -3,7 +3,8 @@ import UIKit
 
 extension View {
     func hidesRootTabBarOnPush(restoreDelay: UInt64 = 0) -> some View {
-        background(NativeBottomBarOnPushHider(restoreDelay: restoreDelay))
+        toolbar(.hidden, for: .tabBar)
+            .background(NativeBottomBarOnPushHider(restoreDelay: restoreDelay))
     }
 
     func keepsRootTabBarHiddenDuringPresentation() -> some View {

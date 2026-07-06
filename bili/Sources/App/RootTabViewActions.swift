@@ -60,6 +60,34 @@ extension RootTabView {
         }
     }
 
+    func openPgcSeasonRoute(_ route: PgcSeasonRoute) {
+        openOverlayRoute(route)
+    }
+
+    func openVideoOwnerRoute(_ owner: VideoOwner) {
+        openOverlayRoute(owner)
+    }
+
+    private func openOverlayRoute<Route: Hashable>(_ route: Route) {
+        AppOrientationLock.restorePortrait()
+        if bottomMode == .video {
+            withAnimation(.smooth(duration: 0.28)) {
+                videoNavigationPath.append(route)
+            }
+            return
+        }
+
+        withAnimation(.smooth(duration: 0.32)) {
+            videoPresentationGeneration &+= 1
+            didConsumeStartupVideo = true
+            isClosingVideo = false
+            activeVideo = nil
+            videoNavigationPath = NavigationPath()
+            bottomMode = .video
+        }
+        pushInitialOverlayRoute(route, generation: videoPresentationGeneration)
+    }
+
     func openLiveRoomFromLink(_ room: LiveRoom) {
         AppOrientationLock.restorePortrait()
         if bottomMode == .video {
@@ -219,6 +247,20 @@ extension RootTabView {
                 .map(\.key)
         )
         recentPlaybackPreloadTimes = recentPlaybackPreloadTimes.filter { keptKeys.contains($0.key) }
+    }
+
+    func pushInitialOverlayRoute<Route: Hashable>(_ route: Route, generation: Int) {
+        DispatchQueue.main.async {
+            guard bottomMode == .video,
+                  videoNavigationPath.isEmpty,
+                  videoPresentationGeneration == generation,
+                  !isClosingVideo
+            else { return }
+
+            withAnimation(.smooth(duration: 0.30)) {
+                videoNavigationPath.append(route)
+            }
+        }
     }
 
     func pushInitialVideo(_ video: VideoItem, generation: Int, animated: Bool) {

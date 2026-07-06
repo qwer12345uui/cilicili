@@ -12,6 +12,12 @@ extension VideoDetailViewModel {
 
     func loadRelated(forceRefresh: Bool = false) async {
         guard !relatedState.isLoading else { return }
+        if detail.isPGCEpisode {
+            related = []
+            relatedState = .idle
+            lastRelatedLoadTimedOut = false
+            return
+        }
         guard related.isEmpty || forceRefresh else {
             await refreshRelatedInBackgroundIfNeeded()
             return

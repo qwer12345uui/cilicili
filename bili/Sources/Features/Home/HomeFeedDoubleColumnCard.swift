@@ -3,7 +3,6 @@ import SwiftUI
 struct HomeFeedDoubleColumnCard: View {
     let metrics: HomeFeedLayoutMetrics
     let cell: HomeVideoCellModel
-    let index: Int
     let loadMoreTriggerCellID: String?
     let actions: HomeFeedContentActions
 
@@ -16,7 +15,6 @@ struct HomeFeedDoubleColumnCard: View {
         )
         .homeFeedCardLifecycle(
             cell: cell,
-            index: index,
             loadMoreTriggerCellID: loadMoreTriggerCellID,
             actions: actions
         )

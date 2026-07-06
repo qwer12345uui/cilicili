@@ -75,9 +75,10 @@ struct VideoCardBorderedBody<Cover: View>: View {
     }
 }
 
-struct VideoCardBorderedCompactBody: View {
+struct VideoCardBorderedCompactBody: View, Equatable {
     let display: VideoCardDisplayModel
     let coverSize: CGSize
+    var showsShadow = true
 
     var body: some View {
         HStack(alignment: .top, spacing: 12) {
@@ -86,7 +87,8 @@ struct VideoCardBorderedCompactBody: View {
                 size: coverSize,
                 maximumPixelLength: 480,
                 cornerRadius: 18,
-                showsBorder: true
+                showsBorder: true,
+                showsShadow: false
             )
 
             VStack(alignment: .leading, spacing: 6) {
@@ -129,7 +131,7 @@ struct VideoCardBorderedCompactBody: View {
             .frame(maxWidth: .infinity, minHeight: max(coverSize.height - 20, 1), alignment: .topLeading)
         }
         .frame(maxWidth: .infinity, minHeight: coverSize.height, alignment: .topLeading)
-        .videoCardBorderedSurface(cornerRadius: 18)
+        .videoCardBorderedSurface(cornerRadius: 18, showsShadow: showsShadow)
         .contentShape(Rectangle())
         .accessibilityElement(children: .combine)
         .accessibilityLabel(display.title)
@@ -137,8 +139,8 @@ struct VideoCardBorderedCompactBody: View {
 }
 
 extension View {
-    func videoCardBorderedSurface(cornerRadius: CGFloat = 18) -> some View {
-        modifier(VideoCardBorderedSurfaceModifier(cornerRadius: cornerRadius))
+    func videoCardBorderedSurface(cornerRadius: CGFloat = 18, showsShadow: Bool = true) -> some View {
+        modifier(VideoCardBorderedSurfaceModifier(cornerRadius: cornerRadius, showsShadow: showsShadow))
     }
 
     func videoCardBorderedCover(cornerRadius: CGFloat = 14) -> some View {
@@ -149,6 +151,7 @@ extension View {
 private struct VideoCardBorderedSurfaceModifier: ViewModifier {
     @Environment(\.colorScheme) private var colorScheme
     let cornerRadius: CGFloat
+    let showsShadow: Bool
 
     func body(content: Content) -> some View {
         let shape = RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
@@ -162,8 +165,8 @@ private struct VideoCardBorderedSurfaceModifier: ViewModifier {
             .overlay {
                 shape.strokeBorder(borderColor, lineWidth: 1)
             }
-            .shadow(color: .black.opacity(shadowOpacity), radius: 18, x: 0, y: 10)
-            .shadow(color: .black.opacity(0.06), radius: 6, x: 0, y: 2)
+            .shadow(color: .black.opacity(showsShadow ? shadowOpacity : 0), radius: 18, x: 0, y: 10)
+            .shadow(color: .black.opacity(showsShadow ? 0.06 : 0), radius: 6, x: 0, y: 2)
     }
 
     private var borderColor: Color {

@@ -5,6 +5,7 @@ struct DynamicFeedTextContent: View {
 
     let collapsedInput: DynamicAttributedTextInput
     let expandedInput: DynamicAttributedTextInput
+    let copyText: String?
     let preferredWidth: CGFloat?
     let showsExpandButton: Bool
     @Binding var isExpanded: Bool
@@ -20,6 +21,7 @@ struct DynamicFeedTextContent: View {
             .transaction { transaction in
                 transaction.animation = nil
             }
+            .dynamicCopyableText(copyText)
 
             if showsExpandButton {
                 Button(action: toggleExpanded) {

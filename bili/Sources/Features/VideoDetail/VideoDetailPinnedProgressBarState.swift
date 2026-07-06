@@ -7,8 +7,7 @@ extension VideoDetailPinnedProgressBar {
     }
 
     var playbackProgress: Double {
-        guard let duration = resolvedDuration, duration > 0 else { return 0 }
-        return Self.clamped(max(playbackClock.currentTime, 0) / duration)
+        Self.clamped(playbackClock.displayProgress)
     }
 
     var resolvedDuration: TimeInterval? {
@@ -21,7 +20,7 @@ extension VideoDetailPinnedProgressBar {
 
     var displayedTime: TimeInterval {
         guard isScrubbing, let duration = resolvedDuration, duration > 0 else {
-            return max(playbackClock.currentTime, 0)
+            return max(playbackClock.displayCurrentTime, 0)
         }
         return displayedProgress * duration
     }

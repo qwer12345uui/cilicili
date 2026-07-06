@@ -22,7 +22,6 @@ struct SkeletonBlock: View {
     var body: some View {
         block
             .frame(width: width, height: height)
-            .redacted(reason: .placeholder)
             .accessibilityHidden(true)
     }
 
@@ -51,7 +50,6 @@ struct SkeletonAspectBlock: View {
             .fill(Color(.tertiarySystemFill).opacity(0.64))
             .aspectRatio(aspectRatio, contentMode: .fit)
             .frame(maxWidth: .infinity)
-            .redacted(reason: .placeholder)
             .accessibilityHidden(true)
     }
 }

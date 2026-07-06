@@ -39,12 +39,11 @@ extension VideoDetailViewModel {
     func isCurrentReplyThreadLoad(
         commentID: Int,
         token: UUID,
-        aid: Int,
-        bvid: String
+        target: VideoDetailCommentTarget
     ) -> Bool {
         replyThreadLoadTokens[commentID] == token
             && comments.contains { $0.id == commentID }
-            && isCurrentVideoContext(aid: aid, bvid: bvid)
+            && isCurrentCommentTarget(target)
     }
 
     func clearReplyThreadLoadIfCurrent(commentID: Int, token: UUID) {
@@ -63,12 +62,11 @@ extension VideoDetailViewModel {
         key: String,
         rootID: Int,
         token: UUID,
-        aid: Int,
-        bvid: String
+        target: VideoDetailCommentTarget
     ) -> Bool {
         dialogThreadLoadTokens[key] == token
             && comments.contains { $0.id == rootID }
-            && isCurrentVideoContext(aid: aid, bvid: bvid)
+            && isCurrentCommentTarget(target)
     }
 
     func clearDialogThreadLoadIfCurrent(key: String, token: UUID) {

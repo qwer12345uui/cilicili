@@ -3,9 +3,37 @@ import Foundation
 extension VideoDetailViewModel {
     func stopPlaybackForNavigation() {
         guard !isPlaybackInvalidatedForNavigation else { return }
+        flushPlaybackProgressForNavigation()
         isPlaybackTerminatedForNavigation = true
         isPlaybackInvalidatedForNavigation = true
         schedulePlaybackStopForNavigation()
+    }
+
+    private func flushPlaybackProgressForNavigation() {
+        guard !libraryStore.incognitoModeEnabled else { return }
+        let time = currentPlaybackResumeTime()
+        guard time.isFinite,
+              time >= TimeInterval(libraryStore.playbackHistorySyncThresholdSeconds)
+        else { return }
+        let cid = selectedCID ?? detail.cid
+        let duration = detail.duration.map(TimeInterval.init)
+        libraryStore.recordPlaybackProgress(
+            video: detail,
+            cid: cid,
+            progress: time,
+            duration: duration
+        )
+        let api = api
+        let detail = detail
+        Task {
+            try? await api.reportVideoHistory(
+                aid: detail.aid,
+                cid: cid,
+                progress: time,
+                duration: duration,
+                bvid: detail.bvid
+            )
+        }
     }
 
     private func schedulePlaybackStopForNavigation() {

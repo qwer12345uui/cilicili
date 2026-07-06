@@ -10,6 +10,7 @@ struct DynamicFeedCardTextSection: View {
             DynamicFeedTextContent(
                 collapsedInput: display.collapsedTextInput,
                 expandedInput: display.expandedTextInput,
+                copyText: text,
                 preferredWidth: preferredWidth,
                 showsExpandButton: display.showsExpandButton,
                 isExpanded: $isTextExpanded

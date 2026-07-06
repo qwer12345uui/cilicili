@@ -65,7 +65,9 @@ struct StoredVideo: Identifiable, Codable, Hashable {
     }
 
     var resumeTime: TimeInterval? {
-        guard let playbackTime, playbackTime >= 10 else { return nil }
+        guard let playbackTime,
+              playbackTime >= TimeInterval(LibraryStore.defaultPlaybackHistorySyncThresholdSeconds)
+        else { return nil }
         if let playbackDuration, playbackDuration > 0 {
             let remaining = playbackDuration - playbackTime
             guard remaining > 15, playbackTime / playbackDuration < 0.96 else { return nil }
@@ -85,11 +87,20 @@ struct StoredVideo: Identifiable, Codable, Hashable {
     }
 }
 
+nonisolated struct StoredPlaybackProgress: Codable, Equatable {
+    let bvid: String
+    let cid: Int?
+    let playbackTime: TimeInterval
+    let playbackDuration: TimeInterval?
+    let updatedAt: Date
+}
+
 @MainActor
 final class LibraryStore: ObservableObject {
     @Published private(set) var appearanceMode: AppAppearanceMode
     @Published private(set) var appTintColorHex: String
     @Published private(set) var defaultPlaybackRate: Double
+    @Published private(set) var playbackHistorySyncThresholdSeconds: Int
     @Published private(set) var preferredVideoQuality: Int?
     @Published private(set) var cellularPreferredVideoQuality: Int?
     @Published private(set) var playbackAutoOptimizationMode: PlaybackAutoOptimizationMode
@@ -142,6 +153,7 @@ final class LibraryStore: ObservableObject {
     private static let appTintColorDefaultMigrationKey = "cc.bili.appearance.tintColorDefaultPinkMigration.v1"
     private static let appTintColorDefaultToneMigrationKey = "cc.bili.appearance.tintColorDefaultToneMigration.v2"
     private static let defaultPlaybackRateKey = "cc.bili.playback.defaultPlaybackRate.v1"
+    private static let playbackHistorySyncThresholdSecondsKey = "cc.bili.playback.historySyncThresholdSeconds.v1"
     private static let preferredVideoQualityKey = "cc.bili.playback.preferredVideoQuality.v1"
     private static let cellularPreferredVideoQualityKey = "cc.bili.playback.cellularPreferredVideoQuality.v1"
     private static let playbackAutoOptimizationModeKey = "cc.bili.playback.autoOptimizationMode.v1"
@@ -157,6 +169,7 @@ final class LibraryStore: ObservableObject {
     private static let prefersBackupAudioURLKey = PlaybackAudioURLPolicy.storageKey
     private static let playbackCDNProbeSnapshotKey = "cc.bili.playback.cdnProbeSnapshot.v1"
     private static let playbackCDNProbeSnapshotsByContextKey = "cc.bili.playback.cdnProbeSnapshotsByContext.v1"
+    private static let playbackProgressByBVIDKey = "cc.bili.playback.progressByBVID.v1"
     private static let blocksAdDynamicsKey = "cc.bili.content.blocksAdDynamics.v1"
     private static let blocksGoodsDynamicsKey = "cc.bili.content.blocksGoodsDynamics.v1"
     private static let blocksGoodsCommentsKey = "cc.bili.content.blocksGoodsComments.v1"
@@ -195,6 +208,8 @@ final class LibraryStore: ObservableObject {
     nonisolated static let defaultPlaybackStreamSourcePreference: PlaybackStreamSourcePreference = .app
     nonisolated static let defaultHomeRecommendFeedSourcePreference: HomeRecommendFeedSourcePreference = .app
     nonisolated static let defaultHomeFeedLayout: HomeFeedLayout = .singleColumn
+    nonisolated static let defaultPlaybackHistorySyncThresholdSeconds = 5
+    nonisolated static let supportedPlaybackHistorySyncThresholdSeconds = [5, 10, 30]
     nonisolated static let supportedVideoQualities = BiliVideoQuality.supportedQualities
     nonisolated static let playbackCDNProbeRefreshIntervalRange: ClosedRange<Int> = 15...1440
     nonisolated static let defaultPlaybackCDNProbeRefreshIntervalMinutes = 120
@@ -204,8 +219,10 @@ final class LibraryStore: ObservableObject {
     nonisolated static let supportedRecommendMinimumViews = [0, 50, 100, 500, 1000]
     nonisolated static let supportedRecommendMinimumLikeRatios = [0, 1, 2, 3, 4]
     private static let temporaryPlaybackCDNAvoidanceDuration: TimeInterval = 10 * 60
+    private static let maxStoredPlaybackProgressCount = 240
     private var playbackCDNProbeSnapshotsByContext: [String: PlaybackCDNProbeSnapshot] = [:]
     private var temporarilyAvoidedPlaybackCDNPreferences: [PlaybackCDNPreference: Date] = [:]
+    private var playbackProgressByBVID: [String: StoredPlaybackProgress] = [:]
 
     var effectivePlaybackCDNPreference: PlaybackCDNPreference {
         effectivePlaybackCDNPreference(for: playbackCDNPreference)
@@ -284,6 +301,10 @@ final class LibraryStore: ObservableObject {
         userDefaults.set(true, forKey: Self.appTintColorDefaultToneMigrationKey)
         userDefaults.set(true, forKey: Self.appTintColorDefaultMigrationKey)
         self.defaultPlaybackRate = Self.normalizedPlaybackRate(userDefaults.object(forKey: Self.defaultPlaybackRateKey) as? Double ?? 1.0)
+        self.playbackHistorySyncThresholdSeconds = Self.normalizedPlaybackHistorySyncThresholdSeconds(
+            userDefaults.object(forKey: Self.playbackHistorySyncThresholdSecondsKey) as? Int
+                ?? Self.defaultPlaybackHistorySyncThresholdSeconds
+        )
         if let storedVideoQuality = userDefaults.object(forKey: Self.preferredVideoQualityKey) as? Int {
             self.preferredVideoQuality = storedVideoQuality == 0 ? nil : Self.normalizedVideoQuality(storedVideoQuality)
         } else {
@@ -335,6 +356,10 @@ final class LibraryStore: ObservableObject {
             self.playbackCDNProbeSnapshot = probeSnapshot
         } else {
             self.playbackCDNProbeSnapshot = nil
+        }
+        if let progressData = userDefaults.data(forKey: Self.playbackProgressByBVIDKey),
+           let progress = try? JSONDecoder().decode([String: StoredPlaybackProgress].self, from: progressData) {
+            self.playbackProgressByBVID = progress
         }
         self.blocksAdDynamics = userDefaults.object(forKey: Self.blocksAdDynamicsKey) as? Bool ?? true
         self.blocksGoodsDynamics = userDefaults.object(forKey: Self.blocksGoodsDynamicsKey) as? Bool ?? true
@@ -429,6 +454,75 @@ final class LibraryStore: ObservableObject {
         let normalizedRate = Self.normalizedPlaybackRate(rate)
         defaultPlaybackRate = normalizedRate
         userDefaults.set(normalizedRate, forKey: Self.defaultPlaybackRateKey)
+    }
+
+    func setPlaybackHistorySyncThresholdSeconds(_ seconds: Int) {
+        let normalizedSeconds = Self.normalizedPlaybackHistorySyncThresholdSeconds(seconds)
+        playbackHistorySyncThresholdSeconds = normalizedSeconds
+        userDefaults.set(normalizedSeconds, forKey: Self.playbackHistorySyncThresholdSecondsKey)
+    }
+
+    func recordPlaybackProgress(
+        video: VideoItem,
+        cid: Int?,
+        progress: TimeInterval,
+        duration: TimeInterval?
+    ) {
+        let bvid = video.bvid.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !bvid.isEmpty,
+              progress.isFinite,
+              progress >= TimeInterval(playbackHistorySyncThresholdSeconds)
+        else { return }
+        playbackProgressByBVID[bvid] = StoredPlaybackProgress(
+            bvid: bvid,
+            cid: cid ?? video.cid,
+            playbackTime: progress,
+            playbackDuration: duration,
+            updatedAt: Date()
+        )
+        persistPlaybackProgress()
+    }
+
+    func localPlaybackResumeTime(
+        for video: VideoItem,
+        cid: Int?,
+        duration: TimeInterval?
+    ) -> TimeInterval? {
+        guard let progress = localPlaybackProgress(for: video, duration: duration) else { return nil }
+        if let progressCID = progress.cid,
+           let cid,
+           progressCID != cid {
+            return nil
+        }
+        return progress.playbackTime
+    }
+
+    func localPlaybackProgress(
+        for video: VideoItem,
+        duration: TimeInterval?
+    ) -> StoredPlaybackProgress? {
+        guard !incognitoModeEnabled else { return nil }
+        let bvid = video.bvid.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !bvid.isEmpty,
+              let progress = playbackProgressByBVID[bvid],
+              isUsablePlaybackProgress(progress, duration: duration)
+        else { return nil }
+        return progress
+    }
+
+    private func isUsablePlaybackProgress(
+        _ progress: StoredPlaybackProgress,
+        duration: TimeInterval?
+    ) -> Bool {
+        guard progress.playbackTime.isFinite,
+              progress.playbackTime >= TimeInterval(playbackHistorySyncThresholdSeconds)
+        else { return false }
+        let resolvedDuration = duration ?? progress.playbackDuration
+        if let resolvedDuration, resolvedDuration > 0 {
+            let remaining = resolvedDuration - progress.playbackTime
+            guard remaining > 15, progress.playbackTime / resolvedDuration < 0.96 else { return false }
+        }
+        return true
     }
 
     func setPreferredVideoQuality(_ quality: Int?) {
@@ -638,6 +732,26 @@ final class LibraryStore: ObservableObject {
             return
         }
         userDefaults.set(data, forKey: Self.playbackCDNProbeSnapshotsByContextKey)
+    }
+
+    private func persistPlaybackProgress() {
+        if playbackProgressByBVID.count > Self.maxStoredPlaybackProgressCount {
+            playbackProgressByBVID = Dictionary(
+                uniqueKeysWithValues: playbackProgressByBVID
+                    .values
+                    .sorted { $0.updatedAt > $1.updatedAt }
+                    .prefix(Self.maxStoredPlaybackProgressCount)
+                    .map { ($0.bvid, $0) }
+            )
+        }
+        guard !playbackProgressByBVID.isEmpty,
+              let data = try? JSONEncoder().encode(playbackProgressByBVID)
+        else {
+            userDefaults.removeObject(forKey: Self.playbackProgressByBVIDKey)
+            return
+        }
+        userDefaults.set(data, forKey: Self.playbackProgressByBVIDKey)
+        userDefaults.synchronize()
     }
 
     private static func playbackCDNProbeContextKey(
@@ -896,6 +1010,12 @@ final class LibraryStore: ObservableObject {
 
     private static func normalizedPlaybackRate(_ rate: Double) -> Double {
         supportedPlaybackRates.contains(rate) ? rate : 1.0
+    }
+
+    private static func normalizedPlaybackHistorySyncThresholdSeconds(_ seconds: Int) -> Int {
+        supportedPlaybackHistorySyncThresholdSeconds.contains(seconds)
+            ? seconds
+            : defaultPlaybackHistorySyncThresholdSeconds
     }
 
     private static func normalizedVideoQuality(_ quality: Int?) -> Int? {

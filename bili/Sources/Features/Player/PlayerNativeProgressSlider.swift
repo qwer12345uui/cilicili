@@ -14,7 +14,7 @@ struct PlayerNativeProgressSlider: View {
     private var progressBinding: Binding<Double> {
         Binding(
             get: {
-                scrubbingState.isEditing ? scrubbingState.editingProgress : clock.progress
+                scrubbingState.isEditing ? scrubbingState.editingProgress : clock.displayProgress
             },
             set: { newValue in
                 let clampedValue = min(max(newValue, 0), 1)
@@ -70,7 +70,7 @@ struct PlayerNativeProgressSlider: View {
     }
 
     private var displayProgress: Double {
-        min(max(scrubbingState.isEditing ? scrubbingState.editingProgress : clock.progress, 0), 1)
+        min(max(scrubbingState.isEditing ? scrubbingState.editingProgress : clock.displayProgress, 0), 1)
     }
 
     private var effectiveCanSeek: Bool {

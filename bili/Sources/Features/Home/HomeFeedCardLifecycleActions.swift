@@ -2,7 +2,6 @@ import Foundation
 
 struct HomeFeedCardLifecycleActions {
     let cell: HomeVideoCellModel
-    let index: Int
     let loadMoreTriggerCellID: String?
     let actions: HomeFeedContentActions
 
@@ -11,11 +10,7 @@ struct HomeFeedCardLifecycleActions {
     }
 
     func handleAppear() {
-        actions.onVisibleFrame(cell.video, index)
-    }
-
-    func handleDisappear() {
-        actions.onInvisibleFrame(cell.video)
+        actions.onCardAppear(cell.video, cell.index)
     }
 
     func loadMoreIfNeeded() async {

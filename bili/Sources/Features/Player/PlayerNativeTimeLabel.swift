@@ -17,7 +17,7 @@ struct PlayerNativeTimeLabel: View {
     }
 
     private var currentText: String {
-        BiliFormatters.duration(Int(clock.currentTime.rounded()))
+        BiliFormatters.duration(Int(clock.displayCurrentTime.rounded()))
     }
 
     private var fullTimeText: String {

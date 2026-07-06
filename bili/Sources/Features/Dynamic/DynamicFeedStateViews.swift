@@ -11,13 +11,15 @@ struct DynamicFeedSkeletonScrollContent: View {
 }
 
 struct DynamicFeedSkeletonList: View {
+    private let placeholderCount = 6
+
     var body: some View {
         LazyVStack(spacing: 0) {
-            ForEach(0..<3, id: \.self) { index in
+            ForEach(0..<placeholderCount, id: \.self) { index in
                 DynamicFeedSkeletonCard()
                     .allowsHitTesting(false)
 
-                if index != 2 {
+                if index != placeholderCount - 1 {
                     Divider()
                         .padding(.leading, 66)
                 }

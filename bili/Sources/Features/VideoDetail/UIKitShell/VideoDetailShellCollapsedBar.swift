@@ -1,7 +1,7 @@
 import SwiftUI
 
-/// UIKit 外壳用：暂停下翻收缩时的折叠工具条，原生液态玻璃风格（iOS26）。
-/// UIKit 详情页播放器收缩后的底部条，背景用 glassEffect。
+/// UIKit 外壳用：暂停下翻收缩时的折叠工具条。
+/// 背景由 `VideoDetailShellViewController` 的主题色遮罩提供。
 struct VideoDetailShellCollapsedBar: View {
     @ObservedObject var playerViewModel: PlayerStateViewModel
     let onNavigateBack: () -> Void
@@ -44,7 +44,6 @@ struct VideoDetailShellCollapsedBar: View {
         .biliLiquidGlassForeground(shadowOpacity: 0.20)
         .padding(.horizontal, 12)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .biliRegularGlassEffect(in: Rectangle())
         .contentShape(Rectangle())
     }
 }

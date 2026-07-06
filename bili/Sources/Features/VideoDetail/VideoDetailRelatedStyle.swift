@@ -9,7 +9,7 @@ enum VideoDetailRelatedStyle {
     static let retryVerticalPadding: CGFloat = 16
     static let retrySpacing: CGFloat = 10
     static let rowVerticalPadding: CGFloat = 9
-    static let placeholderCount = 3
+    static let placeholderCount = 6
     static let coverWidthRatio: CGFloat = 0.40
     static let minimumCoverWidth: CGFloat = 132
     static let maximumCoverWidth: CGFloat = 160

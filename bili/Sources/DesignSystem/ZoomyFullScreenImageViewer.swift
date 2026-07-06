@@ -57,7 +57,10 @@ struct ZoomyFullScreenImageViewer: View {
                 .ignoresSafeArea()
 
             ZStack {
-                if items.count > 1 {
+                if let dismissLockedItemID {
+                    imagePage(for: item(withID: dismissLockedItemID))
+                        .ignoresSafeArea()
+                } else if items.count > 1 {
                     TabView(selection: $selectedItemID) {
                         ForEach(items) { item in
                             imagePage(for: item)
@@ -250,6 +253,10 @@ struct ZoomyFullScreenImageViewer: View {
             id: url?.absoluteString ?? initialItemID,
             viewerURL: url
         )
+    }
+
+    private func item(withID id: String) -> ZoomyImagePreviewItem? {
+        items.first { $0.id == id }
     }
 
     private func initialImage(for item: ZoomyImagePreviewItem) -> UIImage? {

@@ -3,7 +3,6 @@ import SwiftUI
 struct HomeFeedSingleColumnCard: View {
     let metrics: HomeFeedLayoutMetrics
     let cell: HomeVideoCellModel
-    let index: Int
     let loadMoreTriggerCellID: String?
     let actions: HomeFeedContentActions
 
@@ -18,7 +17,6 @@ struct HomeFeedSingleColumnCard: View {
         .padding(.bottom, metrics.mode == .borderedSingleColumn ? 8 : 14)
         .homeFeedCardLifecycle(
             cell: cell,
-            index: index,
             loadMoreTriggerCellID: loadMoreTriggerCellID,
             actions: actions
         )

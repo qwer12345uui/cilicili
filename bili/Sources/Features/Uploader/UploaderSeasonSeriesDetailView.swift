@@ -238,7 +238,7 @@ private final class UploaderSeasonSeriesDetailViewModel: ObservableObject {
 private struct UploaderSeasonSeriesDetailLoadingRows: View {
     var body: some View {
         VStack(spacing: 12) {
-            ForEach(0..<4, id: \.self) { _ in
+            ForEach(0..<8, id: \.self) { _ in
                 VideoCompactListPlaceholderRow(
                     coverSize: CGSize(width: 132, height: 74),
                     cornerRadius: 8,

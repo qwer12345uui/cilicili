@@ -9,12 +9,31 @@ extension VideoDetailViewModel {
         if redirectToHistoryCIDIfNeeded(detail.historyCID, currentCID: cid) {
             return true
         }
-        if let resumeTime = data.resumeTime(duration: historyResumeDurationHint) {
+        let minimumProgress = playbackHistoryResumeMinimumProgress
+        if let localProgress = libraryStore.localPlaybackProgress(
+            for: detail,
+            duration: historyResumeDurationHint
+        ),
+           redirectToHistoryCIDIfNeeded(localProgress.cid, currentCID: cid) {
+            return true
+        }
+        if let resumeTime = libraryStore.localPlaybackResumeTime(
+            for: detail,
+            cid: cid,
+            duration: historyResumeDurationHint
+        ) {
+            setPendingPlaybackHistoryResumeTime(resumeTime, cid: cid)
+            return false
+        }
+        if let resumeTime = data.resumeTime(
+            duration: historyResumeDurationHint,
+            minimumProgress: minimumProgress
+        ) {
             setPendingPlaybackHistoryResumeTime(resumeTime, cid: cid)
             return false
         }
         if let resumeTime = detail.historyResumeTime,
-           resumeTime > 0.25,
+           resumeTime >= minimumProgress,
            detail.historyCID == nil || detail.historyCID == cid {
             setPendingPlaybackHistoryResumeTime(resumeTime, cid: cid)
             return false
@@ -43,6 +62,10 @@ extension VideoDetailViewModel {
         detail.duration.map(TimeInterval.init)
     }
 
+    private var playbackHistoryResumeMinimumProgress: TimeInterval {
+        TimeInterval(libraryStore.playbackHistorySyncThresholdSeconds)
+    }
+
     private func prepareCloudHistoryResumeIfNeeded(currentCID: Int) async {
         guard !didResolveCloudHistoryResume else { return }
         didResolveCloudHistoryResume = true
@@ -52,7 +75,10 @@ extension VideoDetailViewModel {
         do {
             let history = try await api.fetchVideoHistoryProgress(aid: aid)
             let targetCID = matchingHistoryCID(history.lastPlayCid) ?? currentCID
-            if let resumeTime = history.resumeTime(duration: historyResumeDurationHint) {
+            if let resumeTime = history.resumeTime(
+                duration: historyResumeDurationHint,
+                minimumProgress: playbackHistoryResumeMinimumProgress
+            ) {
                 setPendingPlaybackHistoryResumeTime(resumeTime, cid: targetCID)
             }
             if targetCID != currentCID {

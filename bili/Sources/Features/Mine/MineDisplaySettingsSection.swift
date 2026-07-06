@@ -2,6 +2,7 @@ import SwiftUI
 
 struct MineDisplaySettingsSection: View {
     @ObservedObject var libraryStore: LibraryStore
+    @AppStorage(VideoCoverBadgeContrastBacking.storageKey) private var videoCoverBadgeContrastBackingOpacity = VideoCoverBadgeContrastBacking.defaultOpacity
 
     var body: some View {
         Section("显示") {
@@ -59,6 +60,29 @@ struct MineDisplaySettingsSection: View {
                 )
             }
 
+            VStack(alignment: .leading, spacing: 10) {
+                HStack {
+                    Label("封面角标暗色底", systemImage: "circle.lefthalf.filled")
+                    Spacer(minLength: 8)
+                    Text(videoCoverBadgeContrastBackingOpacityTitle)
+                        .font(.caption.monospacedDigit())
+                        .foregroundStyle(.secondary)
+                }
+
+                Slider(
+                    value: Binding(
+                        get: {
+                            VideoCoverBadgeContrastBacking.normalized(videoCoverBadgeContrastBackingOpacity)
+                        },
+                        set: { value in
+                            videoCoverBadgeContrastBackingOpacity = VideoCoverBadgeContrastBacking.normalized(value)
+                        }
+                    ),
+                    in: VideoCoverBadgeContrastBacking.opacityRange,
+                    step: 0.05
+                )
+            }
+
             Toggle(isOn: Binding(
                 get: { libraryStore.videoCoverBottomScrimEnabled },
                 set: { libraryStore.setVideoCoverBottomScrimEnabled($0) }
@@ -103,6 +127,10 @@ struct MineDisplaySettingsSection: View {
 
     private var videoCoverBadgeShadowOpacityTitle: String {
         "\(Int((libraryStore.videoCoverBadgeShadowOpacity * 100).rounded()))%"
+    }
+
+    private var videoCoverBadgeContrastBackingOpacityTitle: String {
+        "\(Int((VideoCoverBadgeContrastBacking.normalized(videoCoverBadgeContrastBackingOpacity) * 100).rounded()))%"
     }
 }
 

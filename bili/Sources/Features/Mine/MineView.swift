@@ -20,6 +20,8 @@ struct MineView: View {
                     }
             }
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(Color(.systemBackground))
         .rootNavigationTitle("我的")
         .nativeTopNavigationChrome()
         .sheet(item: $loginSheet) { sheet in

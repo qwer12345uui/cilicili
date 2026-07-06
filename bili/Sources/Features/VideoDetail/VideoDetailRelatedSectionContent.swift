@@ -10,7 +10,7 @@ struct VideoDetailRelatedSectionContent: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: VideoDetailRelatedStyle.sectionSpacing) {
-            VideoDetailRelatedHeader(isLoading: state.isLoading)
+            VideoDetailRelatedHeader(isLoading: showsLoadingPlaceholder)
                 .padding(.horizontal, layout.horizontalPadding)
 
             if !relatedItems.isEmpty {
@@ -30,5 +30,9 @@ struct VideoDetailRelatedSectionContent: View {
                 )
             }
         }
+    }
+
+    private var showsLoadingPlaceholder: Bool {
+        relatedItems.isEmpty && (state == .idle || state.isLoading)
     }
 }

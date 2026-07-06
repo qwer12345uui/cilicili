@@ -13,7 +13,7 @@ struct BiliPlayerControlsOverlayLayer: View {
         let bottomInset = max(safeAreaInsets.bottom, state.contentInsets.bottom)
         let trailingInset = max(safeAreaInsets.trailing, state.contentInsets.trailing)
         ZStack(alignment: .bottom) {
-            if isEdgeScrimEnabled, state.showsActivePlaybackControls {
+            if isEdgeScrimEnabled, state.showsActivePlaybackControls, state.isPlaying {
                 PlayerControlEdgeScrimLayer(contentInsets: state.contentInsets)
                     .transition(.opacity)
                     .zIndex(1)
@@ -47,9 +47,9 @@ struct BiliPlayerControlsOverlayLayer: View {
                     .zIndex(7)
             }
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
         .opacity(state.playbackControlsOpacity)
         .allowsHitTesting(state.playbackControlsAllowsHitTesting)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
     private var usesFullscreenChromeSpacing: Bool {

@@ -10,7 +10,7 @@ struct LiveView: View {
                 LiveFeedView(viewModel: viewModel)
             } else {
                 ScrollView {
-                    LiveFeedSkeletonList(horizontalPadding: 12, topPadding: 2)
+                    LiveFeedSkeletonList(horizontalPadding: 12, topPadding: 18)
                 }
                 .nativeTopScrollEdgeEffect()
                 .background(Color(.systemBackground))

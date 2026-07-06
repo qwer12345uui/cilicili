@@ -10,7 +10,7 @@ struct CommentsSectionContentStateView: View {
     var body: some View {
         switch state {
         case .loading:
-            CommentsSkeletonContent(rowCount: 2, horizontalPadding: style.horizontalPadding)
+            CommentsSkeletonContent(rowCount: 4, horizontalPadding: style.horizontalPadding)
         case .failed(let message):
             CommentsSectionErrorContent(
                 message: message,

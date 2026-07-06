@@ -24,25 +24,12 @@ struct BiliMediaPlaceholder: View {
         ZStack {
             LinearGradient(
                 colors: [
-                    Color(.tertiarySystemFill).opacity(0.78),
-                    Color(.secondarySystemFill).opacity(0.48),
-                    Color(.tertiarySystemFill).opacity(0.66)
+                    Color(.tertiarySystemFill).opacity(0.74),
+                    Color(.secondarySystemFill).opacity(0.52)
                 ],
                 startPoint: .topLeading,
                 endPoint: .bottomTrailing
             )
-
-            GeometryReader { proxy in
-                let stripeWidth = max(proxy.size.width * 0.36, 80)
-
-                Rectangle()
-                    .fill(.white.opacity(0.045))
-                    .frame(width: stripeWidth)
-                    .rotationEffect(.degrees(14))
-                    .offset(x: proxy.size.width * 0.18, y: -proxy.size.height * 0.18)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
-                    .allowsHitTesting(false)
-            }
 
             ZStack {
                 Circle()

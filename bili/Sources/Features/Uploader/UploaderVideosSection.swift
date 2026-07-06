@@ -47,7 +47,7 @@ struct UploaderVideosSection: View {
     @ViewBuilder
     private var emptyContent: some View {
         if viewModel.state.isLoading {
-            UploaderVideosLoadingState()
+            UploaderVideosLoadingState(metrics: metrics)
         } else if case .failed(let message) = viewModel.state {
             ErrorStateView(title: "投稿加载失败", message: message) {
                 Task { await viewModel.refresh() }
@@ -72,8 +72,15 @@ struct UploaderVideosSection: View {
                 }
             }
 
-            footer
-                .gridCellColumns(metrics.feedColumns.count)
+            if viewModel.state.isLoading {
+                ForEach(0..<(metrics.feedColumns.count * 2), id: \.self) { _ in
+                    VideoFeedSkeletonCard(style: metrics.mode.isDoubleColumn ? .grid : .singleColumn)
+                        .allowsHitTesting(false)
+                }
+            } else {
+                footer
+                    .gridCellColumns(metrics.feedColumns.count)
+            }
         }
         .frame(maxWidth: .infinity)
         .padding(.horizontal, metrics.feedHorizontalPadding)
@@ -81,11 +88,7 @@ struct UploaderVideosSection: View {
 
     @ViewBuilder
     private var footer: some View {
-        if viewModel.state.isLoading {
-            ProgressView()
-                .frame(maxWidth: .infinity)
-                .padding()
-        } else if !viewModel.hasMoreVideos {
+        if !viewModel.hasMoreVideos {
             Text("没有更多投稿了")
                 .font(.caption)
                 .foregroundStyle(.tertiary)
@@ -96,16 +99,11 @@ struct UploaderVideosSection: View {
 }
 
 private struct UploaderVideosLoadingState: View {
-    var body: some View {
-        VStack(spacing: 12) {
-            ProgressView()
+    let metrics: HomeFeedLayoutMetrics
 
-            Text("正在加载投稿")
-                .font(.footnote)
-                .foregroundStyle(.secondary)
-        }
-        .frame(maxWidth: .infinity)
-        .padding(.top, 80)
+    var body: some View {
+        HomeFeedSkeletonSection(metrics: metrics)
+            .accessibilityLabel("正在加载投稿")
     }
 }
 

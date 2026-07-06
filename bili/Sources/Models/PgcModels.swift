@@ -24,17 +24,67 @@ nonisolated struct PgcSeasonInfo: Decodable, Hashable, Sendable {
     let cover: String?
     let evaluate: String?
     let episodes: [PgcEpisode]
+    let sections: [PgcEpisodeSection]
     let rating: PgcRating?
+    let stat: PgcSeasonStat?
     let upInfo: PgcUpInfo?
     let userStatus: PgcUserStatus?
 
     enum CodingKeys: String, CodingKey {
-        case title, subtitle, cover, evaluate, episodes, rating
+        case title, subtitle, cover, evaluate, episodes, rating, stat
+        case sections = "section"
         case seasonID = "season_id"
         case mediaID = "media_id"
         case seasonTitle = "season_title"
         case upInfo = "up_info"
         case userStatus = "user_status"
+    }
+
+    init(
+        seasonID: Int?,
+        mediaID: Int?,
+        title: String?,
+        seasonTitle: String?,
+        subtitle: String?,
+        cover: String?,
+        evaluate: String?,
+        episodes: [PgcEpisode],
+        sections: [PgcEpisodeSection],
+        rating: PgcRating?,
+        stat: PgcSeasonStat?,
+        upInfo: PgcUpInfo?,
+        userStatus: PgcUserStatus?
+    ) {
+        self.seasonID = seasonID
+        self.mediaID = mediaID
+        self.title = title
+        self.seasonTitle = seasonTitle
+        self.subtitle = subtitle
+        self.cover = cover
+        self.evaluate = evaluate
+        self.episodes = episodes
+        self.sections = sections
+        self.rating = rating
+        self.stat = stat
+        self.upInfo = upInfo
+        self.userStatus = userStatus
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        seasonID = container.pgcDecodeLossyIntIfPresent(forKey: .seasonID)
+        mediaID = container.pgcDecodeLossyIntIfPresent(forKey: .mediaID)
+        title = container.pgcDecodeLossyStringIfPresent(forKey: .title)
+        seasonTitle = container.pgcDecodeLossyStringIfPresent(forKey: .seasonTitle)
+        subtitle = container.pgcDecodeLossyStringIfPresent(forKey: .subtitle)
+        cover = container.pgcDecodeLossyStringIfPresent(forKey: .cover)
+        evaluate = container.pgcDecodeLossyStringIfPresent(forKey: .evaluate)
+        episodes = try container.decodeIfPresent([PgcEpisode].self, forKey: .episodes) ?? []
+        sections = try container.decodeIfPresent([PgcEpisodeSection].self, forKey: .sections) ?? []
+        rating = try container.decodeIfPresent(PgcRating.self, forKey: .rating)
+        stat = try container.decodeIfPresent(PgcSeasonStat.self, forKey: .stat)
+        upInfo = try container.decodeIfPresent(PgcUpInfo.self, forKey: .upInfo)
+        userStatus = try container.decodeIfPresent(PgcUserStatus.self, forKey: .userStatus)
     }
 
     var displayTitle: String {
@@ -61,6 +111,77 @@ nonisolated struct PgcSeasonInfo: Decodable, Hashable, Sendable {
         return episodes.first { episode in
             episode.epID == lastEpID || episode.idValue == lastEpID
         }
+    }
+
+    var allPlayableEpisodes: [PgcEpisode] {
+        var seen = Set<Int>()
+        return (episodes + sections.flatMap(\.episodes)).filter { episode in
+            guard episode.videoItem(in: self) != nil else { return false }
+            return seen.insert(episode.id).inserted
+        }
+    }
+
+    var selectableEpisodes: [PgcEpisode] {
+        episodes.isEmpty ? allPlayableEpisodes : episodes
+    }
+
+    func withFallbackSeasonID(_ fallbackSeasonID: Int) -> PgcSeasonInfo {
+        guard seasonID == nil else { return self }
+        return PgcSeasonInfo(
+            seasonID: fallbackSeasonID,
+            mediaID: mediaID,
+            title: title,
+            seasonTitle: seasonTitle,
+            subtitle: subtitle,
+            cover: cover,
+            evaluate: evaluate,
+            episodes: episodes,
+            sections: sections,
+            rating: rating,
+            stat: stat,
+            upInfo: upInfo,
+            userStatus: userStatus
+        )
+    }
+
+    func relatedEpisodeVideoItems(excluding detail: VideoItem, limit: Int) -> [VideoItem] {
+        let currentEpisodeID = detail.pgcEpisodeID
+        let currentCID = detail.cid
+        let currentBVID = detail.bvid.trimmingCharacters(in: .whitespacesAndNewlines)
+        return allPlayableEpisodes
+            .filter { episode in
+                if let currentEpisodeID,
+                   episode.epID == currentEpisodeID || episode.idValue == currentEpisodeID {
+                    return false
+                }
+                if let currentCID, episode.cid == currentCID {
+                    return false
+                }
+                if let bvid = episode.bvid?.trimmingCharacters(in: .whitespacesAndNewlines),
+                   !bvid.isEmpty,
+                   bvid == currentBVID {
+                    return false
+                }
+                return true
+            }
+            .compactMap { episode in
+                episode.videoItem(in: self, recommendReason: "同番剧")
+            }
+            .prefix(limit)
+            .map { $0 }
+    }
+}
+
+nonisolated struct PgcEpisodeSection: Decodable, Hashable, Sendable {
+    let episodes: [PgcEpisode]
+
+    enum CodingKeys: String, CodingKey {
+        case episodes
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        episodes = try container.decodeIfPresent([PgcEpisode].self, forKey: .episodes) ?? []
     }
 }
 
@@ -128,7 +249,7 @@ nonisolated struct PgcEpisode: Decodable, Hashable, Identifiable, Sendable {
         return duration > 10_000 ? duration / 1000 : duration
     }
 
-    func videoItem(in season: PgcSeasonInfo) -> VideoItem? {
+    func videoItem(in season: PgcSeasonInfo, recommendReason: String? = nil) -> VideoItem? {
         guard let cid, cid > 0 else { return nil }
         let episodeID = epID ?? idValue
         let seasonID = season.seasonID
@@ -140,11 +261,11 @@ nonisolated struct PgcEpisode: Decodable, Hashable, Identifiable, Sendable {
             aid: aid,
             title: displayTitle,
             pic: cover?.normalizedBiliURL() ?? season.normalizedCover,
-            desc: season.evaluate,
+            desc: season.evaluate?.removingHTMLTags(),
             duration: durationSeconds,
             pubdate: pubTime,
             owner: season.owner,
-            stat: nil,
+            stat: season.stat?.videoStat,
             cid: cid,
             pages: [
                 VideoPage(
@@ -156,6 +277,7 @@ nonisolated struct PgcEpisode: Decodable, Hashable, Identifiable, Sendable {
                 )
             ],
             dimension: dimension,
+            recommendReason: recommendReason,
             pgcSeasonID: seasonID,
             pgcEpisodeID: episodeID
         )
@@ -168,6 +290,28 @@ nonisolated struct PgcRating: Decodable, Hashable, Sendable {
     var displayScore: String? {
         guard let score else { return nil }
         return String(format: "%.1f", score)
+    }
+}
+
+nonisolated struct PgcSeasonStat: Decodable, Hashable, Sendable {
+    let views: Int?
+    let reply: Int?
+    let likes: Int?
+    let coins: Int?
+    let favorite: Int?
+
+    enum CodingKeys: String, CodingKey {
+        case views, reply, likes, coins, favorite
+    }
+
+    var videoStat: VideoStat {
+        VideoStat(
+            view: views,
+            reply: reply,
+            like: likes,
+            coin: coins,
+            favorite: favorite
+        )
     }
 }
 

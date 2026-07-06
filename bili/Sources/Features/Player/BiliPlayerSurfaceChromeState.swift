@@ -12,6 +12,8 @@ struct BiliPlayerSurfaceChromeState {
     let constrainsRotationSnapshotToVideoAspect: Bool
     let showsPlayerLoadingChrome: Bool
     let isBuffering: Bool
+    let isPlaying: Bool
+    let hasPresentedPlayback: Bool
     let showsInlineLoadingProgress: Bool
     let isUserSeeking: Bool
     let isSpeedBoostActive: Bool

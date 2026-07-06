@@ -21,8 +21,8 @@ struct HomeFeedDoubleColumnContent: View {
 
     var body: some View {
         LazyVGrid(columns: metrics.feedColumns, spacing: metrics.feedSpacing) {
-            ForEach(Array(cells.enumerated()), id: \.element.id) { index, cell in
-                if visibleLastSeenMarkerIndex == index {
+            ForEach(cells) { cell in
+                if visibleLastSeenMarkerIndex == cell.index {
                     HomeFeedLastSeenMarkerCard(
                         metrics: metrics,
                         action: actions.onRefreshFromLastSeenMarker
@@ -32,7 +32,6 @@ struct HomeFeedDoubleColumnContent: View {
                 HomeFeedDoubleColumnCard(
                     metrics: metrics,
                     cell: cell,
-                    index: index,
                     loadMoreTriggerCellID: loadMoreTriggerCellID,
                     actions: actions
                 )

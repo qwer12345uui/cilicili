@@ -19,18 +19,26 @@ struct VideoDetailLoadedDetailContentPage: View {
         )
         .padding(.horizontal, VideoDetailContentPageMetrics.horizontalPadding)
 
-        VideoDetailPageMenu(
-            store: renderPack.pageSelectorStore,
-            selectPage: renderPack.actions.selectPage
-        )
-        .padding(.horizontal, VideoDetailContentPageMetrics.horizontalPadding)
+        if viewModel.detail.isPGCEpisode {
+            VideoDetailPgcEpisodeSection(
+                detail: viewModel.detail,
+                selectEpisode: renderPack.actions.selectPgcEpisode
+            )
+                .padding(.horizontal, VideoDetailContentPageMetrics.horizontalPadding)
+        } else {
+            VideoDetailPageMenu(
+                store: renderPack.pageSelectorStore,
+                selectPage: renderPack.actions.selectPage
+            )
+            .padding(.horizontal, VideoDetailContentPageMetrics.horizontalPadding)
 
-        VideoDetailRelatedSection(
-            store: renderPack.relatedStore,
-            layoutWidth: layoutWidth,
-            runtimeSettings: runtimeSettings,
-            retryRelated: renderPack.actions.retryRelated
-        )
+            VideoDetailRelatedSection(
+                store: renderPack.relatedStore,
+                layoutWidth: layoutWidth,
+                runtimeSettings: runtimeSettings,
+                retryRelated: renderPack.actions.retryRelated
+            )
+        }
     }
 
     private var renderPack: VideoDetailLoadedDetailContentPageRenderPack {

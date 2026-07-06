@@ -2396,16 +2396,29 @@ nonisolated final class BiliAPIClient {
         )
     }
 
-    func fetchPgcSeasonInfo(seasonID: Int, epID: Int? = nil) async throws -> PgcSeasonInfo {
-        var query = ["season_id": String(seasonID)]
+    func fetchPgcSeasonInfo(seasonID: Int?, epID: Int? = nil) async throws -> PgcSeasonInfo {
+        var query: [String: String] = [:]
+        if let seasonID {
+            query["season_id"] = String(seasonID)
+        }
         if let epID {
             query["ep_id"] = String(epID)
+        }
+        guard !query.isEmpty else { throw BiliAPIError.missingPayload }
+
+        let referer: String
+        if let epID {
+            referer = "https://www.bilibili.com/bangumi/play/ep\(epID)"
+        } else if let seasonID {
+            referer = "https://www.bilibili.com/bangumi/play/ss\(seasonID)"
+        } else {
+            referer = "https://www.bilibili.com/bangumi/play/"
         }
         let response: BiliResponse<PgcSeasonInfo> = try await get(
             base: baseURL,
             path: "/pgc/view/web/season",
             query: query,
-            referer: "https://www.bilibili.com/bangumi/play/ss\(seasonID)",
+            referer: referer,
             responseCachePolicy: .detail
         )
         guard response.code == 0 else {

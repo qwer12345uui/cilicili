@@ -9,11 +9,17 @@ struct SearchUserResultRow: View {
 
             VStack(alignment: .leading, spacing: 5) {
                 SearchUserNameLine(user: user)
+
                 SearchUserDescriptionText(user: user)
+                    .frame(maxWidth: .infinity, minHeight: 16, alignment: .leading)
+
+                Spacer(minLength: 0)
+
                 SearchUserMetadataLine(user: user)
             }
-            .frame(maxWidth: .infinity, minHeight: 54, alignment: .topLeading)
+            .frame(maxWidth: .infinity, minHeight: 58, alignment: .topLeading)
         }
+        .foregroundStyle(.primary)
         .contentShape(Rectangle())
     }
 }
@@ -43,6 +49,7 @@ private struct SearchUserNameLine: View {
         HStack(spacing: 6) {
             Text(user.name)
                 .font(.subheadline.weight(.semibold))
+                .foregroundStyle(.primary)
                 .lineLimit(1)
 
             if user.isFollowing == true {

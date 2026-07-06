@@ -198,10 +198,22 @@ private final class PlayerNowPlayingSession {
 final class PlayerPlaybackClock: ObservableObject {
     @Published private(set) var currentTime: TimeInterval = 0
     @Published private(set) var duration: TimeInterval?
+    @Published private(set) var seekPreviewProgress: Double?
 
     var progress: Double {
         guard let duration, duration > 0 else { return 0 }
         return min(max(currentTime / duration, 0), 1)
+    }
+
+    var displayProgress: Double {
+        seekPreviewProgress ?? progress
+    }
+
+    var displayCurrentTime: TimeInterval {
+        guard let seekPreviewProgress, let duration, duration > 0 else {
+            return currentTime
+        }
+        return min(max(seekPreviewProgress, 0), 1) * duration
     }
 
     func update(time: TimeInterval? = nil, duration: TimeInterval? = nil, force: Bool = false) {
@@ -225,6 +237,17 @@ final class PlayerPlaybackClock: ObservableObject {
     func reset() {
         currentTime = 0
         duration = nil
+        seekPreviewProgress = nil
+    }
+
+    func updateSeekPreview(progress: Double, force: Bool = false) {
+        let clamped = min(max(progress, 0), 1)
+        guard force || seekPreviewProgress.map({ abs($0 - clamped) >= 0.002 }) ?? true else { return }
+        seekPreviewProgress = clamped
+    }
+
+    func clearSeekPreview() {
+        seekPreviewProgress = nil
     }
 }
 

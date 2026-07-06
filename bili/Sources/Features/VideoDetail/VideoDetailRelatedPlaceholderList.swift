@@ -2,15 +2,13 @@ import SwiftUI
 
 struct VideoDetailRelatedPlaceholderList: View {
     let layout: VideoDetailRelatedListLayout
-    let isLoading: Bool
 
     var body: some View {
         VStack(spacing: 0) {
             ForEach(0..<VideoDetailRelatedStyle.placeholderCount, id: \.self) { _ in
                 VideoCompactListPlaceholderRow(
                     coverSize: layout.coverSize,
-                    fill: VideoDetailTheme.secondarySurface,
-                    isLoading: isLoading,
+                    fill: Color(.tertiarySystemFill).opacity(0.64),
                     cornerRadius: VideoDetailRelatedStyle.coverCornerRadius,
                     titleMinHeight: VideoDetailRelatedStyle.rowTitleMinHeight,
                     authorStyle: .plain,

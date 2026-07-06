@@ -93,7 +93,6 @@ struct VideoFeedSkeletonCard: View {
         .frame(maxWidth: .infinity, minHeight: coverSize.height, alignment: .topLeading)
         .videoCardBorderedSurface(cornerRadius: 18)
         .padding(.vertical, 8)
-        .redacted(reason: .placeholder)
         .accessibilityLabel("正在加载视频")
     }
 }

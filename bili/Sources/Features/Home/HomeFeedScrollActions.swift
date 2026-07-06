@@ -20,22 +20,11 @@ final class HomeFeedScrollActions: ObservableObject {
 
     func updateViewportHeight(
         _ height: CGFloat,
-        state: HomeFeedViewportState,
-        preloadActions: HomeFeedPreloadActions
+        state: HomeFeedViewportState
     ) -> HomeFeedViewportState {
         var updatedState = state
-        if let updatedHeight = updatedState.updateViewportHeight(height) {
-            preloadActions.updateViewportHeight(updatedHeight)
-        }
+        _ = updatedState.updateViewportHeight(height)
         return updatedState
-    }
-
-    func updateVisiblePreloadFrames(
-        _ frames: [HomeVisibleVideoFrame],
-        context: HomeFeedPreloadContext,
-        preloadActions: HomeFeedPreloadActions
-    ) {
-        preloadActions.updateVisiblePreloadFrames(frames, context: context)
     }
 
     func updatePullRefreshDistance(

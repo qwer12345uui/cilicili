@@ -8,6 +8,10 @@ struct VideoDetailLoadedDetailContentPageActions {
         viewModel?.selectPage(page)
     }
 
+    func selectPgcEpisode(_ video: VideoItem) {
+        viewModel?.selectPgcEpisode(video)
+    }
+
     func retryRelated() async {
         guard let viewModel else { return }
         await viewModel.retryRelated()

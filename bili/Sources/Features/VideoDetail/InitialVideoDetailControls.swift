@@ -37,7 +37,6 @@ private struct InitialVideoDetailActionStrip: View {
             height: layout.rowHeight,
             alignment: .center
         )
-        .redacted(reason: .placeholder)
         .accessibilityHidden(true)
     }
 

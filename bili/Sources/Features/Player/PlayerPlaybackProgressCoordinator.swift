@@ -26,7 +26,8 @@ final class PlayerPlaybackProgressCoordinator: ObservableObject {
         context: PlayerPlaybackProgressContext
     ) {
         guard !context.libraryStore.incognitoModeEnabled else { return }
-        guard time.isFinite, time >= 5 else { return }
+        let minimumProgress = TimeInterval(context.libraryStore.playbackHistorySyncThresholdSeconds)
+        guard time.isFinite, time >= minimumProgress else { return }
         guard let historyVideo = context.historyVideo else { return }
         let bvid = historyVideo.bvid.trimmingCharacters(in: .whitespacesAndNewlines)
         let aid = historyVideo.aid
@@ -35,6 +36,12 @@ final class PlayerPlaybackProgressCoordinator: ObservableObject {
             return
         }
         let duration = context.historyDuration ?? context.durationHint ?? context.playerDuration
+        context.libraryStore.recordPlaybackProgress(
+            video: historyVideo,
+            cid: context.historyCID ?? historyVideo.cid,
+            progress: time,
+            duration: duration
+        )
         HomeRecommendFeedbackCenter.shared.recordPlayProgress(
             video: historyVideo,
             progress: time,

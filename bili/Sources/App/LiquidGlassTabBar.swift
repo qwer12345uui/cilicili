@@ -104,6 +104,14 @@ extension View {
     }
 
     @ViewBuilder
+    func biliBottomTabGlassEffect<S: InsettableShape>(
+        interactive: Bool = false,
+        in shape: S
+    ) -> some View {
+        modifier(BiliBottomTabGlassEffectModifier(interactive: interactive, shape: shape))
+    }
+
+    @ViewBuilder
     func biliGlassButtonStyle(prominent: Bool = false) -> some View {
         modifier(BiliGlassButtonStyleModifier(prominent: prominent))
     }
@@ -195,6 +203,41 @@ private struct BiliRegularGlassEffectModifier<GlassShape: Shape>: ViewModifier {
             )
         } else {
             content.background(.ultraThinMaterial, in: shape)
+        }
+    }
+}
+
+private struct BiliBottomTabGlassEffectModifier<GlassShape: InsettableShape>: ViewModifier {
+    @Environment(\.colorScheme) private var colorScheme
+    let interactive: Bool
+    let shape: GlassShape
+
+    private var tabTint: Color {
+        colorScheme == .dark
+            ? .black.opacity(0.18)
+            : Color(.systemBackground).opacity(0.16)
+    }
+
+    @ViewBuilder
+    func body(content: Content) -> some View {
+        if #available(iOS 26, *) {
+            content
+                .glassEffect(
+                    .regular
+                        .tint(tabTint)
+                        .interactive(interactive),
+                    in: shape
+                )
+                .overlay {
+                    shape.strokeBorder(Color.primary.opacity(0.04), lineWidth: 0.5)
+                }
+        } else {
+            content
+                .background(.ultraThinMaterial, in: shape)
+                .background(tabTint, in: shape)
+                .overlay {
+                    shape.strokeBorder(Color.primary.opacity(0.04), lineWidth: 0.5)
+                }
         }
     }
 }

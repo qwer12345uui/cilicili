@@ -27,7 +27,10 @@ struct BiliPlayerViewContent: View {
             content: playbackSurface,
             visibilityActions: renderState.visibilityActions,
             speedBoostActions: renderState.speedBoostActions,
-            viewModel: context.viewModel
+            viewModel: context.viewModel,
+            holdCurrentFrameForSeek: context.holdCurrentFrameForSeek,
+            prepareUserSeekWarmup: context.prepareUserSeekWarmup,
+            resetPreparedScrubProgress: context.resetPreparedScrubProgress
         )
     }
 
@@ -46,8 +49,20 @@ struct BiliPlayerViewContent: View {
     private var playbackControls: some View {
         BiliPlayerNativeControlsHost(
             context: context,
-            renderState: renderState
+            renderState: renderState,
+            actions: nativePlaybackControlsActions
         )
+    }
+
+    private var nativePlaybackControlsActions: PlayerNativePlaybackControlsActions {
+        BiliPlayerNativeControlsActionBuilder(
+            viewModel: context.viewModel,
+            configuration: context.configuration,
+            visibilityActions: renderState.visibilityActions,
+            holdCurrentFrameForSeek: context.holdCurrentFrameForSeek,
+            prepareUserSeekWarmup: context.prepareUserSeekWarmup,
+            resetPreparedScrubProgress: context.resetPreparedScrubProgress
+        ).actions
     }
 
     private var surfaceChromeState: BiliPlayerSurfaceChromeState {
@@ -63,6 +78,8 @@ struct BiliPlayerViewContent: View {
                 || context.configuration.isLayoutTransitioning,
             showsPlayerLoadingChrome: renderState.showsPlayerLoadingChrome,
             isBuffering: context.surfaceState.isBuffering,
+            isPlaying: context.surfaceState.isPlaying,
+            hasPresentedPlayback: context.surfaceState.hasPresentedPlayback,
             showsInlineLoadingProgress: renderState.showsInlineLoadingProgress,
             isUserSeeking: context.surfaceState.isUserSeeking,
             isSpeedBoostActive: context.speedBoostModel.isActive,

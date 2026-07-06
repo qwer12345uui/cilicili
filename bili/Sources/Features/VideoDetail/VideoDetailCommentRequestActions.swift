@@ -1,10 +1,19 @@
 import Foundation
 
 extension VideoDetailViewModel {
-    func fetchCommentsWithTimeout(aid: Int, cursor: String, sort: CommentSort) async throws -> CommentPage {
+    func fetchCommentsWithTimeout(
+        target: VideoDetailCommentTarget,
+        cursor: String,
+        sort: CommentSort
+    ) async throws -> CommentPage {
         try await withThrowingTaskGroup(of: CommentPage.self) { group in
             group.addTask(priority: .userInitiated) {
-                try await self.api.fetchComments(aid: aid, cursor: cursor, sort: sort)
+                try await self.api.fetchComments(
+                    oid: target.oid,
+                    type: target.type,
+                    cursor: cursor,
+                    sort: sort
+                )
             }
             group.addTask(priority: .utility) {
                 try await Task.sleep(nanoseconds: 8_000_000_000)

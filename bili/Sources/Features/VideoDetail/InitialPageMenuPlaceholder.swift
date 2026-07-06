@@ -8,13 +8,15 @@ struct InitialPageMenuPlaceholder: View {
     }
 
     var body: some View {
-        Button(action: {}) {
-            Label(title, systemImage: "rectangle.stack")
-                .frame(maxWidth: .infinity)
+        HStack(spacing: 8) {
+            Image(systemName: "rectangle.stack")
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(.tertiary)
+
+            SkeletonBlock(width: title.count > 2 ? 34 : 24, height: 12, shape: .capsule)
         }
-        .buttonStyle(.bordered)
-        .controlSize(.large)
-        .redacted(reason: .placeholder)
+        .frame(maxWidth: .infinity)
+        .initialPageMenuPlaceholderBackground()
         .allowsHitTesting(false)
         .accessibilityHidden(true)
     }

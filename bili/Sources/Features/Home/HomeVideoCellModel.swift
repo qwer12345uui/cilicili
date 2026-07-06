@@ -2,11 +2,13 @@ import Foundation
 
 struct HomeVideoCellModel: Identifiable, Equatable {
     let id: String
+    let index: Int
     let video: VideoItem
     let display: VideoCardDisplayModel
 
-    init(video: VideoItem) {
+    init(video: VideoItem, index: Int) {
         self.id = video.id
+        self.index = index
         self.video = video
         self.display = VideoCardDisplayModel(video: video)
     }

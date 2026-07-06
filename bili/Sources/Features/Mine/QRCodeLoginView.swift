@@ -15,7 +15,7 @@ struct QRCodeLoginView: View {
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .padding(24)
-            .background(Color(.systemGroupedBackground))
+            .background(Color(.systemBackground))
             .hiddenInlineNavigationTitle()
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {

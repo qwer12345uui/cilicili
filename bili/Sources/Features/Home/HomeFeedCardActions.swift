@@ -26,26 +26,6 @@ final class HomeFeedCardActions {
         )
     }
 
-    func registerVisiblePreloadCandidate(
-        _ video: VideoItem,
-        index: Int,
-        context: HomeFeedPreloadContext,
-        preloadActions: HomeFeedPreloadActions
-    ) {
-        preloadActions.registerVisiblePreloadCandidate(
-            video,
-            index: index,
-            context: context
-        )
-    }
-
-    func unregisterVisiblePreloadCandidate(
-        _ video: VideoItem,
-        preloadActions: HomeFeedPreloadActions
-    ) {
-        preloadActions.unregisterVisiblePreloadCandidate(video)
-    }
-
     func loadMoreIfNeeded(
         current video: VideoItem,
         viewModel: HomeViewModel

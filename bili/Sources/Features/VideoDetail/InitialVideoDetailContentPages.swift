@@ -9,7 +9,7 @@ struct InitialVideoDetailDetailContentPage: View {
     }
 
     private var shouldShowInitialPageMenuPlaceholder: Bool {
-        (seedVideo.pages?.count ?? 1) > 1
+        !seedVideo.isPGCEpisode && (seedVideo.pages?.count ?? 1) > 1
     }
 
     var body: some View {
@@ -24,6 +24,8 @@ struct InitialVideoDetailDetailContentPage: View {
                 .padding(.horizontal, VideoDetailContentPageMetrics.horizontalPadding)
         }
 
-        InitialRelatedSection(layoutWidth: layoutWidth)
+        if !seedVideo.isPGCEpisode {
+            InitialRelatedSection(layoutWidth: layoutWidth)
+        }
     }
 }

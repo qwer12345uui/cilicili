@@ -15,6 +15,16 @@ enum VideoCoverBottomScrimSettings {
     static let defaultIsEnabled = true
 }
 
+enum VideoCoverBadgeContrastBacking {
+    static let storageKey = "cc.bili.display.videoCoverBadgeContrastBackingOpacity.v1"
+    static let defaultOpacity = 0.35
+    static let opacityRange: ClosedRange<Double> = 0...0.8
+
+    static func normalized(_ opacity: Double) -> Double {
+        min(max(opacity, opacityRange.lowerBound), opacityRange.upperBound)
+    }
+}
+
 struct VideoCoverGlassBadge<Content: View>: View {
     @AppStorage(VideoCoverBadgeShadow.storageKey) private var shadowOpacity = VideoCoverBadgeShadow.defaultOpacity
     let content: Content
@@ -117,23 +127,19 @@ struct VideoCoverPlayBadge: View {
 
 struct VideoCoverBottomScrim: View {
     @AppStorage(VideoCoverBottomScrimSettings.storageKey) private var isEnabled = VideoCoverBottomScrimSettings.defaultIsEnabled
-    var opacity: Double = 0.20
-    var heightFraction: CGFloat = 1.0 / 4.0
+    var opacity: Double = 0.30
+    var heightFraction: CGFloat = 1.0 / 3.0
 
     var body: some View {
         if isEnabled {
-            GeometryReader { proxy in
-                LinearGradient(
-                    colors: [
-                        .clear,
-                        .black.opacity(opacity)
-                    ],
-                    startPoint: .top,
-                    endPoint: .bottom
-                )
-                .frame(height: max(proxy.size.height * min(max(heightFraction, 0), 1), 0))
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
-            }
+            LinearGradient(
+                stops: [
+                    .init(color: .clear, location: max(0, min(1 - heightFraction, 1))),
+                    .init(color: .black.opacity(opacity), location: 1)
+                ],
+                startPoint: .top,
+                endPoint: .bottom
+            )
             .allowsHitTesting(false)
             .accessibilityHidden(true)
         }
@@ -153,9 +159,13 @@ private struct VideoCoverBadgeBackgroundModifier<BadgeShape: InsettableShape>: V
     func body(content: Content) -> some View {
         switch style {
         case .clear:
-            content.biliPlayerClearGlass(interactive: false, in: shape)
+            content
+                .videoCoverReadableBacking(style: style, in: shape)
+                .biliPlayerClearGlass(interactive: false, in: shape)
         case .regular:
-            content.biliRegularGlassEffect(in: shape)
+            content
+                .videoCoverReadableBacking(style: style, in: shape)
+                .biliRegularGlassEffect(in: shape)
         }
     }
 }
@@ -180,6 +190,13 @@ extension View {
             y: 1
         )
     }
+
+    func videoCoverReadableBacking<S: InsettableShape>(
+        style: VideoCoverBadgeGlassStyle,
+        in shape: S
+    ) -> some View {
+        modifier(VideoCoverReadableBackingModifier(shape: shape, style: style))
+    }
 }
 
 private struct VideoCoverBadgeForegroundModifier: ViewModifier {
@@ -194,5 +211,40 @@ private extension View {
     func videoCoverControlShadow() -> some View {
         shadow(color: .black.opacity(0.28), radius: 8, x: 0, y: 4)
             .shadow(color: .black.opacity(0.16), radius: 2, x: 0, y: 1)
+    }
+}
+
+private struct VideoCoverReadableBackingModifier<BadgeShape: InsettableShape>: ViewModifier {
+    @AppStorage(VideoCoverBadgeContrastBacking.storageKey) private var contrastOpacity = VideoCoverBadgeContrastBacking.defaultOpacity
+    let shape: BadgeShape
+    let style: VideoCoverBadgeGlassStyle
+
+    func body(content: Content) -> some View {
+        content
+            .background {
+                shape.fill(Color.black.opacity(backingOpacity))
+            }
+            .overlay {
+                shape.strokeBorder(Color.white.opacity(strokeOpacity), lineWidth: 0.5)
+            }
+    }
+
+    private var backingOpacity: Double {
+        let normalizedOpacity = VideoCoverBadgeContrastBacking.normalized(contrastOpacity)
+        switch style {
+        case .clear:
+            return VideoCoverBadgeContrastBacking.normalized(normalizedOpacity + 0.05)
+        case .regular:
+            return VideoCoverBadgeContrastBacking.normalized(normalizedOpacity - 0.05)
+        }
+    }
+
+    private var strokeOpacity: Double {
+        switch style {
+        case .clear:
+            return 0.18
+        case .regular:
+            return 0.12
+        }
     }
 }

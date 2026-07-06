@@ -13,8 +13,7 @@ struct HomeFeedScreenContentActionsBuilder {
             onVideoSelect: launchConfiguration.onVideoSelect,
             onVideoTap: openVideo,
             onVideoPress: beginPressedPreload,
-            onVisibleFrame: registerVisiblePreloadCandidate,
-            onInvisibleFrame: unregisterVisiblePreloadCandidate,
+            onCardAppear: recordExposure,
             onLoadMore: loadMoreIfNeeded,
             onRefreshFromLastSeenMarker: refreshFromLastSeenMarker
         )
@@ -39,21 +38,8 @@ struct HomeFeedScreenContentActionsBuilder {
         )
     }
 
-    private func registerVisiblePreloadCandidate(_ video: VideoItem, index: Int) {
+    private func recordExposure(_ video: VideoItem, index: Int) {
         viewModel.recordRecommendExposure(video, index: index)
-        actionStore.card.registerVisiblePreloadCandidate(
-            video,
-            index: index,
-            context: preloadContext,
-            preloadActions: actionStore.preload
-        )
-    }
-
-    private func unregisterVisiblePreloadCandidate(_ video: VideoItem) {
-        actionStore.card.unregisterVisiblePreloadCandidate(
-            video,
-            preloadActions: actionStore.preload
-        )
     }
 
     private func loadMoreIfNeeded(_ video: VideoItem) async {

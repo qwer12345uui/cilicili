@@ -8,9 +8,7 @@ struct HomeFeedScrollView<FeedContent: View>: View {
     @ObservedObject var viewModel: HomeViewModel
     @ObservedObject var runtimeSettings: HomeRuntimeSettingsStore
     @Binding var viewportState: HomeFeedViewportState
-    let preloadContext: HomeFeedPreloadContext
     @ObservedObject var scrollActions: HomeFeedScrollActions
-    let preloadActions: HomeFeedPreloadActions
     let refreshActions: HomeFeedRefreshActions
     @ViewBuilder let feedContent: () -> FeedContent
 
@@ -37,13 +35,11 @@ struct HomeFeedScrollView<FeedContent: View>: View {
                 viewModel: viewModel,
                 runtimeSettings: runtimeSettings,
                 viewportState: $viewportState,
-                preloadContext: preloadContext,
                 scrollActions: scrollActions,
-                preloadActions: preloadActions,
                 refreshActions: refreshActions
             )
             .scrollBounceBehavior(.always, axes: .vertical)
-            .background(Color.homeAdaptiveBackground)
+            .background(Color(.systemBackground))
             .nativeTopScrollEdgeEffect()
             .animation(.smooth(duration: 0.24), value: runtimeSettings.homeFeedLayout)
             .homeFeedScrollOverlays(

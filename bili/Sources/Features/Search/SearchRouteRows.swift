@@ -1,31 +1,5 @@
 import SwiftUI
 
-struct SearchScopeMenu: View {
-    @ObservedObject var viewModel: SearchViewModel
-
-    var body: some View {
-        Menu {
-            ForEach(SearchScope.allCases) { scope in
-                Button {
-                    Task { await viewModel.selectScope(scope) }
-                } label: {
-                    Label(scope.title, systemImage: scope.systemImage)
-                }
-            }
-        } label: {
-            Image(systemName: viewModel.selectedScope.systemImage)
-                .font(.subheadline.weight(.semibold))
-                .frame(width: 34, height: 34)
-                .contentShape(Circle())
-        }
-        .buttonStyle(.plain)
-        .contentShape(Circle())
-        .biliPlayerClearGlass(interactive: true, in: Circle())
-        .accessibilityLabel("搜索类型")
-        .accessibilityValue(viewModel.selectedScope.title)
-    }
-}
-
 struct SearchResultRouteRow: View {
     let result: SearchResultItem
 
@@ -36,7 +10,7 @@ struct SearchResultRouteRow: View {
                 SearchVideoResultRow(video: video)
             }
         case .user(let user):
-            NavigationLink(value: user.owner) {
+            SearchOwnerRouteButton(owner: user.owner) {
                 SearchUserResultRow(user: user)
             }
         case .bangumi(let media):
@@ -52,18 +26,49 @@ struct SearchResultRouteRow: View {
 private struct SearchInternalMediaRouteRow: View {
     let media: SearchMediaItem
     let kind: String
+    @Environment(\.openPgcSeasonRouteAction) private var openPgcSeasonRoute
 
     var body: some View {
         if let route = PgcSeasonRoute(media: media) {
-            NavigationLink(value: route) {
-                SearchMediaResultRow(media: media, kind: kind)
+            if let openPgcSeasonRoute {
+                Button {
+                    openPgcSeasonRoute(route)
+                } label: {
+                    SearchMediaResultRow(media: media, kind: kind)
+                }
+                .buttonStyle(.plain)
+            } else {
+                NavigationLink(value: route) {
+                    SearchMediaResultRow(media: media, kind: kind)
+                }
             }
         } else if let url = media.destinationURL {
-            Link(destination: url) {
+            AppLinkButton(url: url) {
                 SearchMediaResultRow(media: media, kind: kind)
             }
         } else {
             SearchMediaResultRow(media: media, kind: kind)
+        }
+    }
+}
+
+private struct SearchOwnerRouteButton<Label: View>: View {
+    let owner: VideoOwner
+    @ViewBuilder let label: () -> Label
+    @Environment(\.openVideoOwnerRouteAction) private var openVideoOwnerRoute
+
+    var body: some View {
+        if let openVideoOwnerRoute {
+            Button {
+                openVideoOwnerRoute(owner)
+            } label: {
+                label()
+            }
+            .buttonStyle(.plain)
+        } else {
+            NavigationLink(value: owner) {
+                label()
+            }
         }
     }
 }
@@ -73,7 +78,7 @@ private struct SearchArticleRouteRow: View {
 
     var body: some View {
         if let url = article.destinationURL {
-            Link(destination: url) {
+            AppLinkButton(url: url) {
                 SearchArticleResultRow(article: article)
             }
         } else {

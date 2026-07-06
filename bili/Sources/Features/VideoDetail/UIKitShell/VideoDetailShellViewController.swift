@@ -26,7 +26,7 @@ final class VideoDetailShellViewController: UIViewController {
     private let playerContainer = UIView()
     private let contentHost: UIHostingController<VideoDetailShellContentView>
     private let contentState = VideoDetailShellContentView.State()
-    /// 暂停下翻收缩时的折叠工具条（黑色遮罩，对齐原项目），盖在 playerContainer 上。
+    /// 暂停下翻收缩时的折叠工具条（主题色遮罩），盖在 playerContainer 上。
     private var collapsedBarHost: UIHostingController<VideoDetailShellCollapsedBar>?
     private let collapsedDimmingView = UIView()
 
@@ -114,7 +114,7 @@ final class VideoDetailShellViewController: UIViewController {
                 viewModel: viewModel,
                 runtimeSettings: runtimeSettings,
                 state: contentState,
-                layoutWidth: UIScreen.main.bounds.width,
+                layoutWidth: Self.initialLayoutWidth,
                 selectedContentTab: selectedContentTab,
                 onShowNetworkDiagnostics: onShowNetworkDiagnostics,
                 onShowFavoriteFolders: onShowFavoriteFolders,
@@ -129,7 +129,7 @@ final class VideoDetailShellViewController: UIViewController {
             viewModel: viewModel,
             runtimeSettings: runtimeSettings,
             state: contentState,
-            layoutWidth: UIScreen.main.bounds.width,
+            layoutWidth: Self.initialLayoutWidth,
             selectedContentTab: selectedContentTab,
             onShowNetworkDiagnostics: onShowNetworkDiagnostics,
             onShowFavoriteFolders: onShowFavoriteFolders,
@@ -146,6 +146,12 @@ final class VideoDetailShellViewController: UIViewController {
     @available(*, unavailable)
     required init?(coder _: NSCoder) {
         fatalError("init(coder:) has not been implemented")
+    }
+
+    private static var initialLayoutWidth: CGFloat {
+        UIApplication.shared.connectedScenes
+            .compactMap { ($0 as? UIWindowScene)?.screen.bounds.width }
+            .first ?? 393
     }
 
     // MARK: - Orientation / Chrome
@@ -173,7 +179,7 @@ final class VideoDetailShellViewController: UIViewController {
         view.backgroundColor = .black
 
         playerContainer.backgroundColor = .black
-        collapsedDimmingView.backgroundColor = .black
+        updateCollapsedDimmingColor()
         collapsedDimmingView.alpha = 0
         collapsedDimmingView.isUserInteractionEnabled = false
         addChild(contentHost)
@@ -237,9 +243,10 @@ final class VideoDetailShellViewController: UIViewController {
     ) {
         super.viewWillTransition(to: size, with: coordinator)
         let toLandscape = size.width > size.height
-        // 过渡开始就让内容区可见并参与动画，避免动画期间露出黑背景闪黑；
-        // 横屏时它被全屏 playerContainer 覆盖，动画结束后再真正隐藏。
-        contentHost.view.isHidden = false
+        // 横屏转场只让播放器 live surface 跟随系统旋转，内容区不参与重排。
+        // 转回竖屏时再恢复内容区，避免下方 SwiftUI 列表和播放器一起动画布局。
+        contentHost.view.isHidden = toLandscape
+        contentHost.view.isUserInteractionEnabled = !toLandscape
         isSystemRotationTransitioning = true
         setBareSurfaceTransitionActive(true)
         // 转回竖屏时重置缩放高度为默认（最大），避免横屏前的缩放残留。
@@ -255,14 +262,12 @@ final class VideoDetailShellViewController: UIViewController {
         }, completion: { [weak self] _ in
             guard let self else { return }
             self.contentHost.view.isHidden = toLandscape
-            self.applyLayout()
-            self.view.layoutIfNeeded()
-            self.surfaceHost?.refreshLayoutImmediately()
+            self.contentHost.view.isUserInteractionEnabled = !toLandscape
             self.surfaceHost?.setLandscape(toLandscape || self.isPortraitFullscreen)
             self.isSystemRotationTransitioning = false
-            self.setBareSurfaceTransitionActive(false)
             self.applyLayout()
             self.view.layoutIfNeeded()
+            self.setBareSurfaceTransitionActive(false)
             self.surfaceHost?.refreshLayoutImmediately()
         })
     }
@@ -488,7 +493,7 @@ final class VideoDetailShellViewController: UIViewController {
         // 注意：滚动路径不改 topInset（改 contentSize 会引发 offset 反馈抽搐）。
     }
 
-    /// 折叠工具条（黑色遮罩）：暂停且播放器已经明显收缩时显示，
+    /// 折叠工具条（主题色遮罩）：暂停且播放器已经明显收缩时显示，
     /// 盖满 playerContainer（对齐原项目 usesCollapsedChrome）。
     private func updateCollapsedChrome(playerHeight: CGFloat) {
         let minimum = minimumPlayerHeight(forWidth: view.bounds.width)
@@ -531,7 +536,21 @@ final class VideoDetailShellViewController: UIViewController {
 
     // MARK: - Bindings
 
+    private func updateCollapsedDimmingColor() {
+        collapsedDimmingView.backgroundColor = AppThemeTintColor.uiColor(
+            for: dependencies.libraryStore.appTintColorHex
+        )
+    }
+
     private func bindViewModel() {
+        dependencies.libraryStore.$appTintColorHex
+            .removeDuplicates()
+            .receive(on: RunLoop.main)
+            .sink { [weak self] _ in
+                self?.updateCollapsedDimmingColor()
+            }
+            .store(in: &cancellables)
+
         viewModel.$detail
             .receive(on: RunLoop.main)
             .sink { [weak self] detail in
