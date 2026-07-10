@@ -16,7 +16,10 @@ final class DolbyVisionCodecConfigurationTests: XCTestCase {
         XCTAssertEqual(configuration?.decoderCodecString, "dvh1.08.06")
         XCTAssertEqual(configuration?.hlsAdvertisedCodec(baseLayerCodec: "hev1.2.4.L150.b0"), "hvc1.2.4.L150.b0")
         XCTAssertEqual(configuration?.supplementalCodecString, "dvh1.08.06/db1p")
-        XCTAssertNil(configuration?.hlsAdvertisedSupplementalCodec(baseLayerCodec: "hev1.2.4.L150.b0"))
+        XCTAssertEqual(
+            configuration?.hlsAdvertisedSupplementalCodec(baseLayerCodec: "hev1.2.4.L150.b0"),
+            "dvh1.08.06/db1p"
+        )
         XCTAssertEqual(configuration?.hlsVideoRangeAttribute, "PQ")
     }
 
@@ -149,7 +152,10 @@ final class DolbyVisionCodecConfigurationTests: XCTestCase {
         XCTAssertEqual(normalization?.hlsBaseLayerCodec, "hvc1.1.6.L150.B0")
         XCTAssertEqual(DolbyVisionCodecConfiguration.sampleEntryType(in: normalization?.data), "hvc1")
         XCTAssertEqual(configuration?.hlsAdvertisedCodec(baseLayerCodec: normalization?.hlsBaseLayerCodec ?? ""), "hvc1.1.6.L150.B0")
-        XCTAssertNil(configuration?.hlsAdvertisedSupplementalCodec(baseLayerCodec: normalization?.hlsBaseLayerCodec ?? ""))
+        XCTAssertEqual(
+            configuration?.hlsAdvertisedSupplementalCodec(baseLayerCodec: normalization?.hlsBaseLayerCodec ?? ""),
+            "dvh1.08.06/db1p"
+        )
     }
 
     func testProfileFiveAdvertisesDolbyVisionCodecDirectly() {
@@ -369,16 +375,16 @@ final class DolbyVisionCodecConfigurationTests: XCTestCase {
         }
         defaults.set(DolbyVisionRenderingPolicy.fullEffect.rawValue, forKey: DolbyVisionRenderingPolicy.storageKey)
 
-        XCTAssertEqual(DolbyVisionRenderingPolicy.stored(in: defaults), .compatibleHLG)
+        XCTAssertEqual(DolbyVisionRenderingPolicy.stored(in: defaults), .appleNativeP8HLS)
         defaults.set(DolbyVisionRenderingPolicy.protectedHLG.rawValue, forKey: DolbyVisionRenderingPolicy.storageKey)
-        XCTAssertEqual(DolbyVisionRenderingPolicy.stored(in: defaults), .compatibleHLG)
+        XCTAssertEqual(DolbyVisionRenderingPolicy.stored(in: defaults), .appleNativeP8HLS)
         defaults.set(DolbyVisionRenderingPolicy.supplementalHLS.rawValue, forKey: DolbyVisionRenderingPolicy.storageKey)
-        XCTAssertEqual(DolbyVisionRenderingPolicy.stored(in: defaults), .compatibleHLG)
+        XCTAssertEqual(DolbyVisionRenderingPolicy.stored(in: defaults), .appleNativeP8HLS)
         defaults.set(DolbyVisionRenderingPolicy.appleNativeP8HLS.rawValue, forKey: DolbyVisionRenderingPolicy.storageKey)
         XCTAssertEqual(DolbyVisionRenderingPolicy.stored(in: defaults), .appleNativeP8HLS)
         defaults.set(DolbyVisionRenderingPolicy.metadataPassthrough.rawValue, forKey: DolbyVisionRenderingPolicy.storageKey)
-        XCTAssertEqual(DolbyVisionRenderingPolicy.stored(in: defaults), .compatibleHLG)
-        XCTAssertEqual(defaults.string(forKey: DolbyVisionRenderingPolicy.storageKey), DolbyVisionRenderingPolicy.compatibleHLG.rawValue)
+        XCTAssertEqual(DolbyVisionRenderingPolicy.stored(in: defaults), .appleNativeP8HLS)
+        XCTAssertEqual(defaults.string(forKey: DolbyVisionRenderingPolicy.storageKey), DolbyVisionRenderingPolicy.appleNativeP8HLS.rawValue)
     }
 
     func testProtectedHLGModeMigratesToBaseLayerOnly() {

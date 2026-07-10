@@ -1,19 +1,19 @@
 import SwiftUI
 import UIKit
 
-struct PlaybackDetailFullscreenGeometry {
+struct PlaybackDetailFullscreenGeometry: Equatable {
     let size: CGSize
     let offset: CGSize
-}
 
-extension GeometryProxy {
-    func playbackDetailFullscreenGeometry(
+    static func resolve(
+        containerSize: CGSize,
+        safeAreaInsets: EdgeInsets,
+        localFrame: CGRect,
         window: UIWindow?,
         resolveSize: (_ window: UIWindow, _ rootView: UIView) -> CGSize
     ) -> PlaybackDetailFullscreenGeometry {
         if let window,
            let rootView = window.rootViewController?.view {
-            let localFrame = frame(in: .global)
             let frameInWindow = rootView.convert(localFrame, from: nil)
             return PlaybackDetailFullscreenGeometry(
                 size: resolveSize(window, rootView),
@@ -22,12 +22,27 @@ extension GeometryProxy {
         }
 
         let expandedSize = CGSize(
-            width: size.width + safeAreaInsets.leading + safeAreaInsets.trailing,
-            height: size.height + safeAreaInsets.top + safeAreaInsets.bottom
+            width: containerSize.width + safeAreaInsets.leading + safeAreaInsets.trailing,
+            height: containerSize.height + safeAreaInsets.top + safeAreaInsets.bottom
         )
         return PlaybackDetailFullscreenGeometry(
             size: expandedSize,
             offset: CGSize(width: -safeAreaInsets.leading, height: -safeAreaInsets.top)
+        )
+    }
+}
+
+extension GeometryProxy {
+    func playbackDetailFullscreenGeometry(
+        window: UIWindow?,
+        resolveSize: (_ window: UIWindow, _ rootView: UIView) -> CGSize
+    ) -> PlaybackDetailFullscreenGeometry {
+        PlaybackDetailFullscreenGeometry.resolve(
+            containerSize: size,
+            safeAreaInsets: safeAreaInsets,
+            localFrame: frame(in: .global),
+            window: window,
+            resolveSize: resolveSize
         )
     }
 }
