@@ -52,9 +52,6 @@ struct LiveRoomContentView: View {
                 .background(VideoDetailTheme.background.opacity(0.96))
             }
         }
-        .task(id: viewModel.roomID) {
-            viewModel.startLoading()
-        }
         .onAppear {
             UIDevice.current.beginGeneratingDeviceOrientationNotifications()
             allowLiveAutoRotation()

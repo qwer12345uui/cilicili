@@ -6,12 +6,18 @@ final class LiveRoomViewModelHolder: ObservableObject {
     @Published var viewModel: LiveRoomViewModel?
 
     private var cancellable: AnyCancellable?
+    private var cleanupPlayback: (() -> Void)?
     private var lastSnapshot: LiveRoomToolbarSnapshot?
 
     func configure(room: LiveRoom, api: BiliAPIClient, libraryStore: LibraryStore) {
         guard viewModel == nil else { return }
         let viewModel = LiveRoomViewModel(seedRoom: room, api: api, libraryStore: libraryStore)
         self.viewModel = viewModel
+        cleanupPlayback = { [viewModel] in
+            Task { @MainActor [viewModel] in
+                viewModel.stopPlaybackForNavigation()
+            }
+        }
         lastSnapshot = LiveRoomToolbarSnapshot(viewModel)
         cancellable = viewModel.objectWillChange.sink { [weak self] _ in
             Task { @MainActor [weak self, weak viewModel] in
@@ -22,6 +28,10 @@ final class LiveRoomViewModelHolder: ObservableObject {
                 self.objectWillChange.send()
             }
         }
+    }
+
+    deinit {
+        cleanupPlayback?()
     }
 }
 

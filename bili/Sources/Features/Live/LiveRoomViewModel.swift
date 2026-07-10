@@ -98,6 +98,15 @@ final class LiveRoomViewModel: ObservableObject {
         }
     }
 
+    func resumePlaybackAfterCoveredNavigationIfNeeded() {
+        if let playerViewModel, !playerViewModel.isTerminated {
+            resumeLiveDanmakuIfNeeded()
+            return
+        }
+        playerViewModel = nil
+        startLoading()
+    }
+
     func reload() {
         stopCurrentLoadAndPlayback()
         streamCandidates = []

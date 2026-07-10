@@ -23,13 +23,6 @@ struct LiveRoomDetailView: View {
             } initialContent: {
                 LiveRoomInitialPlaceholder(room: seedRoom)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .task {
-                        holder.configure(
-                            room: seedRoom,
-                            api: dependencies.api,
-                            libraryStore: dependencies.libraryStore
-                        )
-                    }
             }
             .toolbar {
                 ToolbarItem(placement: .principal) {
@@ -40,10 +33,16 @@ struct LiveRoomDetailView: View {
                 }
             }
         }
+        .task(id: seedRoom.id) {
+            configureAndStartPlaybackIfNeeded()
+        }
     }
 
     private var pageLifecycleActions: PlaybackDetailPageLifecycleActions {
         PlaybackDetailPageLifecycleActions(
+            onAppear: {
+                holder.viewModel?.resumePlaybackAfterCoveredNavigationIfNeeded()
+            },
             onScenePhaseChanged: { phase in
                 guard let viewModel = holder.viewModel else { return }
                 switch phase {
@@ -59,6 +58,15 @@ struct LiveRoomDetailView: View {
                 holder.viewModel?.stopPlaybackForNavigation()
             }
         )
+    }
+
+    private func configureAndStartPlaybackIfNeeded() {
+        holder.configure(
+            room: seedRoom,
+            api: dependencies.api,
+            libraryStore: dependencies.libraryStore
+        )
+        holder.viewModel?.resumePlaybackAfterCoveredNavigationIfNeeded()
     }
 
     @ViewBuilder
