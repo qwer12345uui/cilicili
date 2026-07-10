@@ -1619,6 +1619,14 @@ final class PlayerStateViewModel: NSObject, ObservableObject {
         rescheduleTimeObserverIfNeeded()
     }
 
+    func pendingNavigationResumeState() -> (resumeTime: TimeInterval, shouldResumePlayback: Bool)? {
+        guard let navigationAudioSuspension else { return nil }
+        return (
+            navigationAudioSuspension.resumeTime,
+            navigationAudioSuspension.shouldResumePlayback
+        )
+    }
+
     func prepareForVisualPlaybackTransition() {
         guard !isTerminated else { return }
         silenceAudioForNavigationIfNeeded()
@@ -1644,10 +1652,11 @@ final class PlayerStateViewModel: NSObject, ObservableObject {
         rescheduleTimeObserverIfNeeded()
     }
 
-    func restoreAudioAfterCancelledNavigation() {
-        guard !isTerminated, let navigationAudioSuspension else { return }
+    @discardableResult
+    func restoreAudioAfterCancelledNavigation() -> Bool {
+        guard !isTerminated, let navigationAudioSuspension else { return false }
         self.navigationAudioSuspension = nil
-        guard surfaceView != nil else { return }
+        guard surfaceView != nil else { return false }
         ActivePlaybackCoordinator.shared.activate(self)
         engine.setVolume(navigationAudioSuspension.volume)
         engine.setMuted(navigationAudioSuspension.isMuted)
@@ -1660,6 +1669,7 @@ final class PlayerStateViewModel: NSObject, ObservableObject {
                 resumePreparedPlaybackAfterSeek()
             }
         }
+        return true
     }
 
     func setPlaybackIntent(_ shouldAutoplay: Bool) {

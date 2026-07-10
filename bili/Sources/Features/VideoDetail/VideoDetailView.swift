@@ -59,6 +59,10 @@ struct VideoDetailView: View {
 
     private var pageLifecycleActions: PlaybackDetailPageLifecycleActions {
         PlaybackDetailPageLifecycleActions(
+            onAppear: {
+                guard let viewModel = holder.viewModel else { return }
+                Task { await viewModel.resumePlaybackAfterCoveredNavigationIfNeeded() }
+            },
             onDisappear: {
                 fullscreenCoordinator.resetForDisappear()
                 holder.viewModel?.stopPlaybackForNavigation()

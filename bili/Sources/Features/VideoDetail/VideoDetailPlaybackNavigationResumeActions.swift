@@ -1,44 +1,25 @@
 import Foundation
 
 extension VideoDetailViewModel {
-    func resumePlaybackAfterCancelledNavigation() {
-        resumePlaybackAfterNavigationInterruptionIfNeeded()
-    }
+    func resumePlaybackAfterCoveredNavigationIfNeeded() async {
+        guard isPlaybackInvalidatedForNavigation || isPlaybackTerminatedForNavigation else { return }
+        navigationState.playbackStopTask?.cancel()
+        navigationState.playbackStopTask = nil
+        isPlaybackInvalidatedForNavigation = false
+        isPlaybackTerminatedForNavigation = false
 
-    func resumePlaybackAfterCoveredNavigationIfNeeded() {
-        resumePlaybackAfterNavigationInterruptionIfNeeded()
-    }
-
-    func recoverPlaybackAfterAppResume() {
-        guard canActivatePlaybackAfterNavigation else { return }
-        discardTerminatedStablePlayerIfNeeded()
-        guard let player = stablePlayerViewModel else {
-            if selectedPlayVariant?.isPlayable == true {
-                updateStablePlayerViewModelIfNeeded(
-                    resumeTimeOverride: pendingNavigationResumeTime ?? currentPlaybackResumeTime(),
-                    shouldResumePlayback: true
-                )
-                pendingNavigationResumeTime = nil
-            } else {
-                schedulePlayURLLoadIfNeeded()
-            }
+        if let player = stablePlayerViewModel {
+            _ = player.restoreAudioAfterCancelledNavigation()
+            clearPendingNavigationResumeState()
             return
         }
-        let shouldResume = player.wantsAutoplay || player.isPlaying || player.playbackSnapshot().isPlaying
-        player.recoverPlaybackAfterAppResume()
-        if shouldResume, let message = player.errorMessage, let selectedPlayVariant {
-            handlePlaybackError(message, for: selectedPlayVariant)
-        }
+
+        await load()
     }
 
-    func cancelPlaybackNavigationStop() {
-        guard canActivatePlaybackAfterNavigation else { return }
-        discardTerminatedStablePlayerIfNeeded()
-        guard let player = stablePlayerViewModel else { return }
-        player.setPlaybackIntent(true)
-        guard stablePlayerViewModel === player,
-              canActivatePlaybackAfterNavigation
-        else { return }
-        player.recoverPlaybackAfterAppResume()
+    private func clearPendingNavigationResumeState() {
+        shouldResumePlaybackAfterCancelledNavigation = false
+        pendingNavigationResumeTime = nil
+        hasPendingNavigationInterruption = false
     }
 }

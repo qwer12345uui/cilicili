@@ -92,7 +92,6 @@ extension RootTabView {
         AppOrientationLock.restorePortrait()
         if bottomMode == .video {
             ActivePlaybackCoordinator.shared.stopActivePlayback()
-            NotificationCenter.default.post(name: .biliStopActiveVideoPlayback, object: nil)
             withAnimation(.smooth(duration: 0.28)) {
                 videoNavigationPath.append(room)
             }
@@ -187,7 +186,6 @@ extension RootTabView {
         AppOrientationLock.restorePortrait()
         PlayerMetricsLog.record(.routeOpen, metricsID: video.bvid, title: video.title)
         ActivePlaybackCoordinator.shared.pauseActivePlaybackForNavigation()
-        NotificationCenter.default.post(name: .biliPauseActiveVideoPlaybackForNavigation, object: nil)
         beginPlaybackPreload(for: video)
         withAnimation(.smooth(duration: 0.28)) {
             didConsumeStartupVideo = true
@@ -333,7 +331,6 @@ extension RootTabView {
         isClosingVideo = true
         videoPresentationGeneration &+= 1
         ActivePlaybackCoordinator.shared.pauseActivePlaybackForNavigation()
-        NotificationCenter.default.post(name: .biliPauseActiveVideoPlaybackForNavigation, object: nil)
         closeVideoFallbackTask?.cancel()
         closeVideoFallbackTask = Task { @MainActor in
             try? await Task.sleep(nanoseconds: 850_000_000)
@@ -348,7 +345,6 @@ extension RootTabView {
         closeVideoFallbackTask?.cancel()
         closeVideoFallbackTask = nil
         ActivePlaybackCoordinator.shared.stopActivePlayback()
-        NotificationCenter.default.post(name: .biliStopActiveVideoPlayback, object: nil)
         AppOrientationLock.restorePortrait()
         var transaction = Transaction()
         transaction.disablesAnimations = true
@@ -366,7 +362,7 @@ extension RootTabView {
         closeVideoFallbackTask?.cancel()
         closeVideoFallbackTask = nil
         isClosingVideo = false
-        NotificationCenter.default.post(name: .biliResumeActiveVideoPlaybackAfterCancelledNavigation, object: nil)
+        ActivePlaybackCoordinator.shared.resumeActivePlaybackAfterCancelledNavigation()
     }
 
     func completeCloseVideoIfNeeded() {
@@ -374,7 +370,6 @@ extension RootTabView {
         closeVideoFallbackTask?.cancel()
         closeVideoFallbackTask = nil
         ActivePlaybackCoordinator.shared.stopActivePlayback()
-        NotificationCenter.default.post(name: .biliStopActiveVideoPlayback, object: nil)
         AppOrientationLock.restorePortrait()
         var transaction = Transaction()
         transaction.disablesAnimations = true

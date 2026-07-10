@@ -53,6 +53,11 @@ final class ActivePlaybackCoordinator {
         registeredPlayersIncludingActive().forEach { $0.pauseForNavigation() }
     }
 
+    @discardableResult
+    func resumeActivePlaybackAfterCancelledNavigation() -> Bool {
+        activePlayer?.restoreAudioAfterCancelledNavigation() ?? false
+    }
+
     func isActive(_ player: PlayerStateViewModel) -> Bool {
         activePlayer === player
     }

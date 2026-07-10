@@ -3,24 +3,34 @@ import Foundation
 extension VideoDetailViewModel {
     func stopPlaybackForNavigation() {
         guard !isPlaybackInvalidatedForNavigation else { return }
-        flushPlaybackProgressForNavigation()
+        let resumeTime = currentPlaybackResumeTime()
+        capturePlaybackStateForNavigation(resumeTime: resumeTime)
+        flushPlaybackProgressForNavigation(resumeTime: resumeTime)
         isPlaybackTerminatedForNavigation = true
         isPlaybackInvalidatedForNavigation = true
         schedulePlaybackStopForNavigation()
     }
 
-    private func flushPlaybackProgressForNavigation() {
+    private func capturePlaybackStateForNavigation(resumeTime: TimeInterval) {
+        let suspendedState = stablePlayerViewModel?.pendingNavigationResumeState()
+        let bestResumeTime = max(resumeTime, suspendedState?.resumeTime ?? 0)
+        pendingNavigationResumeTime = bestResumeTime > 0.25 ? bestResumeTime : nil
+        shouldResumePlaybackAfterCancelledNavigation = suspendedState?.shouldResumePlayback
+            ?? currentPlaybackIntent()
+        hasPendingNavigationInterruption = true
+    }
+
+    private func flushPlaybackProgressForNavigation(resumeTime: TimeInterval) {
         guard !libraryStore.incognitoModeEnabled else { return }
-        let time = currentPlaybackResumeTime()
-        guard time.isFinite,
-              time >= TimeInterval(libraryStore.playbackHistorySyncThresholdSeconds)
+        guard resumeTime.isFinite,
+              resumeTime >= TimeInterval(libraryStore.playbackHistorySyncThresholdSeconds)
         else { return }
         let cid = selectedCID ?? detail.cid
         let duration = detail.duration.map(TimeInterval.init)
         libraryStore.recordPlaybackProgress(
             video: detail,
             cid: cid,
-            progress: time,
+            progress: resumeTime,
             duration: duration
         )
         let api = api
@@ -29,7 +39,7 @@ extension VideoDetailViewModel {
             try? await api.reportVideoHistory(
                 aid: detail.aid,
                 cid: cid,
-                progress: time,
+                progress: resumeTime,
                 duration: duration,
                 bvid: detail.bvid
             )
@@ -80,9 +90,6 @@ extension VideoDetailViewModel {
         }
         finishPlaybackStartupWaiters(with: nil)
         playURLState = .idle
-        shouldResumePlaybackAfterCancelledNavigation = false
-        pendingNavigationResumeTime = nil
-        hasPendingNavigationInterruption = false
     }
 
     private func stopStablePlaybackForNavigation() {

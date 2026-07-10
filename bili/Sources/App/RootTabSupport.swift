@@ -29,12 +29,6 @@ enum BottomTabMode {
     case video
 }
 
-extension Notification.Name {
-    static let biliPauseActiveVideoPlaybackForNavigation = Notification.Name("cc.bili.pauseActiveVideoPlaybackForNavigation")
-    static let biliResumeActiveVideoPlaybackAfterCancelledNavigation = Notification.Name("cc.bili.resumeActiveVideoPlaybackAfterCancelledNavigation")
-    static let biliStopActiveVideoPlayback = Notification.Name("cc.bili.stopActiveVideoPlayback")
-}
-
 extension View {
     func videoDestinations() -> some View {
         navigationDestination(for: VideoItem.self) { video in
