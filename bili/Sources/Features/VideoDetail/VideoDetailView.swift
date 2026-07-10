@@ -12,7 +12,6 @@ struct VideoDetailView: View {
     @StateObject private var runtimeSettings = VideoDetailRuntimeSettingsStore()
     @StateObject private var fullscreenCoordinator = VideoDetailFullscreenCoordinator()
     @State private var presentationState = VideoDetailViewPresentationState()
-    @State private var hidesPlayerSystemChrome = false
 
     init(
         seedVideo: VideoItem,
@@ -27,30 +26,26 @@ struct VideoDetailView: View {
     }
 
     var body: some View {
-        VideoDetailViewContent(
-            seedVideo: seedVideo,
-            holder: holder,
-            runtimeSettings: runtimeSettings,
-            fullscreenCoordinator: fullscreenCoordinator,
-            selectedContentTab: $presentationState.selectedContentTab,
-            replySheetComment: $presentationState.replySheetComment,
-            isShowingDanmakuSettings: $presentationState.isShowingDanmakuSettings,
-            isShowingFavoriteFolders: $presentationState.isShowingFavoriteFolders,
-            isShowingNetworkDiagnostics: $presentationState.isShowingNetworkDiagnostics,
-            onNavigateBack: popOneVideoLevel,
-            lifecycleActions: contentLifecycleActions
-        )
-        .videoDetailViewChrome(hidesRootTabBar: hidesRootTabBar)
-        .statusBar(hidden: hidesPlayerSystemChrome)
-        .persistentSystemOverlays(hidesPlayerSystemChrome ? .hidden : .automatic)
-        .background {
-            VideoDetailChromeStatusBarStyleBridge(
-                style: .lightContent,
-                isHidden: hidesPlayerSystemChrome
+        PlaybackDetailPageHost(
+            hidesSystemChrome: .constant(false),
+            background: VideoDetailTheme.background,
+            hidesRootTabBar: hidesRootTabBar,
+            navigationBarVisibility: .hidden,
+            hidesBackButton: true
+        ) {
+            VideoDetailViewContent(
+                seedVideo: seedVideo,
+                holder: holder,
+                runtimeSettings: runtimeSettings,
+                fullscreenCoordinator: fullscreenCoordinator,
+                selectedContentTab: $presentationState.selectedContentTab,
+                replySheetComment: $presentationState.replySheetComment,
+                isShowingDanmakuSettings: $presentationState.isShowingDanmakuSettings,
+                isShowingFavoriteFolders: $presentationState.isShowingFavoriteFolders,
+                isShowingNetworkDiagnostics: $presentationState.isShowingNetworkDiagnostics,
+                onNavigateBack: popOneVideoLevel,
+                lifecycleActions: contentLifecycleActions
             )
-        }
-        .onPreferenceChange(VideoDetailChromeHiddenPreferenceKey.self) { isHidden in
-            hidesPlayerSystemChrome = isHidden
         }
     }
 

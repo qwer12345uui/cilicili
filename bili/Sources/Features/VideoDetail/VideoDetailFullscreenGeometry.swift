@@ -1,36 +1,17 @@
 import SwiftUI
 import UIKit
 
-struct FullscreenContainerGeometry {
-    let size: CGSize
-    let offset: CGSize
-}
-
 extension GeometryProxy {
-    var fullscreenContainerGeometry: FullscreenContainerGeometry {
-        if let window = UIApplication.shared.biliForegroundKeyWindow,
-           let rootView = window.rootViewController?.view {
-            let localFrame = frame(in: .global)
-            let frameInWindow = rootView.convert(localFrame, from: nil)
-            let resolvedSize = Self.resolvedFullscreenSize(
+    var fullscreenContainerGeometry: PlaybackDetailFullscreenGeometry {
+        playbackDetailFullscreenGeometry(
+            window: UIApplication.shared.playbackDetailForegroundKeyWindow
+        ) { window, rootView in
+            Self.resolvedFullscreenSize(
                 windowSize: window.bounds.size,
                 rootSize: rootView.bounds.size,
                 orientation: window.windowScene?.effectiveGeometry.interfaceOrientation
             )
-            return FullscreenContainerGeometry(
-                size: resolvedSize,
-                offset: CGSize(width: -frameInWindow.minX, height: -frameInWindow.minY)
-            )
         }
-
-        let expandedSize = CGSize(
-            width: size.width + safeAreaInsets.leading + safeAreaInsets.trailing,
-            height: size.height + safeAreaInsets.top + safeAreaInsets.bottom
-        )
-        return FullscreenContainerGeometry(
-            size: expandedSize,
-            offset: CGSize(width: -safeAreaInsets.leading, height: -safeAreaInsets.top)
-        )
     }
 
     private static func resolvedFullscreenSize(

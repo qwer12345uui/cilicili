@@ -3,7 +3,7 @@ import UIKit
 
 struct LiveRoomContentLayout {
     let proxySize: CGSize
-    let fullscreenGeometry: LiveDetailFullscreenContainerGeometry
+    let fullscreenGeometry: PlaybackDetailFullscreenGeometry
     let fullscreenMode: PlayerFullscreenMode?
     let isCompletingFullscreenExit: Bool
 
@@ -58,11 +58,10 @@ struct LiveRoomContentLayout {
     }
 
     private var stablePortraitLayoutWidth: CGFloat {
-        let proxyShortSide = min(proxySize.width, proxySize.height)
-        let fullscreenShortSide = min(fullscreenGeometry.size.width, fullscreenGeometry.size.height)
-        let windowShortSide = UIApplication.shared.liveDetailForegroundKeyWindow.map { window in
-            min(window.bounds.width, window.bounds.height)
-        } ?? .greatestFiniteMagnitude
-        return min(proxyShortSide, fullscreenShortSide, windowShortSide)
+        PlaybackDetailStableLayout.portraitWidth(
+            containerSize: proxySize,
+            fullscreenSize: fullscreenGeometry.size,
+            windowSize: UIApplication.shared.playbackDetailForegroundKeyWindow?.bounds.size
+        )
     }
 }

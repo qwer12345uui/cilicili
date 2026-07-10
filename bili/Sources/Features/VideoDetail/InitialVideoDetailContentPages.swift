@@ -5,7 +5,7 @@ struct InitialVideoDetailDetailContentPage: View {
     let layoutWidth: CGFloat
 
     private var contentWidth: CGFloat {
-        VideoDetailContentPageMetrics.contentWidth(for: layoutWidth)
+        PlaybackDetailContentMetrics.contentWidth(for: layoutWidth)
     }
 
     private var shouldShowInitialPageMenuPlaceholder: Bool {
@@ -17,11 +17,11 @@ struct InitialVideoDetailDetailContentPage: View {
             titleText: seedVideo.title,
             contentWidth: contentWidth
         )
-        .padding(.horizontal, VideoDetailContentPageMetrics.horizontalPadding)
+        .padding(.horizontal, PlaybackDetailContentMetrics.horizontalPadding)
 
         if shouldShowInitialPageMenuPlaceholder {
             InitialPageMenuPlaceholder(pageCount: seedVideo.pages?.count)
-                .padding(.horizontal, VideoDetailContentPageMetrics.horizontalPadding)
+                .padding(.horizontal, PlaybackDetailContentMetrics.horizontalPadding)
         }
 
         if !seedVideo.isPGCEpisode {

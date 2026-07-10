@@ -14,29 +14,27 @@ struct VideoDetailViewContent: View {
     let lifecycleActions: VideoDetailViewContentLifecycleActions
 
     var body: some View {
-        Group {
-            if let viewModel = holder.viewModel {
-                VideoDetailViewContentResolver(
-                    seedVideo: seedVideo,
-                    runtimeSettings: runtimeSettings,
-                    fullscreenCoordinator: fullscreenCoordinator,
-                    viewModel: viewModel,
-                    selectedContentTab: $selectedContentTab,
-                    replySheetComment: $replySheetComment,
-                    isShowingDanmakuSettings: $isShowingDanmakuSettings,
-                    isShowingFavoriteFolders: $isShowingFavoriteFolders,
-                    isShowingNetworkDiagnostics: $isShowingNetworkDiagnostics,
-                    onNavigateBack: onNavigateBack
-                )
-            } else {
-                VideoDetailInitialContentResolver(
-                    seedVideo: seedVideo,
-                    selectedContentTab: $selectedContentTab,
-                    runtimeSettings: runtimeSettings.snapshot,
-                    onNavigateBack: onNavigateBack,
-                    lifecycleActions: lifecycleActions
-                )
-            }
+        PlaybackDetailLoadedStatePage(holder.viewModel) { viewModel in
+            VideoDetailViewContentResolver(
+                seedVideo: seedVideo,
+                runtimeSettings: runtimeSettings,
+                fullscreenCoordinator: fullscreenCoordinator,
+                viewModel: viewModel,
+                selectedContentTab: $selectedContentTab,
+                replySheetComment: $replySheetComment,
+                isShowingDanmakuSettings: $isShowingDanmakuSettings,
+                isShowingFavoriteFolders: $isShowingFavoriteFolders,
+                isShowingNetworkDiagnostics: $isShowingNetworkDiagnostics,
+                onNavigateBack: onNavigateBack
+            )
+        } initialContent: {
+            VideoDetailInitialContentResolver(
+                seedVideo: seedVideo,
+                selectedContentTab: $selectedContentTab,
+                runtimeSettings: runtimeSettings.snapshot,
+                onNavigateBack: onNavigateBack,
+                lifecycleActions: lifecycleActions
+            )
         }
     }
 }

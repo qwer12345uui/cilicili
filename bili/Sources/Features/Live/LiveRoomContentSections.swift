@@ -2,21 +2,21 @@ import SwiftUI
 
 extension LiveRoomContentView {
     func detailScrollPage(_ viewModel: LiveRoomViewModel, layoutWidth: CGFloat) -> some View {
-        let horizontalPadding: CGFloat = 12
-        let contentWidth = max(layoutWidth - horizontalPadding * 2, 0)
-
-        return VStack(alignment: .leading, spacing: 14) {
+        PlaybackDetailContentPage(
+            layoutWidth: layoutWidth,
+            horizontalPadding: PlaybackDetailContentMetrics.horizontalPadding,
+            topPadding: PlaybackDetailContentMetrics.topPadding,
+            bottomPadding: 28,
+            spacing: PlaybackDetailContentMetrics.spacing,
+            background: VideoDetailTheme.background
+        ) { contentWidth in
             liveDetailControls(viewModel, contentWidth: contentWidth)
-                .padding(.horizontal, horizontalPadding)
         }
-        .padding(.top, 12)
-        .frame(width: layoutWidth, alignment: .top)
-        .background(VideoDetailTheme.background)
     }
 
     func liveDetailControls(_ viewModel: LiveRoomViewModel, contentWidth: CGFloat) -> some View {
-        VStack(alignment: .leading, spacing: 14) {
-            LiveRoomInfoBlock(viewModel: viewModel)
+        VStack(alignment: .leading, spacing: 12) {
+            LiveRoomInfoCard(viewModel: viewModel)
             liveActionStrip(viewModel, contentWidth: contentWidth)
             liveInlineControlStrip(viewModel)
             liveStatusNotice(viewModel)

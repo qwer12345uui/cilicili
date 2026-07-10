@@ -229,7 +229,7 @@ final class VideoDetailShellViewController: UIViewController {
         if isPortraitVideo {
             AppOrientationLock.update(to: .portrait, in: scene)
         } else {
-            AppOrientationLock.update(to: [.portrait, .landscape], in: scene)
+            AppOrientationLock.update(to: .allButUpsideDown, in: scene)
         }
     }
 
@@ -412,7 +412,7 @@ final class VideoDetailShellViewController: UIViewController {
             setPortraitFullscreen(true)
         } else {
             let scene = view.window?.windowScene
-            AppOrientationLock.update(to: [.portrait, .landscape], in: scene)
+            AppOrientationLock.update(to: .allButUpsideDown, in: scene)
             AppOrientationLock.requestGeometryUpdate(to: .landscapeRight, in: scene)
         }
     }
@@ -429,7 +429,7 @@ final class VideoDetailShellViewController: UIViewController {
     /// 旋转回竖屏。
     private func requestPortrait() {
         let scene = view.window?.windowScene
-        AppOrientationLock.update(to: [.portrait, .landscape], in: scene)
+        AppOrientationLock.update(to: .allButUpsideDown, in: scene)
         AppOrientationLock.requestGeometryUpdate(to: .portrait, in: scene)
     }
 

@@ -1,5 +1,4 @@
 import SwiftUI
-import UIKit
 
 struct VideoDetailInitialPlaybackStage: View {
     let seedVideo: VideoItem
@@ -10,16 +9,16 @@ struct VideoDetailInitialPlaybackStage: View {
     let onNavigateBack: () -> Void
 
     var body: some View {
-        ZStack(alignment: .top) {
-            VideoDetailTheme.background
-                .ignoresSafeArea()
-
+        PlaybackDetailPlayerStage(
+            screenSize: CGSize(width: layout.width, height: containerHeight),
+            background: VideoDetailTheme.background
+        ) {
             VideoDetailNativeContentTabView(
                 selection: $selectedContentTab,
                 layoutWidth: layout.width,
                 topInset: layout.playerHeight,
                 minimizesTabBarOnScroll: runtimeSettings.minimizesTabBarOnScroll,
-                onScrollOffsetChange: { _, _ in }
+                onScrollOffsetChange: nil
             ) { tab in
                 InitialVideoDetailContentPage(
                     seedVideo: seedVideo,
@@ -27,27 +26,17 @@ struct VideoDetailInitialPlaybackStage: View {
                     tab: tab
                 )
             }
-            .frame(width: layout.width, height: containerHeight)
-
+        } player: {
             VideoDetailInitialPlayerPlaceholder(
                 width: layout.width,
                 height: layout.playerHeight,
                 showsPinnedProgressBar: runtimeSettings.showsPinnedProgressBar,
                 onNavigateBack: onNavigateBack
             )
-            .zIndex(1)
-
+        }
+        .overlay(alignment: .top) {
             VideoDetailStatusBarBackdrop(isHidden: false)
         }
-        .frame(width: layout.width, height: containerHeight)
         .background(VideoDetailTheme.background)
-        .background {
-            StatusBarStyleBridge(
-                style: .lightContent,
-                isHidden: false
-            )
-            .frame(width: 0, height: 0)
-            .allowsHitTesting(false)
-        }
     }
 }

@@ -10,7 +10,12 @@ struct VideoDetailContentPage: View {
     let onReply: (Comment) -> Void
 
     var body: some View {
-        VStack(alignment: .leading, spacing: VideoDetailContentPageMetrics.spacing) {
+        PlaybackDetailContentPage(
+            layoutWidth: layoutWidth,
+            topPadding: PlaybackDetailContentMetrics.topPadding,
+            spacing: PlaybackDetailContentMetrics.spacing,
+            background: VideoDetailTheme.background
+        ) { _ in
             VideoDetailContentPageBody(
                 viewModel: viewModel,
                 layoutWidth: layoutWidth,
@@ -21,8 +26,5 @@ struct VideoDetailContentPage: View {
                 onReply: onReply
             )
         }
-        .padding(.top, VideoDetailContentPageMetrics.topPadding)
-        .frame(width: layoutWidth, alignment: .top)
-        .background(VideoDetailTheme.background)
     }
 }

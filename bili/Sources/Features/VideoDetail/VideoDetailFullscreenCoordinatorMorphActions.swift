@@ -352,7 +352,7 @@ extension VideoDetailFullscreenCoordinator {
             return latestPlayerSurfaceFrame
         }
         guard let window = UIApplication.shared.videoDetailKeyWindow
-            ?? UIApplication.shared.biliForegroundKeyWindow
+            ?? UIApplication.shared.playbackDetailForegroundKeyWindow
         else { return .null }
         let width = window.bounds.width
         let height = width * 9 / 16
@@ -361,7 +361,7 @@ extension VideoDetailFullscreenCoordinator {
 
     private func resolvedFullscreenFrame(orientation: UIDeviceOrientation) -> CGRect {
         guard let window = UIApplication.shared.videoDetailKeyWindow
-            ?? UIApplication.shared.biliForegroundKeyWindow
+            ?? UIApplication.shared.playbackDetailForegroundKeyWindow
         else { return .null }
         let bounds = window.bounds
         guard orientation.isLandscape else { return bounds }

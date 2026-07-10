@@ -6,18 +6,22 @@ struct LiveInlineControlStrip: View {
 
     var body: some View {
         ScrollView(.horizontal) {
-            HStack(spacing: 10) {
-                Button(action: showDescription) {
-                    LiveInlineMetadataButtonLabel(title: "简介", systemImage: "text.alignleft")
-                }
-                .buttonStyle(.plain)
+            GlassEffectContainer(spacing: 8) {
+                HStack(spacing: 8) {
+                    Button(action: showDescription) {
+                        LiveInlineMetadataButtonLabel(title: "简介", systemImage: "text.alignleft")
+                    }
+                    .buttonBorderShape(.capsule)
+                    .controlSize(.mini)
+                    .biliGlassButtonStyle()
 
-                LiveStreamInlineMenu(viewModel: viewModel)
-                LiveQualityInlineMenu(viewModel: viewModel)
-                LiveInlineDanmakuButton(viewModel: viewModel)
-                LiveInlineDanmakuDiagnosticsButton(viewModel: viewModel)
+                    LiveStreamInlineMenu(viewModel: viewModel)
+                    LiveQualityInlineMenu(viewModel: viewModel)
+                    LiveInlineDanmakuButton(viewModel: viewModel)
+                    LiveInlineDanmakuDiagnosticsButton(viewModel: viewModel)
+                }
+                .frame(height: 32)
             }
-            .frame(height: 30)
         }
         .scrollIndicators(.hidden)
         .font(.caption.weight(.semibold))
@@ -39,7 +43,9 @@ private struct LiveInlineDanmakuButton: View {
                 systemImage: viewModel.isDanmakuEnabled ? "text.bubble.fill" : "text.bubble"
             )
         }
-        .buttonStyle(.plain)
+        .buttonBorderShape(.capsule)
+        .controlSize(.mini)
+        .biliGlassButtonStyle()
         .foregroundStyle(viewModel.isDanmakuEnabled ? appTintColor : .secondary)
     }
 }
@@ -58,7 +64,9 @@ private struct LiveInlineDanmakuDiagnosticsButton: View {
                 systemImage: "waveform.path.ecg"
             )
         }
-        .buttonStyle(.plain)
+        .buttonBorderShape(.capsule)
+        .controlSize(.mini)
+        .biliGlassButtonStyle()
         .foregroundStyle(viewModel.isLiveDanmakuDiagnosticsEnabled ? appTintColor : .secondary)
     }
 }

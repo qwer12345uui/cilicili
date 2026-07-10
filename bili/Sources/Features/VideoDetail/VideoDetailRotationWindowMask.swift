@@ -16,7 +16,7 @@ enum VideoDetailRotationWindowMask {
         generation &+= 1
 
         guard let window = UIApplication.shared.videoDetailKeyWindow
-            ?? UIApplication.shared.biliForegroundKeyWindow
+            ?? UIApplication.shared.playbackDetailForegroundKeyWindow
         else { return false }
 
         let overlay = overlayView ?? makeOverlayView()
@@ -71,7 +71,7 @@ enum VideoDetailRotationWindowMask {
         let animationGeneration = generation
 
         guard let window = UIApplication.shared.videoDetailKeyWindow
-            ?? UIApplication.shared.biliForegroundKeyWindow,
+            ?? UIApplication.shared.playbackDetailForegroundKeyWindow,
             let overlay = overlayView,
             let image = imageView,
             image.image != nil,
@@ -144,7 +144,7 @@ enum VideoDetailRotationWindowMask {
         let animationGeneration = generation
 
         guard let window = UIApplication.shared.videoDetailKeyWindow
-            ?? UIApplication.shared.biliForegroundKeyWindow,
+            ?? UIApplication.shared.playbackDetailForegroundKeyWindow,
             let snapshot,
             sourceFrame.width > 1,
             sourceFrame.height > 1,

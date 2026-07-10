@@ -17,20 +17,20 @@ struct VideoDetailLoadedDetailContentPage: View {
             onShowNetworkDiagnostics: onShowNetworkDiagnostics,
             onShowFavoriteFolders: onShowFavoriteFolders
         )
-        .padding(.horizontal, VideoDetailContentPageMetrics.horizontalPadding)
+        .padding(.horizontal, PlaybackDetailContentMetrics.horizontalPadding)
 
         if viewModel.detail.isPGCEpisode {
             VideoDetailPgcEpisodeSection(
                 detail: viewModel.detail,
                 selectEpisode: renderPack.actions.selectPgcEpisode
             )
-                .padding(.horizontal, VideoDetailContentPageMetrics.horizontalPadding)
+                .padding(.horizontal, PlaybackDetailContentMetrics.horizontalPadding)
         } else {
             VideoDetailPageMenu(
                 store: renderPack.pageSelectorStore,
                 selectPage: renderPack.actions.selectPage
             )
-            .padding(.horizontal, VideoDetailContentPageMetrics.horizontalPadding)
+            .padding(.horizontal, PlaybackDetailContentMetrics.horizontalPadding)
 
             VideoDetailRelatedSection(
                 store: renderPack.relatedStore,

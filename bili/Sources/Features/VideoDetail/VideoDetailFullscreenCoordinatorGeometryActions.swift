@@ -3,12 +3,8 @@ import UIKit
 extension VideoDetailFullscreenCoordinator {
     func requestInlineFullscreenGeometry(for mode: PlayerFullscreenMode) {
         let scene = UIApplication.shared.videoDetailKeyWindow?.windowScene
-            ?? UIApplication.shared.biliForegroundKeyWindow?.windowScene
-        AppOrientationLock.update(
-            to: mode.videoDetailInterfaceOrientationMask,
-            in: scene,
-            requestsGeometryUpdate: true
-        )
+            ?? UIApplication.shared.playbackDetailForegroundWindowScene
+        AppOrientationLock.requestPlaybackDetailGeometry(for: mode, in: scene)
     }
 
     func requestInlineFullscreenGeometryAfterLayout(for mode: PlayerFullscreenMode) {
@@ -25,7 +21,7 @@ extension VideoDetailFullscreenCoordinator {
 
     func requestInlinePortraitGeometry() {
         let scene = UIApplication.shared.videoDetailKeyWindow?.windowScene
-            ?? UIApplication.shared.biliForegroundKeyWindow?.windowScene
+            ?? UIApplication.shared.playbackDetailForegroundWindowScene
         AppOrientationLock.update(
             to: .portrait,
             in: scene,
@@ -47,28 +43,10 @@ extension VideoDetailFullscreenCoordinator {
 
     func preferredLandscapeDeviceOrientation() -> UIDeviceOrientation {
         if let orientation = UIApplication.shared.videoDetailKeyWindow?.windowScene?.effectiveGeometry.interfaceOrientation
-            ?? UIApplication.shared.biliForegroundKeyWindow?.windowScene?.effectiveGeometry.interfaceOrientation,
+            ?? UIApplication.shared.playbackDetailForegroundWindowScene?.effectiveGeometry.interfaceOrientation,
            orientation.isLandscape {
             return orientation == .landscapeLeft ? .landscapeRight : .landscapeLeft
         }
         return .landscapeLeft
-    }
-}
-
-extension PlayerFullscreenMode {
-    var videoDetailInterfaceOrientationMask: UIInterfaceOrientationMask {
-        switch self {
-        case .portrait:
-            return .portrait
-        case .landscape(let orientation):
-            switch orientation {
-            case .landscapeLeft:
-                return .landscapeRight
-            case .landscapeRight:
-                return .landscapeLeft
-            default:
-                return .landscapeRight
-            }
-        }
     }
 }

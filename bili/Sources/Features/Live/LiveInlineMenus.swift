@@ -22,13 +22,21 @@ struct LiveStreamInlineMenu: View {
                     systemImage: "antenna.radiowaves.left.and.right"
                 )
             }
-            .buttonStyle(.plain)
+            .buttonBorderShape(.capsule)
+            .controlSize(.mini)
+            .biliGlassButtonStyle()
             .contentShape(Rectangle())
         } else {
-            LiveInlineMetadataButtonLabel(
-                title: "线路",
-                systemImage: "antenna.radiowaves.left.and.right"
-            )
+            Button {} label: {
+                LiveInlineMetadataButtonLabel(
+                    title: "线路",
+                    systemImage: "antenna.radiowaves.left.and.right"
+                )
+            }
+            .buttonBorderShape(.capsule)
+            .controlSize(.mini)
+            .biliGlassButtonStyle()
+            .disabled(true)
             .opacity(0.45)
         }
     }
@@ -56,13 +64,21 @@ struct LiveQualityInlineMenu: View {
                     systemImage: "slider.horizontal.3"
                 )
             }
-            .buttonStyle(.plain)
+            .buttonBorderShape(.capsule)
+            .controlSize(.mini)
+            .biliGlassButtonStyle()
             .contentShape(Rectangle())
         } else {
-            LiveInlineMetadataButtonLabel(
-                title: "画质",
-                systemImage: "slider.horizontal.3"
-            )
+            Button {} label: {
+                LiveInlineMetadataButtonLabel(
+                    title: "画质",
+                    systemImage: "slider.horizontal.3"
+                )
+            }
+            .buttonBorderShape(.capsule)
+            .controlSize(.mini)
+            .biliGlassButtonStyle()
+            .disabled(true)
             .opacity(0.45)
         }
     }

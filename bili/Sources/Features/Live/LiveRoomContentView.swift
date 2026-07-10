@@ -9,12 +9,6 @@ struct LiveRoomContentView: View {
     @State var isCompletingFullscreenExit = false
     @State var pendingFullscreenExitTask: Task<Void, Never>?
 
-    static let supportedLiveOrientations: UIInterfaceOrientationMask = [
-        .portrait,
-        .landscapeLeft,
-        .landscapeRight
-    ]
-
     var body: some View {
         GeometryReader { proxy in
             let layout = LiveRoomContentLayout(
@@ -37,22 +31,16 @@ struct LiveRoomContentView: View {
             .offset(layout.frameOffset)
             .background(layout.isLandscape ? Color.black : VideoDetailTheme.background)
             .ignoresSafeArea(.container, edges: layout.ignoresContainerSafeArea ? .all : [])
-            .preference(key: LiveDetailChromeHiddenPreferenceKey.self, value: layout.shouldHideSystemChrome)
-            .statusBar(hidden: layout.shouldHideSystemChrome)
-            .persistentSystemOverlays(layout.shouldHideSystemChrome ? .hidden : .automatic)
-            .background {
-                LiveStatusBarStyleBridge(
-                    style: layout.ignoresContainerSafeArea ? .lightContent : .default,
-                    isHidden: layout.shouldHideSystemChrome
-                )
-                .frame(width: 0, height: 0)
-                .allowsHitTesting(false)
-            }
+            .preference(key: PlaybackDetailChromeHiddenPreferenceKey.self, value: layout.shouldHideSystemChrome)
         }
         .background(VideoDetailTheme.background)
         .overlay {
-            if case .failed(let message) = viewModel.state, viewModel.playerViewModel == nil {
-                ErrorStateView(title: "直播加载失败", message: message, retry: viewModel.reload)
+            if let fullPageFailureMessage {
+                ErrorStateView(
+                    title: "直播加载失败",
+                    message: fullPageFailureMessage,
+                    retry: viewModel.reload
+                )
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .background(VideoDetailTheme.background.opacity(0.96))
             }
@@ -95,56 +83,47 @@ struct LiveRoomContentView: View {
         .ignoresSafeArea(.container, edges: (fullscreenMode != nil || isCompletingFullscreenExit) ? .all : [])
     }
 
+    private var fullPageFailureMessage: String? {
+        guard case .failed(let message) = viewModel.state, viewModel.playerViewModel == nil else {
+            return nil
+        }
+        return message
+    }
+
     private func standardPlaybackPage(
         _ viewModel: LiveRoomViewModel,
         screenSize: CGSize,
         isLandscape: Bool,
         isInlineFullscreen: Bool
     ) -> some View {
-        let standardHeight = screenSize.width * 9 / 16
+        let standardPlayerHeight = PlaybackDetailPlayerMetrics.standardHeight(for: screenSize.width)
         let expandsToFullscreen = isLandscape || isInlineFullscreen
-        let playerHeight = expandsToFullscreen ? screenSize.height : standardHeight
-        let playerWidth: CGFloat? = isLandscape ? screenSize.width : nil
 
-        return ZStack(alignment: .top) {
-            VideoDetailTheme.background
-                .opacity(expandsToFullscreen ? 0 : 1)
-                .ignoresSafeArea()
-
-            if !isLandscape {
-                VStack(spacing: 0) {
-                    Color.clear
-                        .frame(height: standardHeight)
-
-                    ScrollView(.vertical) {
-                        detailScrollPage(viewModel, layoutWidth: screenSize.width)
-                            .frame(width: screenSize.width, alignment: .top)
-                    }
-                    .scrollIndicators(.hidden)
-                    .nativeTopScrollEdgeEffect()
+        return PlaybackDetailPlayerStage(
+            screenSize: screenSize,
+            showsContent: !isLandscape,
+            contentOpacity: isInlineFullscreen ? 0 : 1,
+            allowsContentHitTesting: !isInlineFullscreen,
+            showsFullscreenBackdrop: expandsToFullscreen,
+            background: VideoDetailTheme.background
+        ) {
+            PlaybackDetailScrollPage(
+                layoutWidth: screenSize.width,
+                topInset: standardPlayerHeight,
+                background: VideoDetailTheme.background
+            ) {
+                detailScrollPage(viewModel, layoutWidth: screenSize.width)
                     .frame(width: screenSize.width, alignment: .top)
-                    .frame(maxHeight: .infinity, alignment: .top)
-                    .opacity(isInlineFullscreen ? 0 : 1)
-                    .allowsHitTesting(!isInlineFullscreen)
-                }
-                .frame(width: screenSize.width, height: screenSize.height, alignment: .top)
             }
-
-            if expandsToFullscreen {
-                Color.black
-                    .ignoresSafeArea()
-                    .transition(.opacity)
-            }
-
+        } player: {
             playerHero(
                 viewModel,
                 isLandscape: isLandscape,
                 fullscreenMode: fullscreenMode,
-                playerWidth: playerWidth,
-                playerHeight: playerHeight
+                playerWidth: isLandscape ? screenSize.width : nil,
+                playerHeight: expandsToFullscreen ? screenSize.height : standardPlayerHeight
             )
         }
-        .frame(width: screenSize.width, height: screenSize.height)
     }
 
     private func playerHero(

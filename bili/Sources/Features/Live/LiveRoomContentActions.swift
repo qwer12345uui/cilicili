@@ -45,28 +45,24 @@ extension LiveRoomContentView {
     }
 
     func requestLiveFullscreenGeometry(for mode: PlayerFullscreenMode) {
-        if let windowScene = UIApplication.shared.liveDetailForegroundKeyWindow?.windowScene {
-            AppOrientationLock.update(
-                to: mode.liveDetailInterfaceOrientationMask,
-                in: windowScene,
-                requestsGeometryUpdate: true
-            )
+        if let windowScene = UIApplication.shared.playbackDetailForegroundWindowScene {
+            AppOrientationLock.requestPlaybackDetailGeometry(for: mode, in: windowScene)
         }
     }
 
     func requestLivePortraitGeometry() {
-        if let windowScene = UIApplication.shared.liveDetailForegroundKeyWindow?.windowScene {
-            AppOrientationLock.update(to: Self.supportedLiveOrientations, in: windowScene)
+        if let windowScene = UIApplication.shared.playbackDetailForegroundWindowScene {
+            AppOrientationLock.update(to: .allButUpsideDown, in: windowScene)
             AppOrientationLock.requestGeometryUpdate(to: .portrait, in: windowScene)
         } else {
-            AppOrientationLock.update(to: Self.supportedLiveOrientations, in: nil)
+            AppOrientationLock.update(to: .allButUpsideDown, in: nil)
         }
     }
 
     func allowLiveAutoRotation() {
         AppOrientationLock.update(
-            to: Self.supportedLiveOrientations,
-            in: UIApplication.shared.liveDetailForegroundKeyWindow?.windowScene
+            to: .allButUpsideDown,
+            in: UIApplication.shared.playbackDetailForegroundWindowScene
         )
     }
 

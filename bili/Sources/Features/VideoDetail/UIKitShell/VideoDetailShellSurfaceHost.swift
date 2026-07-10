@@ -722,7 +722,7 @@ private struct SurfaceOnlyPlayerOverlayRoot: View {
 
     private func fullscreenSafeAreaInsets() -> UIEdgeInsets {
         guard configuration.isFullscreenActive,
-              let window = UIApplication.shared.biliSurfaceHostForegroundKeyWindow
+              let window = UIApplication.shared.playbackDetailForegroundKeyWindow
         else { return .zero }
         return window.safeAreaInsets
     }
@@ -1664,16 +1664,6 @@ private extension View {
         self
             .background(Color(.secondarySystemGroupedBackground).opacity(0.34), in: shape)
             .biliPlayerClearGlass(interactive: false, in: shape)
-    }
-}
-
-private extension UIApplication {
-    var biliSurfaceHostForegroundKeyWindow: UIWindow? {
-        connectedScenes
-            .compactMap { $0 as? UIWindowScene }
-            .filter { $0.activationState == .foregroundActive }
-            .flatMap(\.windows)
-            .first { $0.isKeyWindow }
     }
 }
 

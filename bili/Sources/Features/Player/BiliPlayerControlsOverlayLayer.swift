@@ -115,7 +115,7 @@ private struct PlayerControlsSafeAreaInsets {
 
     static func current(isFullscreenActive: Bool) -> PlayerControlsSafeAreaInsets {
         guard isFullscreenActive,
-              let insets = UIApplication.shared.biliPlayerForegroundKeyWindow?.safeAreaInsets
+              let insets = UIApplication.shared.playbackDetailForegroundKeyWindow?.safeAreaInsets
         else { return .zero }
 
         return PlayerControlsSafeAreaInsets(
@@ -132,14 +132,4 @@ private struct PlayerControlsSafeAreaInsets {
         bottom: 0,
         trailing: 0
     )
-}
-
-private extension UIApplication {
-    var biliPlayerForegroundKeyWindow: UIWindow? {
-        connectedScenes
-            .compactMap { $0 as? UIWindowScene }
-            .filter { $0.activationState == .foregroundActive }
-            .flatMap(\.windows)
-            .first { $0.isKeyWindow }
-    }
 }

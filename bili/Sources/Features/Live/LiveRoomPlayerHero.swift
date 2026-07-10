@@ -12,30 +12,26 @@ struct LiveRoomPlayerHero: View {
     let onExitFullscreen: (PlayerStateViewModel?) -> Void
 
     var body: some View {
-        ZStack {
-            if let playerViewModel = viewModel.playerViewModel {
-                livePlayer(playerViewModel)
-            } else {
-                loadingPlaceholder()
-                    .frame(width: playerWidth)
-                    .frame(height: playerHeight)
-            }
+        PlaybackDetailPlayerSurface(width: playerWidth, height: playerHeight) {
+            ZStack {
+                if let playerViewModel = viewModel.playerViewModel {
+                    livePlayer(playerViewModel)
+                } else {
+                    loadingPlaceholder()
+                        .frame(width: playerWidth)
+                        .frame(height: playerHeight)
+                }
 
-            streamFallbackMessage
+                streamFallbackMessage
 
-            if viewModel.isLiveDanmakuDiagnosticsEnabled {
-                LiveDanmakuDiagnosticsOverlay(
-                    store: viewModel.liveDanmakuRenderStore.diagnosticsStore,
-                    usesLandscapeChrome: usesLandscapeChrome
-                )
+                if viewModel.isLiveDanmakuDiagnosticsEnabled {
+                    LiveDanmakuDiagnosticsOverlay(
+                        store: viewModel.liveDanmakuRenderStore.diagnosticsStore,
+                        usesLandscapeChrome: usesLandscapeChrome
+                    )
+                }
             }
         }
-        .frame(width: playerWidth)
-        .frame(maxWidth: .infinity)
-        .frame(height: playerHeight)
-        .background(Color.black)
-        .zIndex(1)
-        .clipped()
     }
 
     private var usesLandscapeChrome: Bool {

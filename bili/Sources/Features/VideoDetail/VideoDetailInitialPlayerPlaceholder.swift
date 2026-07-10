@@ -7,20 +7,20 @@ struct VideoDetailInitialPlayerPlaceholder: View {
     let onNavigateBack: () -> Void
 
     var body: some View {
-        PlayerLoadingPlaceholder(
-            progress: 0.08,
-            message: "加载视频信息",
-            isFinishing: false,
-            showsChromeSkeleton: true
-        )
-        .frame(width: width, height: height)
-        .background(VideoDetailInitialPlayerPlaceholderBackgroundLayer())
-        .overlay(alignment: .topLeading) {
-            VideoDetailInitialPlayerPlaceholderBackButtonLayer(action: onNavigateBack)
-        }
-        .overlay(alignment: .bottom) {
-            if showsPinnedProgressBar {
-                VideoDetailInitialPlayerPlaceholderProgressLayer(width: width)
+        PlaybackDetailPlayerSurface(width: width, height: height) {
+            PlayerLoadingPlaceholder(
+                progress: 0.08,
+                message: "加载视频信息",
+                isFinishing: false,
+                showsChromeSkeleton: true
+            )
+            .overlay(alignment: .topLeading) {
+                VideoDetailInitialPlayerPlaceholderBackButtonLayer(action: onNavigateBack)
+            }
+            .overlay(alignment: .bottom) {
+                if showsPinnedProgressBar {
+                    VideoDetailInitialPlayerPlaceholderProgressLayer(width: width)
+                }
             }
         }
     }

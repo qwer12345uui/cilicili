@@ -1,14 +1,7 @@
 import SwiftUI
 import UIKit
 
-struct LiveDetailChromeHiddenPreferenceKey: PreferenceKey {
-    static var defaultValue = false
-
-    static func reduce(value: inout Bool, nextValue: () -> Bool) {
-        value = value || nextValue()
-    }
-}
-struct LiveStatusBarStyleBridge: UIViewControllerRepresentable {
+struct StatusBarStyleBridge: UIViewControllerRepresentable {
     let style: UIStatusBarStyle
     let isHidden: Bool
 
@@ -17,22 +10,12 @@ struct LiveStatusBarStyleBridge: UIViewControllerRepresentable {
     }
 
     func updateUIViewController(_ uiViewController: Controller, context _: Context) {
-        uiViewController.style = style
-        uiViewController.isHidden = isHidden
+        uiViewController.update(style: style, isHidden: isHidden)
     }
 
     final class Controller: UIViewController {
-        var style: UIStatusBarStyle {
-            didSet {
-                requestChromeUpdate()
-            }
-        }
-
-        var isHidden: Bool {
-            didSet {
-                requestChromeUpdate()
-            }
-        }
+        private(set) var style: UIStatusBarStyle
+        private(set) var isHidden: Bool
 
         init(style: UIStatusBarStyle, isHidden: Bool) {
             self.style = style
@@ -67,6 +50,13 @@ struct LiveStatusBarStyleBridge: UIViewControllerRepresentable {
             requestChromeUpdate()
         }
 
+        func update(style: UIStatusBarStyle, isHidden: Bool) {
+            guard self.style != style || self.isHidden != isHidden else { return }
+            self.style = style
+            self.isHidden = isHidden
+            requestChromeUpdate()
+        }
+
         private func requestChromeUpdate() {
             var controllers = [UIViewController]()
             var current: UIViewController? = self
@@ -84,7 +74,9 @@ struct LiveStatusBarStyleBridge: UIViewControllerRepresentable {
                 controllers.append(root)
             }
 
+            var updatedControllers = Set<ObjectIdentifier>()
             controllers.forEach { controller in
+                guard updatedControllers.insert(ObjectIdentifier(controller)).inserted else { return }
                 controller.setNeedsStatusBarAppearanceUpdate()
                 controller.setNeedsUpdateOfHomeIndicatorAutoHidden()
             }

@@ -7,12 +7,13 @@ struct VideoDetailInitialPlaybackLayout {
 
     init(proxy: GeometryProxy, isPortraitVideo: Bool) {
         let fullscreenSize = proxy.fullscreenContainerGeometry.size
-        width = VideoDetailStablePortraitLayout.width(
-            proxySize: proxy.size,
-            fullscreenSize: fullscreenSize
+        width = PlaybackDetailStableLayout.portraitWidth(
+            containerSize: proxy.size,
+            fullscreenSize: fullscreenSize,
+            windowSize: UIApplication.shared.playbackDetailForegroundKeyWindow?.bounds.size
         )
 
-        let standardHeight = width * 9 / 16
+        let standardHeight = PlaybackDetailPlayerMetrics.standardHeight(for: width)
         if isPortraitVideo {
             let proposedHeight = max(proxy.size.height * 0.65, width)
             let maximumHeight = max(standardHeight, proxy.size.height * 0.72)
@@ -20,16 +21,5 @@ struct VideoDetailInitialPlaybackLayout {
         } else {
             playerHeight = standardHeight
         }
-    }
-}
-
-enum VideoDetailStablePortraitLayout {
-    static func width(proxySize: CGSize, fullscreenSize: CGSize) -> CGFloat {
-        let proxyShortSide = min(proxySize.width, proxySize.height)
-        let fullscreenShortSide = min(fullscreenSize.width, fullscreenSize.height)
-        let windowShortSide = UIApplication.shared.biliForegroundKeyWindow.map { window in
-            min(window.bounds.width, window.bounds.height)
-        } ?? .greatestFiniteMagnitude
-        return min(proxyShortSide, fullscreenShortSide, windowShortSide)
     }
 }

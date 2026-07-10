@@ -81,6 +81,22 @@ enum PlayerFullscreenMode: Equatable {
         if case .portrait = self { return true }
         return false
     }
+
+    var playbackDetailInterfaceOrientationMask: UIInterfaceOrientationMask {
+        switch self {
+        case .portrait:
+            return .portrait
+        case .landscape(let orientation):
+            switch orientation {
+            case .landscapeLeft:
+                return .landscapeRight
+            case .landscapeRight:
+                return .landscapeLeft
+            default:
+                return .landscapeRight
+            }
+        }
+    }
 }
 
 final class VideoSurfaceContainerView: UIView {

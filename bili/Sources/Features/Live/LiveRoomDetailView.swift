@@ -7,10 +7,15 @@ struct LiveRoomDetailView: View {
     @State private var hidesPlayerSystemChrome = false
 
     var body: some View {
-        Group {
-            if let viewModel = holder.viewModel {
+        PlaybackDetailPageHost(
+            hidesSystemChrome: $hidesPlayerSystemChrome,
+            background: VideoDetailTheme.background,
+            navigationBarVisibility: hidesPlayerSystemChrome ? .hidden : .visible,
+            statusBarStyle: hidesPlayerSystemChrome ? .lightContent : .default
+        ) {
+            PlaybackDetailLoadedStatePage(holder.viewModel) { viewModel in
                 LiveRoomContentView(viewModel: viewModel)
-            } else {
+            } initialContent: {
                 LiveRoomInitialPlaceholder(room: seedRoom)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                     .task {
@@ -21,23 +26,14 @@ struct LiveRoomDetailView: View {
                         )
                     }
             }
-        }
-        .navigationTitle("")
-        .navigationBarTitleDisplayMode(.inline)
-        .toolbarBackground(.hidden, for: .navigationBar)
-        .toolbar {
-            ToolbarItem(placement: .principal) {
-                livePrincipalToolbarContent
+            .toolbar {
+                ToolbarItem(placement: .principal) {
+                    livePrincipalToolbarContent
+                }
+                ToolbarItem(placement: .topBarTrailing) {
+                    liveShareToolbarButton
+                }
             }
-            ToolbarItem(placement: .topBarTrailing) {
-                liveShareToolbarButton
-            }
-        }
-        .toolbar(hidesPlayerSystemChrome ? .hidden : .visible, for: .navigationBar)
-        .background(VideoDetailTheme.background)
-        .hidesRootTabBarOnPush()
-        .onPreferenceChange(LiveDetailChromeHiddenPreferenceKey.self) { isHidden in
-            hidesPlayerSystemChrome = isHidden
         }
     }
 
