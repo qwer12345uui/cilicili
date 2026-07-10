@@ -12,7 +12,8 @@ struct LiveRoomDetailView: View {
             background: VideoDetailTheme.background,
             navigationBarVisibility: hidesPlayerSystemChrome ? .hidden : .visible,
             statusBarStyle: hidesPlayerSystemChrome ? .lightContent : .default,
-            performanceContext: .live(seedRoom)
+            performanceContext: .live(seedRoom),
+            lifecycleActions: pageLifecycleActions
         ) {
             PlaybackDetailLoadedStatePage(
                 holder.viewModel,
@@ -39,6 +40,25 @@ struct LiveRoomDetailView: View {
                 }
             }
         }
+    }
+
+    private var pageLifecycleActions: PlaybackDetailPageLifecycleActions {
+        PlaybackDetailPageLifecycleActions(
+            onScenePhaseChanged: { phase in
+                guard let viewModel = holder.viewModel else { return }
+                switch phase {
+                case .active:
+                    viewModel.resumeLiveDanmakuIfNeeded()
+                case .background:
+                    viewModel.suspendLiveDanmaku()
+                default:
+                    break
+                }
+            },
+            onDisappear: {
+                holder.viewModel?.stopPlaybackForNavigation()
+            }
+        )
     }
 
     @ViewBuilder

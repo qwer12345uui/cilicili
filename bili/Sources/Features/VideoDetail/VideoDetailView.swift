@@ -32,7 +32,8 @@ struct VideoDetailView: View {
             hidesRootTabBar: hidesRootTabBar,
             navigationBarVisibility: .hidden,
             hidesBackButton: true,
-            performanceContext: .video(seedVideo)
+            performanceContext: .video(seedVideo),
+            lifecycleActions: pageLifecycleActions
         ) {
             VideoDetailViewContent(
                 seedVideo: seedVideo,
@@ -53,6 +54,15 @@ struct VideoDetailView: View {
     private var contentLifecycleActions: VideoDetailViewContentLifecycleActions {
         VideoDetailViewContentLifecycleActions(
             configureViewModel: viewActions.configureViewModel
+        )
+    }
+
+    private var pageLifecycleActions: PlaybackDetailPageLifecycleActions {
+        PlaybackDetailPageLifecycleActions(
+            onDisappear: {
+                fullscreenCoordinator.resetForDisappear()
+                holder.viewModel?.stopPlaybackForNavigation()
+            }
         )
     }
 

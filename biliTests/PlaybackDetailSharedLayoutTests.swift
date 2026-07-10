@@ -33,6 +33,31 @@ final class PlaybackDetailSharedLayoutTests: XCTestCase {
         XCTAssertEqual(PlaybackDetailContentMetrics.contentWidth(for: 12), 0)
     }
 
+    func testPageLifecycleActionsDeliverPageAndSceneEvents() {
+        var events = [String]()
+        let actions = PlaybackDetailPageLifecycleActions(
+            onAppear: {
+                events.append("appear")
+            },
+            onScenePhaseChanged: { phase in
+                events.append("scene=\(phase)")
+            },
+            onDisappear: {
+                events.append("disappear")
+            }
+        )
+
+        actions.handleAppear()
+        actions.handleScenePhaseChanged(.background)
+        actions.handleScenePhaseChanged(.active)
+        actions.handleDisappear()
+
+        XCTAssertEqual(
+            events,
+            ["appear", "scene=background", "scene=active", "disappear"]
+        )
+    }
+
     func testPGCPerformanceContextKeepsSeasonIdentityAcrossEpisodeSwitches() {
         let firstEpisode = makeVideo(bvid: "BV-first", seasonID: 46089, episodeID: 1)
         let secondEpisode = makeVideo(bvid: "BV-second", seasonID: 46089, episodeID: 2)

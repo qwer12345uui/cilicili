@@ -62,7 +62,6 @@ struct LiveRoomContentView: View {
         }
         .onDisappear {
             pendingFullscreenExitTask?.cancel()
-            viewModel.stopPlaybackForNavigation()
             UIDevice.current.endGeneratingDeviceOrientationNotifications()
             AppOrientationLock.restorePortrait()
             fullscreenMode = nil
@@ -72,17 +71,8 @@ struct LiveRoomContentView: View {
             LiveRoomDescriptionSheet(viewModel: viewModel)
         }
         .onChange(of: scenePhase) { _, phase in
-            switch phase {
-            case .active:
-                if fullscreenMode == nil {
-                    allowLiveAutoRotation()
-                }
-                viewModel.resumeLiveDanmakuIfNeeded()
-            case .background:
-                viewModel.suspendLiveDanmaku()
-            default:
-                break
-            }
+            guard phase == .active, fullscreenMode == nil else { return }
+            allowLiveAutoRotation()
         }
         .onReceive(NotificationCenter.default.publisher(for: UIDevice.orientationDidChangeNotification)) { _ in
             updateLiveFullscreenOrientation(UIDevice.current.orientation)

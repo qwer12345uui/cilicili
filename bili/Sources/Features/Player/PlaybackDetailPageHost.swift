@@ -1,7 +1,36 @@
 import SwiftUI
 import UIKit
 
+struct PlaybackDetailPageLifecycleActions {
+    private let onAppear: () -> Void
+    private let onScenePhaseChanged: (ScenePhase) -> Void
+    private let onDisappear: () -> Void
+
+    init(
+        onAppear: @escaping () -> Void = {},
+        onScenePhaseChanged: @escaping (ScenePhase) -> Void = { _ in },
+        onDisappear: @escaping () -> Void = {}
+    ) {
+        self.onAppear = onAppear
+        self.onScenePhaseChanged = onScenePhaseChanged
+        self.onDisappear = onDisappear
+    }
+
+    func handleAppear() {
+        onAppear()
+    }
+
+    func handleScenePhaseChanged(_ phase: ScenePhase) {
+        onScenePhaseChanged(phase)
+    }
+
+    func handleDisappear() {
+        onDisappear()
+    }
+}
+
 struct PlaybackDetailPageHost<Content: View>: View {
+    @Environment(\.scenePhase) private var scenePhase
     @Binding var hidesSystemChrome: Bool
     let background: Color
     let hidesRootTabBar: Bool
@@ -9,6 +38,7 @@ struct PlaybackDetailPageHost<Content: View>: View {
     let hidesBackButton: Bool
     let statusBarStyle: UIStatusBarStyle
     let performanceContext: PlaybackDetailPerformanceContext?
+    let lifecycleActions: PlaybackDetailPageLifecycleActions
     let content: () -> Content
 
     init(
@@ -19,6 +49,7 @@ struct PlaybackDetailPageHost<Content: View>: View {
         hidesBackButton: Bool = false,
         statusBarStyle: UIStatusBarStyle = .lightContent,
         performanceContext: PlaybackDetailPerformanceContext? = nil,
+        lifecycleActions: PlaybackDetailPageLifecycleActions = PlaybackDetailPageLifecycleActions(),
         @ViewBuilder content: @escaping () -> Content
     ) {
         _hidesSystemChrome = hidesSystemChrome
@@ -28,6 +59,7 @@ struct PlaybackDetailPageHost<Content: View>: View {
         self.hidesBackButton = hidesBackButton
         self.statusBarStyle = statusBarStyle
         self.performanceContext = performanceContext
+        self.lifecycleActions = lifecycleActions
         self.content = content
     }
 
@@ -47,13 +79,20 @@ struct PlaybackDetailPageHost<Content: View>: View {
                 statusBarStyle: statusBarStyle
             )
             .onAppear {
-                guard let performanceContext else { return }
-                PlaybackDetailPerformanceMonitor.shared.begin(performanceContext)
-                PlaybackDetailPerformanceMonitor.shared.mark(.pageAppeared, context: performanceContext)
+                if let performanceContext {
+                    PlaybackDetailPerformanceMonitor.shared.begin(performanceContext)
+                    PlaybackDetailPerformanceMonitor.shared.mark(.pageAppeared, context: performanceContext)
+                }
+                lifecycleActions.handleAppear()
+            }
+            .onChange(of: scenePhase) { _, phase in
+                lifecycleActions.handleScenePhaseChanged(phase)
             }
             .onDisappear {
-                guard let performanceContext else { return }
-                PlaybackDetailPerformanceMonitor.shared.end(performanceContext)
+                lifecycleActions.handleDisappear()
+                if let performanceContext {
+                    PlaybackDetailPerformanceMonitor.shared.end(performanceContext)
+                }
             }
     }
 }
