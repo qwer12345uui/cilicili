@@ -17,6 +17,11 @@ extension LiveRoomContentView {
             playerViewModel?.refreshSurfaceLayout()
             return
         }
+        PlaybackDetailPerformanceMonitor.shared.mark(
+            .fullscreenTransitionStarted,
+            context: performanceContext,
+            detail: "to=landscape"
+        )
         withAnimation(.timingCurve(0.2, 0.92, 0.18, 1, duration: 0.42)) {
             fullscreenMode = targetMode
         }
@@ -27,6 +32,11 @@ extension LiveRoomContentView {
 
     func exitInlineFullscreenPlayback(playerViewModel: PlayerStateViewModel? = nil) {
         guard fullscreenMode != nil else { return }
+        PlaybackDetailPerformanceMonitor.shared.mark(
+            .fullscreenTransitionStarted,
+            context: performanceContext,
+            detail: "to=portrait"
+        )
         pendingFullscreenExitTask?.cancel()
         isCompletingFullscreenExit = true
 

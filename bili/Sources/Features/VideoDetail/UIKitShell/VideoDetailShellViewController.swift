@@ -262,6 +262,12 @@ final class VideoDetailShellViewController: UIViewController {
     ) {
         super.viewWillTransition(to: size, with: coordinator)
         let toLandscape = size.width > size.height
+        let performanceContext = PlaybackDetailPerformanceContext.video(viewModel.detail)
+        PlaybackDetailPerformanceMonitor.shared.mark(
+            .fullscreenTransitionStarted,
+            context: performanceContext,
+            detail: "to=\(toLandscape ? "landscape" : "portrait")"
+        )
         // 横屏转场只让播放器 live surface 跟随系统旋转，内容区不参与重排。
         // 转回竖屏时再恢复内容区，避免下方 SwiftUI 列表和播放器一起动画布局。
         startRotationFrameProbe(
@@ -294,6 +300,11 @@ final class VideoDetailShellViewController: UIViewController {
             self.view.layoutIfNeeded()
             self.setBareSurfaceTransitionActive(false)
             self.surfaceHost?.refreshLayoutImmediately()
+            PlaybackDetailPerformanceMonitor.shared.mark(
+                .fullscreenLayoutUpdated,
+                context: PlaybackDetailPerformanceContext.video(self.viewModel.detail),
+                detail: "landscape=\(toLandscape)"
+            )
             self.rotationFrameProbe.finish(reason: "系统旋转完成 landscape=\(toLandscape)")
         })
     }

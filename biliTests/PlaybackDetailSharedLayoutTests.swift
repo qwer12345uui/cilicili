@@ -33,6 +33,18 @@ final class PlaybackDetailSharedLayoutTests: XCTestCase {
         XCTAssertEqual(PlaybackDetailContentMetrics.contentWidth(for: 12), 0)
     }
 
+    func testPGCPerformanceContextKeepsSeasonIdentityAcrossEpisodeSwitches() {
+        let firstEpisode = makeVideo(bvid: "BV-first", seasonID: 46089, episodeID: 1)
+        let secondEpisode = makeVideo(bvid: "BV-second", seasonID: 46089, episodeID: 2)
+        let firstContext = PlaybackDetailPerformanceContext.video(firstEpisode)
+        let secondContext = PlaybackDetailPerformanceContext.video(secondEpisode)
+
+        XCTAssertEqual(firstContext.kind, .pgc)
+        XCTAssertEqual(firstContext.pageID, "season-46089")
+        XCTAssertEqual(firstContext.key, secondContext.key)
+        XCTAssertNotEqual(firstContext.mediaID, secondContext.mediaID)
+    }
+
     func testFullscreenGeometryFallsBackToSafeAreaExpansion() {
         let geometry = PlaybackDetailFullscreenGeometry.resolve(
             containerSize: CGSize(width: 375, height: 734),
@@ -104,6 +116,36 @@ final class PlaybackDetailSharedLayoutTests: XCTestCase {
     }
 
     @MainActor
+    func testPerformanceMonitorDeduplicatesMilestonesButKeepsRotationEvents() {
+        let monitor = PlaybackDetailPerformanceMonitor.shared
+        let context = PlaybackDetailPerformanceContext.live(roomID: 6, title: "直播测试")
+        monitor.resetForTesting()
+        defer { monitor.resetForTesting() }
+
+        monitor.begin(context)
+        monitor.mark(.loadedContentAppeared, context: context)
+        monitor.mark(.loadedContentAppeared, context: context)
+        monitor.mark(.fullscreenTransitionStarted, context: context, detail: "to=landscape")
+        monitor.mark(.fullscreenTransitionStarted, context: context, detail: "to=portrait")
+        let updatedContext = PlaybackDetailPerformanceContext.live(roomID: 6, title: "已加载直播标题")
+        monitor.mark(.playerAttached, context: updatedContext)
+
+        let snapshot = monitor.snapshot(for: context)
+        XCTAssertEqual(
+            snapshot?.events.filter { $0.milestone == .loadedContentAppeared }.count,
+            1
+        )
+        XCTAssertEqual(
+            snapshot?.events.filter { $0.milestone == .fullscreenTransitionStarted }.count,
+            2
+        )
+
+        monitor.end(context)
+        XCTAssertEqual(monitor.recentSnapshots().first?.events.last?.milestone, .pageDisappeared)
+        XCTAssertEqual(monitor.recentSnapshots().first?.context.title, "已加载直播标题")
+    }
+
+    @MainActor
     private func waitUntil(
         timeout: Duration = .seconds(2),
         condition: @escaping @MainActor () -> Bool
@@ -117,6 +159,25 @@ final class PlaybackDetailSharedLayoutTests: XCTestCase {
             }
             try await Task.sleep(for: .milliseconds(10))
         }
+    }
+
+    private func makeVideo(bvid: String, seasonID: Int, episodeID: Int) -> VideoItem {
+        VideoItem(
+            bvid: bvid,
+            aid: nil,
+            title: "测试番剧",
+            pic: nil,
+            desc: nil,
+            duration: nil,
+            pubdate: nil,
+            owner: nil,
+            stat: nil,
+            cid: nil,
+            pages: nil,
+            dimension: nil,
+            pgcSeasonID: seasonID,
+            pgcEpisodeID: episodeID
+        )
     }
 }
 

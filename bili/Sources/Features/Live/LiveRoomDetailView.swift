@@ -11,9 +11,13 @@ struct LiveRoomDetailView: View {
             hidesSystemChrome: $hidesPlayerSystemChrome,
             background: VideoDetailTheme.background,
             navigationBarVisibility: hidesPlayerSystemChrome ? .hidden : .visible,
-            statusBarStyle: hidesPlayerSystemChrome ? .lightContent : .default
+            statusBarStyle: hidesPlayerSystemChrome ? .lightContent : .default,
+            performanceContext: .live(seedRoom)
         ) {
-            PlaybackDetailLoadedStatePage(holder.viewModel) { viewModel in
+            PlaybackDetailLoadedStatePage(
+                holder.viewModel,
+                performanceContext: .live(seedRoom)
+            ) { viewModel in
                 LiveRoomContentView(viewModel: viewModel)
             } initialContent: {
                 LiveRoomInitialPlaceholder(room: seedRoom)

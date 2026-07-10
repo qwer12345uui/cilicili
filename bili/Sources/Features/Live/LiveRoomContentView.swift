@@ -32,6 +32,13 @@ struct LiveRoomContentView: View {
             .background(layout.isLandscape ? Color.black : VideoDetailTheme.background)
             .ignoresSafeArea(.container, edges: layout.ignoresContainerSafeArea ? .all : [])
             .preference(key: PlaybackDetailChromeHiddenPreferenceKey.self, value: layout.shouldHideSystemChrome)
+            .onChange(of: "\(layout.isLandscape)|\(layout.isInlineFullscreen)") { _, _ in
+                PlaybackDetailPerformanceMonitor.shared.mark(
+                    .fullscreenLayoutUpdated,
+                    context: performanceContext,
+                    detail: "landscape=\(layout.isLandscape) inline=\(layout.isInlineFullscreen)"
+                )
+            }
         }
         .background(VideoDetailTheme.background)
         .overlay {
@@ -88,6 +95,10 @@ struct LiveRoomContentView: View {
             return nil
         }
         return message
+    }
+
+    var performanceContext: PlaybackDetailPerformanceContext {
+        .live(roomID: viewModel.roomID, title: viewModel.title)
     }
 
     private func standardPlaybackPage(

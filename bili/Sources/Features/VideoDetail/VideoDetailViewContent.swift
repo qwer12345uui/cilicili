@@ -14,7 +14,10 @@ struct VideoDetailViewContent: View {
     let lifecycleActions: VideoDetailViewContentLifecycleActions
 
     var body: some View {
-        PlaybackDetailLoadedStatePage(holder.viewModel) { viewModel in
+        PlaybackDetailLoadedStatePage(
+            holder.viewModel,
+            performanceContext: .video(seedVideo)
+        ) { viewModel in
             VideoDetailViewContentResolver(
                 seedVideo: seedVideo,
                 runtimeSettings: runtimeSettings,

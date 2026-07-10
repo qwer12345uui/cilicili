@@ -86,5 +86,11 @@ struct LiveRoomPlayerHero: View {
         .id(ObjectIdentifier(playerViewModel))
         .frame(width: playerWidth)
         .frame(height: playerHeight)
+        .background {
+            PlaybackDetailPlayerReadinessProbe(
+                playerViewModel: playerViewModel,
+                context: .live(roomID: viewModel.roomID, title: viewModel.title)
+            )
+        }
     }
 }

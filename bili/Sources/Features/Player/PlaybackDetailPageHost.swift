@@ -8,6 +8,7 @@ struct PlaybackDetailPageHost<Content: View>: View {
     let navigationBarVisibility: Visibility?
     let hidesBackButton: Bool
     let statusBarStyle: UIStatusBarStyle
+    let performanceContext: PlaybackDetailPerformanceContext?
     let content: () -> Content
 
     init(
@@ -17,6 +18,7 @@ struct PlaybackDetailPageHost<Content: View>: View {
         navigationBarVisibility: Visibility? = nil,
         hidesBackButton: Bool = false,
         statusBarStyle: UIStatusBarStyle = .lightContent,
+        performanceContext: PlaybackDetailPerformanceContext? = nil,
         @ViewBuilder content: @escaping () -> Content
     ) {
         _hidesSystemChrome = hidesSystemChrome
@@ -25,6 +27,7 @@ struct PlaybackDetailPageHost<Content: View>: View {
         self.navigationBarVisibility = navigationBarVisibility
         self.hidesBackButton = hidesBackButton
         self.statusBarStyle = statusBarStyle
+        self.performanceContext = performanceContext
         self.content = content
     }
 
@@ -43,5 +46,14 @@ struct PlaybackDetailPageHost<Content: View>: View {
                 isHidden: hidesSystemChrome,
                 statusBarStyle: statusBarStyle
             )
+            .onAppear {
+                guard let performanceContext else { return }
+                PlaybackDetailPerformanceMonitor.shared.begin(performanceContext)
+                PlaybackDetailPerformanceMonitor.shared.mark(.pageAppeared, context: performanceContext)
+            }
+            .onDisappear {
+                guard let performanceContext else { return }
+                PlaybackDetailPerformanceMonitor.shared.end(performanceContext)
+            }
     }
 }

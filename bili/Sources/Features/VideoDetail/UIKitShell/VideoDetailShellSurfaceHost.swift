@@ -473,6 +473,12 @@ private struct SurfaceOnlyPlayerOverlayRoot: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Color.clear)
+        .background {
+            PlaybackDetailPlayerReadinessProbe(
+                playerViewModel: viewModel,
+                context: .video(overlaySnapshot.historyVideo)
+            )
+        }
         .environmentObject(dependencies)
         .environmentObject(libraryStore)
         .environment(\.appThemeTintColor, libraryStore.appTintColor)

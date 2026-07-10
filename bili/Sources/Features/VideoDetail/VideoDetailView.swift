@@ -31,7 +31,8 @@ struct VideoDetailView: View {
             background: VideoDetailTheme.background,
             hidesRootTabBar: hidesRootTabBar,
             navigationBarVisibility: .hidden,
-            hidesBackButton: true
+            hidesBackButton: true,
+            performanceContext: .video(seedVideo)
         ) {
             VideoDetailViewContent(
                 seedVideo: seedVideo,
