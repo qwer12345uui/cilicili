@@ -28,9 +28,101 @@ struct VideoDetailShellContentView: View {
         }
     }
 
-    @ObservedObject var viewModel: VideoDetailViewModel
+    let viewModel: VideoDetailViewModel
     @ObservedObject var runtimeSettings: VideoDetailRuntimeSettingsStore
     @ObservedObject var state: State
+    let layoutWidth: CGFloat
+    let isPerformanceExperimentEnabled: Bool
+    @Binding var selectedContentTab: VideoDetailContentTab
+    let onShowNetworkDiagnostics: () -> Void
+    let onShowFavoriteFolders: () -> Void
+    let onReply: (Comment) -> Void
+    let onSelectedTabChange: (VideoDetailContentTab) -> Void
+    let onScrollOffsetChange: (VideoDetailContentTab, CGFloat) -> Void
+
+    var body: some View {
+        if isPerformanceExperimentEnabled {
+            contentBody
+        } else {
+            VideoDetailShellObservedContentBody(
+                viewModel: viewModel,
+                runtimeSettings: runtimeSettings,
+                state: state,
+                layoutWidth: layoutWidth,
+                selectedContentTab: $selectedContentTab,
+                onShowNetworkDiagnostics: onShowNetworkDiagnostics,
+                onShowFavoriteFolders: onShowFavoriteFolders,
+                onReply: onReply,
+                onSelectedTabChange: onSelectedTabChange,
+                onScrollOffsetChange: onScrollOffsetChange
+            )
+        }
+    }
+
+    func withPerformanceExperimentEnabled(_ isEnabled: Bool) -> VideoDetailShellContentView {
+        VideoDetailShellContentView(
+            viewModel: viewModel,
+            runtimeSettings: runtimeSettings,
+            state: state,
+            layoutWidth: layoutWidth,
+            isPerformanceExperimentEnabled: isEnabled,
+            selectedContentTab: $selectedContentTab,
+            onShowNetworkDiagnostics: onShowNetworkDiagnostics,
+            onShowFavoriteFolders: onShowFavoriteFolders,
+            onReply: onReply,
+            onSelectedTabChange: onSelectedTabChange,
+            onScrollOffsetChange: onScrollOffsetChange
+        )
+    }
+
+    private var contentBody: some View {
+        VideoDetailShellContentBody(
+            viewModel: viewModel,
+            runtimeSettings: runtimeSettings,
+            state: state,
+            layoutWidth: layoutWidth,
+            selectedContentTab: $selectedContentTab,
+            onShowNetworkDiagnostics: onShowNetworkDiagnostics,
+            onShowFavoriteFolders: onShowFavoriteFolders,
+            onReply: onReply,
+            onSelectedTabChange: onSelectedTabChange,
+            onScrollOffsetChange: onScrollOffsetChange
+        )
+    }
+}
+
+private struct VideoDetailShellObservedContentBody: View {
+    @ObservedObject var viewModel: VideoDetailViewModel
+    @ObservedObject var runtimeSettings: VideoDetailRuntimeSettingsStore
+    @ObservedObject var state: VideoDetailShellContentView.State
+    let layoutWidth: CGFloat
+    @Binding var selectedContentTab: VideoDetailContentTab
+    let onShowNetworkDiagnostics: () -> Void
+    let onShowFavoriteFolders: () -> Void
+    let onReply: (Comment) -> Void
+    let onSelectedTabChange: (VideoDetailContentTab) -> Void
+    let onScrollOffsetChange: (VideoDetailContentTab, CGFloat) -> Void
+
+    var body: some View {
+        VideoDetailShellContentBody(
+            viewModel: viewModel,
+            runtimeSettings: runtimeSettings,
+            state: state,
+            layoutWidth: layoutWidth,
+            selectedContentTab: $selectedContentTab,
+            onShowNetworkDiagnostics: onShowNetworkDiagnostics,
+            onShowFavoriteFolders: onShowFavoriteFolders,
+            onReply: onReply,
+            onSelectedTabChange: onSelectedTabChange,
+            onScrollOffsetChange: onScrollOffsetChange
+        )
+    }
+}
+
+private struct VideoDetailShellContentBody: View {
+    let viewModel: VideoDetailViewModel
+    @ObservedObject var runtimeSettings: VideoDetailRuntimeSettingsStore
+    @ObservedObject var state: VideoDetailShellContentView.State
     let layoutWidth: CGFloat
     @Binding var selectedContentTab: VideoDetailContentTab
     let onShowNetworkDiagnostics: () -> Void

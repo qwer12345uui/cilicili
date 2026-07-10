@@ -105,12 +105,11 @@ struct DynamicImageBadgeRow: View {
 
 struct DynamicImageMediaBadge: View {
     let title: String
-    @AppStorage(VideoCoverBadgeShadow.storageKey) private var shadowOpacity = VideoCoverBadgeShadow.defaultOpacity
 
     var body: some View {
         Text(title)
             .font(.caption2.weight(.semibold))
-            .videoCoverBadgeForeground(opacity: shadowOpacity)
+            .videoCoverBadgeForeground(opacity: 0)
             .padding(.horizontal, 8)
             .padding(.vertical, 5)
             .videoCoverBadgeBackground(style: .clear, in: Capsule())
@@ -119,13 +118,11 @@ struct DynamicImageMediaBadge: View {
 }
 
 private struct DynamicImageLongBadgeContent: View {
-    @AppStorage(VideoCoverBadgeShadow.storageKey) private var shadowOpacity = VideoCoverBadgeShadow.defaultOpacity
-
     var body: some View {
         Label("长图", systemImage: "scroll")
             .font(.caption2.weight(.semibold))
             .labelStyle(.titleAndIcon)
-            .videoCoverBadgeForeground(opacity: shadowOpacity)
+            .videoCoverBadgeForeground(opacity: 0)
             .padding(.horizontal, 8)
             .padding(.vertical, 5)
             .videoCoverBadgeBackground(style: .clear, in: Capsule())

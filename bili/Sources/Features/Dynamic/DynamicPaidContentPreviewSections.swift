@@ -118,7 +118,6 @@ struct DynamicPaidContentMetadata: View {
 }
 
 struct DynamicPaidContentBadge: View {
-    @AppStorage(VideoCoverBadgeShadow.storageKey) private var shadowOpacity = VideoCoverBadgeShadow.defaultOpacity
     let content: DynamicPaidContent
 
     var body: some View {
@@ -126,7 +125,7 @@ struct DynamicPaidContentBadge: View {
             Label(content.badgeText, systemImage: content.isChargeExclusive ? "bolt.fill" : "sparkles")
                 .font(.caption2.weight(.semibold))
                 .labelStyle(.titleAndIcon)
-                .videoCoverBadgeForeground(opacity: shadowOpacity)
+                .videoCoverBadgeForeground(opacity: 0)
                 .lineLimit(1)
                 .padding(.horizontal, 8)
                 .padding(.vertical, 5)

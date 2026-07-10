@@ -6,19 +6,27 @@ enum PlayerPerformanceOverlayDiagnosticsCopyTextFormatter {
         metricsID: String,
         session: PlayerPerformanceSession?,
         diagnosticsStore: VideoDetailNetworkDiagnosticsRenderStore,
-        playerViewModel: PlayerStateViewModel?
+        playerViewModel: PlayerStateViewModel?,
+        experimentSnapshot: VideoDetailPerformanceExperimentSnapshot = VideoDetailPerformanceExperimentSnapshot()
     ) -> String {
         var sections = [
             liveDiagnosticsText(
                 metricsID: metricsID,
                 diagnosticsStore: diagnosticsStore,
                 playerViewModel: playerViewModel
-            ),
+            )
+        ]
+
+        if experimentSnapshot.isVisible {
+            sections.append(experimentText(experimentSnapshot))
+        }
+
+        sections.append(contentsOf: [
             PlayerPerformanceCopyTextFormatter.performanceCopyText(
                 metricsID: metricsID,
                 session: session
             )
-        ]
+        ])
 
         if let session, !session.timeline.isEmpty {
             sections.append(timelineText(session.timeline))
@@ -27,6 +35,31 @@ enum PlayerPerformanceOverlayDiagnosticsCopyTextFormatter {
         return sections
             .filter { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
             .joined(separator: "\n\n")
+    }
+
+    private static func experimentText(_ snapshot: VideoDetailPerformanceExperimentSnapshot) -> String {
+        [
+            "视频详情页省刷新实验",
+            "enabled: \(snapshot.isEnabled ? "true" : "false")",
+            "contentShell: narrowObservation",
+            "rotationStrategy: videoSurfaceFirst",
+            "bareSurfaceTransition: \(snapshot.isBareSurfaceTransitionActive ? "true" : "false")",
+            "rotationTransitionCount: \(snapshot.rotationTransitionCount)",
+            "lastBareSurfaceDuration: \(formattedMilliseconds(snapshot.lastBareSurfaceDurationMilliseconds))",
+            "totalBareSurfaceDuration: \(formattedMilliseconds(snapshot.totalBareSurfaceDurationMilliseconds))",
+            "overlayPublishCount: \(snapshot.overlayPublishCount)",
+            "overlayDeferredCount: \(snapshot.overlayDeferredCount)",
+            "overlayFlushCount: \(snapshot.overlayFlushCount)",
+            "lastEvent: \(snapshot.lastEvent)"
+        ].joined(separator: "\n")
+    }
+
+    private static func formattedMilliseconds(_ milliseconds: Int) -> String {
+        guard milliseconds > 0 else { return "-" }
+        if milliseconds >= 1_000 {
+            return String(format: "%.2fs", Double(milliseconds) / 1_000)
+        }
+        return "\(milliseconds)ms"
     }
 
     private static func liveDiagnosticsText(

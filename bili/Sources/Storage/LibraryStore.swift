@@ -129,9 +129,11 @@ final class LibraryStore: ObservableObject {
     @Published private(set) var sponsorBlockEnabled: Bool
     @Published private(set) var pictureInPictureEnabled: Bool
     @Published private(set) var playerPerformanceOverlayEnabled: Bool
+    @Published private(set) var videoRotationFrameReportOverlayEnabled: Bool
     @Published private(set) var playerControlEdgeScrimEnabled: Bool
     @Published private(set) var showsVideoDetailNetworkDiagnosticsButton: Bool
     @Published private(set) var showsVideoDetailPinnedProgressBar: Bool
+    @Published private(set) var videoDetailPerformanceExperimentEnabled: Bool
     @Published private(set) var incognitoModeEnabled: Bool
     @Published private(set) var guestModeEnabled: Bool
     @Published private(set) var minimizesTabBarOnScroll: Bool
@@ -184,9 +186,11 @@ final class LibraryStore: ObservableObject {
     private static let sponsorBlockEnabledKey = "cc.bili.playback.sponsorBlockEnabled.v1"
     private static let pictureInPictureEnabledKey = "cc.bili.playback.pictureInPictureEnabled.v1"
     private static let playerPerformanceOverlayEnabledKey = "cc.bili.playback.performanceOverlayEnabled.v1"
+    private static let videoRotationFrameReportOverlayEnabledKey = "cc.bili.playback.rotationFrameReportOverlayEnabled.v1"
     nonisolated static let playerControlEdgeScrimEnabledKey = "cc.bili.playback.controlEdgeScrimEnabled.v1"
     private static let showsVideoDetailNetworkDiagnosticsButtonKey = "cc.bili.videoDetail.showsNetworkDiagnosticsButton.v1"
     private static let showsVideoDetailPinnedProgressBarKey = "cc.bili.videoDetail.showsPinnedProgressBar.v1"
+    private static let videoDetailPerformanceExperimentEnabledKey = "cc.bili.videoDetail.performanceExperimentEnabled.v1"
     private static let incognitoModeEnabledKey = "cc.bili.privacy.incognitoModeEnabled.v1"
     private static let guestModeEnabledKey = "cc.bili.privacy.guestModeEnabled.v1"
     private static let minimizesTabBarOnScrollKey = "cc.bili.display.minimizesTabBarOnScroll.v1"
@@ -393,9 +397,11 @@ final class LibraryStore: ObservableObject {
         self.sponsorBlockEnabled = userDefaults.object(forKey: Self.sponsorBlockEnabledKey) as? Bool ?? false
         self.pictureInPictureEnabled = userDefaults.object(forKey: Self.pictureInPictureEnabledKey) as? Bool ?? false
         self.playerPerformanceOverlayEnabled = userDefaults.object(forKey: Self.playerPerformanceOverlayEnabledKey) as? Bool ?? false
+        self.videoRotationFrameReportOverlayEnabled = userDefaults.object(forKey: Self.videoRotationFrameReportOverlayEnabledKey) as? Bool ?? false
         self.playerControlEdgeScrimEnabled = userDefaults.object(forKey: Self.playerControlEdgeScrimEnabledKey) as? Bool ?? true
         self.showsVideoDetailNetworkDiagnosticsButton = userDefaults.object(forKey: Self.showsVideoDetailNetworkDiagnosticsButtonKey) as? Bool ?? false
         self.showsVideoDetailPinnedProgressBar = userDefaults.object(forKey: Self.showsVideoDetailPinnedProgressBarKey) as? Bool ?? false
+        self.videoDetailPerformanceExperimentEnabled = userDefaults.object(forKey: Self.videoDetailPerformanceExperimentEnabledKey) as? Bool ?? false
         self.incognitoModeEnabled = userDefaults.object(forKey: Self.incognitoModeEnabledKey) as? Bool ?? false
         self.guestModeEnabled = userDefaults.object(forKey: Self.guestModeEnabledKey) as? Bool ?? false
         self.minimizesTabBarOnScroll = userDefaults.object(forKey: Self.minimizesTabBarOnScrollKey) as? Bool ?? true
@@ -902,6 +908,11 @@ final class LibraryStore: ObservableObject {
         userDefaults.set(isEnabled, forKey: Self.playerPerformanceOverlayEnabledKey)
     }
 
+    func setVideoRotationFrameReportOverlayEnabled(_ isEnabled: Bool) {
+        videoRotationFrameReportOverlayEnabled = isEnabled
+        userDefaults.set(isEnabled, forKey: Self.videoRotationFrameReportOverlayEnabledKey)
+    }
+
     func setPlayerControlEdgeScrimEnabled(_ isEnabled: Bool) {
         playerControlEdgeScrimEnabled = isEnabled
         userDefaults.set(isEnabled, forKey: Self.playerControlEdgeScrimEnabledKey)
@@ -915,6 +926,11 @@ final class LibraryStore: ObservableObject {
     func setShowsVideoDetailPinnedProgressBar(_ isEnabled: Bool) {
         showsVideoDetailPinnedProgressBar = isEnabled
         userDefaults.set(isEnabled, forKey: Self.showsVideoDetailPinnedProgressBarKey)
+    }
+
+    func setVideoDetailPerformanceExperimentEnabled(_ isEnabled: Bool) {
+        videoDetailPerformanceExperimentEnabled = isEnabled
+        userDefaults.set(isEnabled, forKey: Self.videoDetailPerformanceExperimentEnabledKey)
     }
 
     func setIncognitoModeEnabled(_ isEnabled: Bool) {

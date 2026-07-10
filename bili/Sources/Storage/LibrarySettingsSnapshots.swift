@@ -126,12 +126,14 @@ final class PlayerRuntimeSettingsStore: ObservableObject {
 
 struct VideoDetailRuntimeSettingsSnapshot: Equatable {
     var playerPerformanceOverlayEnabled = false
+    var videoRotationFrameReportOverlayEnabled = false
     var showsNetworkDiagnosticsButton = false
     var showsPinnedProgressBar = false
     var preferredVideoQuality: Int? = LibraryStore.defaultPreferredVideoQuality
     var effectivePlaybackCDNPreference: PlaybackCDNPreference = .automatic
     var playbackAutoOptimizationEnabled = true
     var minimizesTabBarOnScroll = true
+    var videoDetailPerformanceExperimentEnabled = false
 }
 
 @MainActor
@@ -141,12 +143,14 @@ final class VideoDetailRuntimeSettingsStore: ObservableObject {
     private var cancellable: AnyCancellable?
 
     var playerPerformanceOverlayEnabled: Bool { snapshot.playerPerformanceOverlayEnabled }
+    var videoRotationFrameReportOverlayEnabled: Bool { snapshot.videoRotationFrameReportOverlayEnabled }
     var showsNetworkDiagnosticsButton: Bool { snapshot.showsNetworkDiagnosticsButton }
     var showsPinnedProgressBar: Bool { snapshot.showsPinnedProgressBar }
     var preferredVideoQuality: Int? { snapshot.preferredVideoQuality }
     var effectivePlaybackCDNPreference: PlaybackCDNPreference { snapshot.effectivePlaybackCDNPreference }
     var playbackAutoOptimizationEnabled: Bool { snapshot.playbackAutoOptimizationEnabled }
     var minimizesTabBarOnScroll: Bool { snapshot.minimizesTabBarOnScroll }
+    var videoDetailPerformanceExperimentEnabled: Bool { snapshot.videoDetailPerformanceExperimentEnabled }
 
     func bind(_ libraryStore: LibraryStore) {
         guard self.libraryStore !== libraryStore else {
@@ -166,12 +170,14 @@ final class VideoDetailRuntimeSettingsStore: ObservableObject {
         guard let libraryStore else { return }
         let next = VideoDetailRuntimeSettingsSnapshot(
             playerPerformanceOverlayEnabled: libraryStore.playerPerformanceOverlayEnabled,
+            videoRotationFrameReportOverlayEnabled: libraryStore.videoRotationFrameReportOverlayEnabled,
             showsNetworkDiagnosticsButton: libraryStore.showsVideoDetailNetworkDiagnosticsButton,
             showsPinnedProgressBar: libraryStore.showsVideoDetailPinnedProgressBar,
             preferredVideoQuality: libraryStore.effectivePreferredVideoQuality,
             effectivePlaybackCDNPreference: libraryStore.effectivePlaybackCDNPreference,
             playbackAutoOptimizationEnabled: libraryStore.isPlaybackAutoOptimizationEnabled,
-            minimizesTabBarOnScroll: libraryStore.minimizesTabBarOnScroll
+            minimizesTabBarOnScroll: libraryStore.minimizesTabBarOnScroll,
+            videoDetailPerformanceExperimentEnabled: libraryStore.videoDetailPerformanceExperimentEnabled
         )
         guard next != snapshot else { return }
         snapshot = next

@@ -2,7 +2,7 @@ import SwiftUI
 
 enum VideoCoverBadgeShadow {
     static let storageKey = "cc.bili.display.videoCoverBadgeShadowOpacity.v1"
-    static let defaultOpacity = 0.60
+    static let defaultOpacity = 0.0
     static let opacityRange: ClosedRange<Double> = 0...1
 
     static func normalized(_ opacity: Double) -> Double {
@@ -26,7 +26,6 @@ enum VideoCoverBadgeContrastBacking {
 }
 
 struct VideoCoverGlassBadge<Content: View>: View {
-    @AppStorage(VideoCoverBadgeShadow.storageKey) private var shadowOpacity = VideoCoverBadgeShadow.defaultOpacity
     let content: Content
 
     init(@ViewBuilder content: () -> Content) {
@@ -36,7 +35,7 @@ struct VideoCoverGlassBadge<Content: View>: View {
     var body: some View {
         content
             .font(.caption2.weight(.semibold))
-            .videoCoverBadgeForeground(opacity: shadowOpacity)
+            .videoCoverBadgeForeground(opacity: 0)
             .lineLimit(1)
             .truncationMode(.tail)
             .minimumScaleFactor(0.86)
@@ -51,7 +50,6 @@ struct VideoCoverGlassBadge<Content: View>: View {
 }
 
 struct VideoCoverDurationBadge: View {
-    @AppStorage(VideoCoverBadgeShadow.storageKey) private var shadowOpacity = VideoCoverBadgeShadow.defaultOpacity
     let duration: String
     private let maxWidth: CGFloat
 
@@ -64,7 +62,7 @@ struct VideoCoverDurationBadge: View {
         Text(duration)
             .font(.system(size: 11, weight: .semibold))
             .monospacedDigit()
-            .videoCoverBadgeForeground(opacity: shadowOpacity)
+            .videoCoverBadgeForeground(opacity: 0)
             .lineLimit(1)
             .truncationMode(.tail)
             .minimumScaleFactor(0.86)
@@ -80,7 +78,6 @@ struct VideoCoverDurationBadge: View {
 }
 
 struct VideoCoverViewCountBadge: View {
-    @AppStorage(VideoCoverBadgeShadow.storageKey) private var shadowOpacity = VideoCoverBadgeShadow.defaultOpacity
     let viewText: String
 
     init(_ viewText: String) {
@@ -91,7 +88,7 @@ struct VideoCoverViewCountBadge: View {
         Label(viewText, systemImage: "play.fill")
             .font(.caption2.weight(.semibold))
             .labelStyle(.titleAndIcon)
-            .videoCoverBadgeForeground(opacity: shadowOpacity)
+            .videoCoverBadgeForeground(opacity: 0)
             .lineLimit(1)
             .truncationMode(.tail)
             .minimumScaleFactor(0.86)
@@ -107,7 +104,6 @@ struct VideoCoverViewCountBadge: View {
 }
 
 struct VideoCoverPlayBadge: View {
-    @AppStorage(VideoCoverBadgeShadow.storageKey) private var shadowOpacity = VideoCoverBadgeShadow.defaultOpacity
     var size: CGFloat = 40
     var iconSize: CGFloat = 15
 
@@ -115,7 +111,7 @@ struct VideoCoverPlayBadge: View {
         GlassEffectContainer(spacing: 8) {
             Image(systemName: "play.fill")
                 .font(.system(size: iconSize, weight: .bold))
-                .videoCoverBadgeForeground(opacity: shadowOpacity)
+                .videoCoverBadgeForeground(opacity: 0)
                 .offset(x: 1)
                 .frame(width: size, height: size)
                 .videoCoverBadgeBackground(style: .clear, in: Circle())
@@ -126,23 +122,13 @@ struct VideoCoverPlayBadge: View {
 }
 
 struct VideoCoverBottomScrim: View {
-    @AppStorage(VideoCoverBottomScrimSettings.storageKey) private var isEnabled = VideoCoverBottomScrimSettings.defaultIsEnabled
     var opacity: Double = 0.30
     var heightFraction: CGFloat = 1.0 / 3.0
 
     var body: some View {
-        if isEnabled {
-            LinearGradient(
-                stops: [
-                    .init(color: .clear, location: max(0, min(1 - heightFraction, 1))),
-                    .init(color: .black.opacity(opacity), location: 1)
-                ],
-                startPoint: .top,
-                endPoint: .bottom
-            )
+        EmptyView()
             .allowsHitTesting(false)
             .accessibilityHidden(true)
-        }
     }
 }
 
@@ -183,12 +169,7 @@ extension View {
     }
 
     func videoCoverBadgeForegroundShadow(opacity: Double) -> some View {
-        shadow(
-            color: .black.opacity(VideoCoverBadgeShadow.normalized(opacity)),
-            radius: 2.5,
-            x: 0,
-            y: 1
-        )
+        self
     }
 
     func videoCoverReadableBacking<S: InsettableShape>(
@@ -203,14 +184,13 @@ private struct VideoCoverBadgeForegroundModifier: ViewModifier {
     let opacity: Double
 
     func body(content: Content) -> some View {
-        content.biliLiquidGlassForeground(shadowOpacity: VideoCoverBadgeShadow.normalized(opacity))
+        content.biliLiquidGlassForeground(shadowOpacity: 0)
     }
 }
 
 private extension View {
     func videoCoverControlShadow() -> some View {
-        shadow(color: .black.opacity(0.28), radius: 8, x: 0, y: 4)
-            .shadow(color: .black.opacity(0.16), radius: 2, x: 0, y: 1)
+        self
     }
 }
 

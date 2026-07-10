@@ -43,25 +43,6 @@ struct MineDisplaySettingsSection: View {
 
             VStack(alignment: .leading, spacing: 10) {
                 HStack {
-                    Label("封面角标阴影", systemImage: "textformat")
-                    Spacer(minLength: 8)
-                    Text(videoCoverBadgeShadowOpacityTitle)
-                        .font(.caption.monospacedDigit())
-                        .foregroundStyle(.secondary)
-                }
-
-                Slider(
-                    value: Binding(
-                        get: { libraryStore.videoCoverBadgeShadowOpacity },
-                        set: { libraryStore.setVideoCoverBadgeShadowOpacity($0) }
-                    ),
-                    in: VideoCoverBadgeShadow.opacityRange,
-                    step: 0.05
-                )
-            }
-
-            VStack(alignment: .leading, spacing: 10) {
-                HStack {
                     Label("封面角标暗色底", systemImage: "circle.lefthalf.filled")
                     Spacer(minLength: 8)
                     Text(videoCoverBadgeContrastBackingOpacityTitle)
@@ -81,13 +62,6 @@ struct MineDisplaySettingsSection: View {
                     in: VideoCoverBadgeContrastBacking.opacityRange,
                     step: 0.05
                 )
-            }
-
-            Toggle(isOn: Binding(
-                get: { libraryStore.videoCoverBottomScrimEnabled },
-                set: { libraryStore.setVideoCoverBottomScrimEnabled($0) }
-            )) {
-                Label("视频封面底部渐变遮罩", systemImage: "rectangle")
             }
 
             Toggle(isOn: Binding(
@@ -123,10 +97,6 @@ struct MineDisplaySettingsSection: View {
                 }
             }
         }
-    }
-
-    private var videoCoverBadgeShadowOpacityTitle: String {
-        "\(Int((libraryStore.videoCoverBadgeShadowOpacity * 100).rounded()))%"
     }
 
     private var videoCoverBadgeContrastBackingOpacityTitle: String {

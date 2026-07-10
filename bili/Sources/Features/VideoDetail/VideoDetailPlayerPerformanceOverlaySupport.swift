@@ -219,13 +219,15 @@ enum PlayerPerformanceOverlayFormatting {
         metricsID: String,
         session: PlayerPerformanceSession?,
         diagnosticsStore: VideoDetailNetworkDiagnosticsRenderStore,
-        playerViewModel: PlayerStateViewModel?
+        playerViewModel: PlayerStateViewModel?,
+        experimentSnapshot: VideoDetailPerformanceExperimentSnapshot = VideoDetailPerformanceExperimentSnapshot()
     ) -> String {
         PlayerPerformanceOverlayDiagnosticsCopyTextFormatter.text(
             metricsID: metricsID,
             session: session,
             diagnosticsStore: diagnosticsStore,
-            playerViewModel: playerViewModel
+            playerViewModel: playerViewModel,
+            experimentSnapshot: experimentSnapshot
         )
     }
 

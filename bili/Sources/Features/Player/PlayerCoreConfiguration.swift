@@ -191,7 +191,7 @@ nonisolated private struct StreamRankingTuple: Comparable {
 
 enum PlaybackHardwareDecodePolicy {
     nonisolated static let storageKey = "cc.bili.playback.forceHardwareDecode.v1"
-    nonisolated static let defaultValue = false
+    nonisolated static let defaultValue = true
 
     nonisolated static func stored(in userDefaults: UserDefaults = .standard) -> Bool {
         userDefaults.object(forKey: storageKey) as? Bool ?? defaultValue
@@ -218,7 +218,7 @@ nonisolated enum DolbyVisionRenderingPolicy: String, CaseIterable, Identifiable,
     case supplementalHLS
 
     nonisolated static let storageKey = "cc.bili.playback.dolbyVisionRenderingPolicy.v1"
-    nonisolated static let defaultValue: DolbyVisionRenderingPolicy = .compatibleHLG
+    nonisolated static let defaultValue: DolbyVisionRenderingPolicy = .appleNativeP8HLS
     nonisolated static let allCases: [DolbyVisionRenderingPolicy] = [
         .compatibleHLG,
         .appleNativeP8HLS
@@ -286,8 +286,8 @@ nonisolated enum DolbyVisionRenderingPolicy: String, CaseIterable, Identifiable,
         else { return defaultValue }
         let playablePolicy = policy.playablePolicy
         if playablePolicy != policy {
-            userDefaults.set(DolbyVisionRenderingPolicy.compatibleHLG.rawValue, forKey: storageKey)
-            return .compatibleHLG
+            userDefaults.set(defaultValue.rawValue, forKey: storageKey)
+            return defaultValue
         }
         return playablePolicy
     }

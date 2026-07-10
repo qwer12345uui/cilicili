@@ -20,6 +20,13 @@ struct MinePlaybackToolsSection: View {
             }
 
             Toggle(isOn: Binding(
+                get: { libraryStore.videoRotationFrameReportOverlayEnabled },
+                set: { libraryStore.setVideoRotationFrameReportOverlayEnabled($0) }
+            )) {
+                Label("旋转帧报告", systemImage: "rotate.right")
+            }
+
+            Toggle(isOn: Binding(
                 get: { libraryStore.playerControlEdgeScrimEnabled },
                 set: { libraryStore.setPlayerControlEdgeScrimEnabled($0) }
             )) {
@@ -38,6 +45,20 @@ struct MinePlaybackToolsSection: View {
                 set: { libraryStore.setShowsVideoDetailPinnedProgressBar($0) }
             )) {
                 Label("视频窗口底部进度条", systemImage: "line.3.horizontal.decrease")
+            }
+
+            Toggle(isOn: Binding(
+                get: { libraryStore.videoDetailPerformanceExperimentEnabled },
+                set: { libraryStore.setVideoDetailPerformanceExperimentEnabled($0) }
+            )) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Label("视频详情页省刷新实验", systemImage: "rectangle.on.rectangle.angled")
+
+                    Text("减少详情内容和播放器叠层的无关刷新，不会自动显示任何浮窗。")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
             }
 
             NavigationLink {

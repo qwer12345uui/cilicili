@@ -5,6 +5,7 @@ struct PlayerPerformanceOverlayContent: View {
     let metricsID: String
     let session: PlayerPerformanceSession?
     let playerViewModel: PlayerStateViewModel?
+    let experimentSnapshot: VideoDetailPerformanceExperimentSnapshot
     let panelWidth: CGFloat
     let maximumHeight: CGFloat
 
@@ -29,12 +30,14 @@ struct PlayerPerformanceOverlayContent: View {
                         PlayerPerformanceOverlayLoadedContent(
                             diagnosticsStore: diagnosticsStore,
                             session: session,
-                            playerViewModel: playerViewModel
+                            playerViewModel: playerViewModel,
+                            experimentSnapshot: experimentSnapshot
                         )
                     } else {
                         PlayerPerformanceOverlayEmptyContent(
                             diagnosticsStore: diagnosticsStore,
-                            playerViewModel: playerViewModel
+                            playerViewModel: playerViewModel,
+                            experimentSnapshot: experimentSnapshot
                         )
                     }
                 }
@@ -63,7 +66,8 @@ struct PlayerPerformanceOverlayContent: View {
             metricsID: metricsID,
             session: session,
             diagnosticsStore: diagnosticsStore,
-            playerViewModel: playerViewModel
+            playerViewModel: playerViewModel,
+            experimentSnapshot: experimentSnapshot
         )
     }
 }

@@ -23,6 +23,8 @@ final class VideoDetailShellSurfaceHost: UIView {
     }
 
     private let state: State
+    private let overlayState: VideoDetailShellOverlayState
+    private let experimentState: VideoDetailPerformanceExperimentState
     private let surfaceHostView: UIKitPlayerSurfaceHostView
     private let overlayHostingController: UIHostingController<PlayerOverlayHostRoot>
     private var cancellables = Set<AnyCancellable>()
@@ -31,6 +33,7 @@ final class VideoDetailShellSurfaceHost: UIView {
         playerViewModel: PlayerStateViewModel,
         detailViewModel: VideoDetailViewModel,
         dependencies: AppDependencies,
+        isPerformanceExperimentEnabled: Bool,
         onRequestFullscreen: @escaping () -> Void,
         onExitFullscreen: @escaping () -> Void,
         onToggleDanmaku: @escaping () -> Void,
@@ -38,7 +41,16 @@ final class VideoDetailShellSurfaceHost: UIView {
         onNavigateBack: @escaping () -> Void
     ) {
         let state = State(playerViewModel: playerViewModel)
+        let experimentState = VideoDetailPerformanceExperimentState()
+        experimentState.setEnabled(isPerformanceExperimentEnabled)
+        let overlayState = VideoDetailShellOverlayState(
+            detailViewModel: detailViewModel,
+            isPerformanceExperimentEnabled: isPerformanceExperimentEnabled,
+            experimentState: experimentState
+        )
         self.state = state
+        self.overlayState = overlayState
+        self.experimentState = experimentState
         self.surfaceHostView = UIKitPlayerSurfaceHostView(
             viewModel: playerViewModel,
             isPictureInPictureEnabled: dependencies.libraryStore.pictureInPictureEnabled
@@ -46,6 +58,8 @@ final class VideoDetailShellSurfaceHost: UIView {
         let overlayRoot = PlayerOverlayHostRoot(
             detailViewModel: detailViewModel,
             state: state,
+            overlayState: overlayState,
+            experimentState: experimentState,
             dependencies: dependencies,
             onRequestFullscreen: onRequestFullscreen,
             onExitFullscreen: onExitFullscreen,
@@ -107,6 +121,8 @@ final class VideoDetailShellSurfaceHost: UIView {
 
     /// 系统旋转期间退化成原型同款 bare surface：只保留 live video surface。
     func setBareSurfaceTransitionActive(_ active: Bool) {
+        overlayState.setBareSurfaceTransitionActive(active)
+        experimentState.setBareSurfaceTransitionActive(active)
         state.isBareSurfaceTransitionActive = active
         UIView.performWithoutAnimation {
             overlayHostingController.view.isHidden = active
@@ -134,6 +150,11 @@ final class VideoDetailShellSurfaceHost: UIView {
         surfaceHostView.setPlayerViewModel(playerViewModel)
     }
 
+    func setPerformanceExperimentEnabled(_ isEnabled: Bool) {
+        experimentState.setEnabled(isEnabled)
+        overlayState.setPerformanceExperimentEnabled(isEnabled)
+    }
+
     func setVideoGravity(_ gravity: AVLayerVideoGravity) {
         surfaceHostView.setVideoGravity(gravity)
     }
@@ -145,6 +166,111 @@ final class VideoDetailShellSurfaceHost: UIView {
 
 }
 
+private struct VideoDetailShellOverlaySnapshot: Equatable {
+    var historyVideo: VideoItem
+    var historyCID: Int?
+    var historyDuration: TimeInterval?
+    var isDanmakuEnabled = true
+    var isSwitchingPlayQuality = false
+
+    init(
+        detail: VideoItem,
+        selectedCID: Int?,
+        isDanmakuEnabled: Bool,
+        isSwitchingPlayQuality: Bool
+    ) {
+        self.historyVideo = detail
+        self.historyCID = selectedCID ?? detail.cid
+        self.historyDuration = detail.duration.map(TimeInterval.init)
+        self.isDanmakuEnabled = isDanmakuEnabled
+        self.isSwitchingPlayQuality = isSwitchingPlayQuality
+    }
+}
+
+@MainActor
+private final class VideoDetailShellOverlayState: ObservableObject {
+    @Published private(set) var snapshot: VideoDetailShellOverlaySnapshot
+    private var isPerformanceExperimentEnabled: Bool
+    private var isBareSurfaceTransitionActive = false
+    private var pendingSnapshot: VideoDetailShellOverlaySnapshot?
+    private weak var experimentState: VideoDetailPerformanceExperimentState?
+    private var cancellables = Set<AnyCancellable>()
+
+    init(
+        detailViewModel: VideoDetailViewModel,
+        isPerformanceExperimentEnabled: Bool,
+        experimentState: VideoDetailPerformanceExperimentState
+    ) {
+        self.isPerformanceExperimentEnabled = isPerformanceExperimentEnabled
+        self.experimentState = experimentState
+        self.snapshot = VideoDetailShellOverlaySnapshot(
+            detail: detailViewModel.detail,
+            selectedCID: detailViewModel.selectedCID,
+            isDanmakuEnabled: detailViewModel.isDanmakuEnabled,
+            isSwitchingPlayQuality: detailViewModel.isSwitchingPlayQuality
+        )
+
+        Publishers.CombineLatest4(
+            detailViewModel.$detail,
+            detailViewModel.$selectedCID,
+            detailViewModel.$isDanmakuEnabled,
+            detailViewModel.$isSwitchingPlayQuality
+        )
+        .map { detail, selectedCID, isDanmakuEnabled, isSwitchingPlayQuality in
+            VideoDetailShellOverlaySnapshot(
+                detail: detail,
+                selectedCID: selectedCID,
+                isDanmakuEnabled: isDanmakuEnabled,
+                isSwitchingPlayQuality: isSwitchingPlayQuality
+            )
+        }
+        .removeDuplicates()
+        .sink { [weak self] snapshot in
+            self?.receive(snapshot)
+        }
+        .store(in: &cancellables)
+    }
+
+    func setPerformanceExperimentEnabled(_ isEnabled: Bool) {
+        guard isPerformanceExperimentEnabled != isEnabled else { return }
+        isPerformanceExperimentEnabled = isEnabled
+        if !isEnabled {
+            flushPendingSnapshot()
+        }
+    }
+
+    func setBareSurfaceTransitionActive(_ active: Bool) {
+        guard isBareSurfaceTransitionActive != active else { return }
+        isBareSurfaceTransitionActive = active
+        if !active {
+            flushPendingSnapshot()
+        }
+    }
+
+    private func receive(_ nextSnapshot: VideoDetailShellOverlaySnapshot) {
+        guard nextSnapshot != snapshot else { return }
+        if isPerformanceExperimentEnabled && isBareSurfaceTransitionActive {
+            pendingSnapshot = nextSnapshot
+            experimentState?.recordOverlayDeferred()
+            return
+        }
+        snapshot = nextSnapshot
+        if isPerformanceExperimentEnabled {
+            experimentState?.recordOverlayPublish()
+        }
+    }
+
+    private func flushPendingSnapshot() {
+        guard let pendingSnapshot else { return }
+        self.pendingSnapshot = nil
+        guard pendingSnapshot != snapshot else { return }
+        snapshot = pendingSnapshot
+        if isPerformanceExperimentEnabled {
+            experimentState?.recordOverlayFlush()
+        }
+    }
+}
+
 private extension UIView {
     func removeLayerAnimationsRecursively() {
         layer.removeAllAnimations()
@@ -153,8 +279,10 @@ private extension UIView {
 }
 
 private struct PlayerOverlayHostRoot: View {
-    @ObservedObject var detailViewModel: VideoDetailViewModel
+    let detailViewModel: VideoDetailViewModel
     @ObservedObject var state: VideoDetailShellSurfaceHost.State
+    @ObservedObject var overlayState: VideoDetailShellOverlayState
+    @ObservedObject var experimentState: VideoDetailPerformanceExperimentState
     let dependencies: AppDependencies
     let onRequestFullscreen: () -> Void
     let onExitFullscreen: () -> Void
@@ -163,14 +291,16 @@ private struct PlayerOverlayHostRoot: View {
     let onNavigateBack: () -> Void
 
     var body: some View {
+        let overlaySnapshot = overlayState.snapshot
         SurfaceOnlyPlayerOverlayRoot(
             viewModel: state.playerViewModel,
             detailViewModel: detailViewModel,
+            overlaySnapshot: overlaySnapshot,
+            experimentSnapshot: experimentState.snapshot,
             dependencies: dependencies,
             isLandscape: state.isLandscape,
             isBareSurfaceTransitionActive: state.isBareSurfaceTransitionActive,
             videoAspectRatio: state.videoAspectRatio,
-            isDanmakuEnabled: detailViewModel.isDanmakuEnabled,
             onToggleDanmaku: onToggleDanmaku,
             onShowDanmakuSettings: onShowDanmakuSettings,
             onNavigateBack: onNavigateBack,
@@ -185,14 +315,15 @@ private struct PlayerOverlayHostRoot: View {
 private struct SurfaceOnlyPlayerOverlayRoot: View {
     @Environment(\.verticalSizeClass) private var verticalSizeClass
     @ObservedObject var viewModel: PlayerStateViewModel
-    @ObservedObject var detailViewModel: VideoDetailViewModel
+    let detailViewModel: VideoDetailViewModel
     @ObservedObject var libraryStore: LibraryStore
 
+    let overlaySnapshot: VideoDetailShellOverlaySnapshot
+    let experimentSnapshot: VideoDetailPerformanceExperimentSnapshot
     let dependencies: AppDependencies
     let isLandscape: Bool
     let isBareSurfaceTransitionActive: Bool
     let videoAspectRatio: CGFloat
-    let isDanmakuEnabled: Bool
     let onToggleDanmaku: () -> Void
     let onShowDanmakuSettings: () -> Void
     let onNavigateBack: () -> Void
@@ -213,11 +344,12 @@ private struct SurfaceOnlyPlayerOverlayRoot: View {
     init(
         viewModel: PlayerStateViewModel,
         detailViewModel: VideoDetailViewModel,
+        overlaySnapshot: VideoDetailShellOverlaySnapshot,
+        experimentSnapshot: VideoDetailPerformanceExperimentSnapshot,
         dependencies: AppDependencies,
         isLandscape: Bool,
         isBareSurfaceTransitionActive: Bool,
         videoAspectRatio: CGFloat,
-        isDanmakuEnabled: Bool,
         onToggleDanmaku: @escaping () -> Void,
         onShowDanmakuSettings: @escaping () -> Void,
         onNavigateBack: @escaping () -> Void,
@@ -226,12 +358,13 @@ private struct SurfaceOnlyPlayerOverlayRoot: View {
     ) {
         self.viewModel = viewModel
         self.detailViewModel = detailViewModel
+        self.overlaySnapshot = overlaySnapshot
+        self.experimentSnapshot = experimentSnapshot
         self.dependencies = dependencies
         self.libraryStore = dependencies.libraryStore
         self.isLandscape = isLandscape
         self.isBareSurfaceTransitionActive = isBareSurfaceTransitionActive
         self.videoAspectRatio = videoAspectRatio
-        self.isDanmakuEnabled = isDanmakuEnabled
         self.onToggleDanmaku = onToggleDanmaku
         self.onShowDanmakuSettings = onShowDanmakuSettings
         self.onNavigateBack = onNavigateBack
@@ -309,6 +442,16 @@ private struct SurfaceOnlyPlayerOverlayRoot: View {
                     if libraryStore.playerPerformanceOverlayEnabled {
                         performanceOverlay(contentInsets: videoInsets, in: proxy.size)
                             .zIndex(8)
+                    }
+
+                    let rotationReportMetricsID = overlaySnapshot.historyVideo.bvid
+                    if libraryStore.videoRotationFrameReportOverlayEnabled,
+                       !rotationReportMetricsID.isEmpty {
+                        VideoRotationFrameReportFloatingWindow(
+                            metricsID: rotationReportMetricsID,
+                            contentInsets: videoInsets
+                        )
+                        .zIndex(8.5)
                     }
 
                     if isLandscape, isMoreControlsPresented {
@@ -403,7 +546,7 @@ private struct SurfaceOnlyPlayerOverlayRoot: View {
             showsStartupLoadingIndicator: !isBareSurfaceTransitionActive,
             pausesOnDisappear: false,
             topLeadingControlsAccessory: isBareSurfaceTransitionActive ? nil : AnyView(backButton),
-            isDanmakuEnabled: !isBareSurfaceTransitionActive && isDanmakuEnabled,
+            isDanmakuEnabled: !isBareSurfaceTransitionActive && overlaySnapshot.isDanmakuEnabled,
             onToggleDanmaku: onToggleDanmaku,
             onShowDanmakuSettings: onShowDanmakuSettings,
             isSecondaryControlsPresented: !isBareSurfaceTransitionActive
@@ -432,9 +575,9 @@ private struct SurfaceOnlyPlayerOverlayRoot: View {
             speedBoostModel: speedBoostModel,
             playbackProgressCoordinator: playbackProgressCoordinator,
             progressReporter: progressReporter,
-            historyVideo: detailViewModel.detail,
-            historyCID: detailViewModel.selectedCID ?? detailViewModel.detail.cid,
-            historyDuration: detailViewModel.detail.duration.map(TimeInterval.init),
+            historyVideo: overlaySnapshot.historyVideo,
+            historyCID: overlaySnapshot.historyCID,
+            historyDuration: overlaySnapshot.historyDuration,
             configuration: configuration,
             isPictureInPictureEnabled: libraryStore.pictureInPictureEnabled,
             videoGravity: .resizeAspect,
@@ -518,6 +661,7 @@ private struct SurfaceOnlyPlayerOverlayRoot: View {
             HStack {
                 VideoDetailPerformanceOverlayContainer(
                     store: detailViewModel.networkDiagnosticsRenderStore,
+                    experimentSnapshot: experimentSnapshot,
                     panelWidth: panelWidth,
                     maximumHeight: maximumHeight
                 )
@@ -605,7 +749,7 @@ private struct SurfaceOnlyPlayerOverlayRoot: View {
             seekSnapshotOpacity: seekTransitionSnapshotModel.opacity,
             constrainsRotationSnapshotToVideoAspect: false,
             showsPlayerLoadingChrome: renderState.showsPlayerLoadingChrome
-                && !detailViewModel.isSwitchingPlayQuality,
+                && !overlaySnapshot.isSwitchingPlayQuality,
             isBuffering: context.surfaceState.isBuffering,
             isPlaying: context.surfaceState.isPlaying,
             hasPresentedPlayback: context.surfaceState.hasPresentedPlayback,

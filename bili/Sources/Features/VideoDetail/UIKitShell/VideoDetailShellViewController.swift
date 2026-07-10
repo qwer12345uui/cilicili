@@ -20,6 +20,7 @@ final class VideoDetailShellViewController: UIViewController {
     private let dependencies: AppDependencies
     private let onShowDanmakuSettings: () -> Void
     private let onNavigateBack: () -> Void
+    private var isPerformanceExperimentEnabled: Bool
     private var cancellables = Set<AnyCancellable>()
 
     private var surfaceHost: VideoDetailShellSurfaceHost?
@@ -43,6 +44,8 @@ final class VideoDetailShellViewController: UIViewController {
     private var playbackStateCancellable: AnyCancellable?
     /// 系统旋转期间冻结 SwiftUI chrome/滚动联动，让 live surface 跟随 UIKit frame 动画。
     private var isSystemRotationTransitioning = false
+    private let rotationFrameProbe = VideoRotationFrameProbe()
+    private var rotationFrameProbeGeneration = 0
     /// VC 是否处于可见活跃态（viewDidAppear~viewWillDisappear 之间）。
     /// 用于防止 $detail sink 在 VC 消失后重新解锁横屏，导致全局朝向锁卡在 landscape。
     private var isViewActive = false
@@ -94,6 +97,7 @@ final class VideoDetailShellViewController: UIViewController {
         fullscreenCoordinator: VideoDetailFullscreenCoordinator,
         runtimeSettings: VideoDetailRuntimeSettingsStore,
         dependencies: AppDependencies,
+        isPerformanceExperimentEnabled: Bool,
         selectedContentTab: Binding<VideoDetailContentTab>,
         onShowNetworkDiagnostics: @escaping () -> Void,
         onShowFavoriteFolders: @escaping () -> Void,
@@ -107,6 +111,7 @@ final class VideoDetailShellViewController: UIViewController {
         self.dependencies = dependencies
         self.onShowDanmakuSettings = onShowDanmakuSettings
         self.onNavigateBack = onNavigateBack
+        self.isPerformanceExperimentEnabled = isPerformanceExperimentEnabled
         self.selectedContentTabBinding = selectedContentTab
         self.activeContentTab = selectedContentTab.wrappedValue
         self.contentHost = UIHostingController(
@@ -115,6 +120,7 @@ final class VideoDetailShellViewController: UIViewController {
                 runtimeSettings: runtimeSettings,
                 state: contentState,
                 layoutWidth: Self.initialLayoutWidth,
+                isPerformanceExperimentEnabled: isPerformanceExperimentEnabled,
                 selectedContentTab: selectedContentTab,
                 onShowNetworkDiagnostics: onShowNetworkDiagnostics,
                 onShowFavoriteFolders: onShowFavoriteFolders,
@@ -130,6 +136,7 @@ final class VideoDetailShellViewController: UIViewController {
             runtimeSettings: runtimeSettings,
             state: contentState,
             layoutWidth: Self.initialLayoutWidth,
+            isPerformanceExperimentEnabled: isPerformanceExperimentEnabled,
             selectedContentTab: selectedContentTab,
             onShowNetworkDiagnostics: onShowNetworkDiagnostics,
             onShowFavoriteFolders: onShowFavoriteFolders,
@@ -146,6 +153,17 @@ final class VideoDetailShellViewController: UIViewController {
     @available(*, unavailable)
     required init?(coder _: NSCoder) {
         fatalError("init(coder:) has not been implemented")
+    }
+
+    func setPerformanceExperimentEnabled(_ isEnabled: Bool) {
+        guard isPerformanceExperimentEnabled != isEnabled else { return }
+        isPerformanceExperimentEnabled = isEnabled
+        UIView.performWithoutAnimation {
+            contentHost.rootView = contentHost.rootView.withPerformanceExperimentEnabled(isEnabled)
+            contentHost.view.setNeedsLayout()
+            contentHost.view.layoutIfNeeded()
+        }
+        surfaceHost?.setPerformanceExperimentEnabled(isEnabled)
     }
 
     private static var initialLayoutWidth: CGFloat {
@@ -218,6 +236,7 @@ final class VideoDetailShellViewController: UIViewController {
     override func viewWillDisappear(_ animated: Bool) {
         super.viewWillDisappear(animated)
         isViewActive = false
+        rotationFrameProbe.cancel()
         // 离开页面恢复竖屏锁定，避免横屏解锁残留影响其它页面（首页/动态/直播/我的）。
         AppOrientationLock.restorePortrait(in: view.window?.windowScene)
     }
@@ -245,6 +264,10 @@ final class VideoDetailShellViewController: UIViewController {
         let toLandscape = size.width > size.height
         // 横屏转场只让播放器 live surface 跟随系统旋转，内容区不参与重排。
         // 转回竖屏时再恢复内容区，避免下方 SwiftUI 列表和播放器一起动画布局。
+        startRotationFrameProbe(
+            toLandscape: toLandscape,
+            coordinator: coordinator
+        )
         contentHost.view.isHidden = toLandscape
         contentHost.view.isUserInteractionEnabled = !toLandscape
         isSystemRotationTransitioning = true
@@ -254,11 +277,13 @@ final class VideoDetailShellViewController: UIViewController {
             currentPlayerHeight = nil
         }
         coordinator.animate(alongsideTransition: { [weak self] _ in
+            self?.rotationFrameProbe.mark("系统动画布局开始")
             self?.applyLayout(forBoundsSize: size)
             self?.view.layoutIfNeeded()
             self?.surfaceHost?.refreshLayoutImmediately()
             self?.setNeedsStatusBarAppearanceUpdate()
             self?.setNeedsUpdateOfHomeIndicatorAutoHidden()
+            self?.rotationFrameProbe.mark("系统动画布局完成")
         }, completion: { [weak self] _ in
             guard let self else { return }
             self.contentHost.view.isHidden = toLandscape
@@ -269,7 +294,29 @@ final class VideoDetailShellViewController: UIViewController {
             self.view.layoutIfNeeded()
             self.setBareSurfaceTransitionActive(false)
             self.surfaceHost?.refreshLayoutImmediately()
+            self.rotationFrameProbe.finish(reason: "系统旋转完成 landscape=\(toLandscape)")
         })
+    }
+
+    private func startRotationFrameProbe(
+        toLandscape: Bool,
+        coordinator: UIViewControllerTransitionCoordinator
+    ) {
+        guard runtimeSettings.videoRotationFrameReportOverlayEnabled else { return }
+        let detail = viewModel.detail
+        guard !detail.bvid.isEmpty else { return }
+        rotationFrameProbeGeneration &+= 1
+        let durationMs = Int((coordinator.transitionDuration * 1000).rounded())
+        let coordinatorSummary = "coordinatorDuration=\(durationMs)ms animated=\(coordinator.isAnimated) interactive=\(coordinator.isInteractive)"
+        rotationFrameProbe.start(
+            metricsID: detail.bvid,
+            title: detail.title,
+            mode: "videoDetailShell",
+            generation: rotationFrameProbeGeneration,
+            toLandscape: toLandscape,
+            coordinatorSummary: coordinatorSummary,
+            maximumFrameRate: view.window?.windowScene?.screen.maximumFramesPerSecond ?? 60
+        )
     }
 
     // MARK: - Layout
@@ -340,6 +387,7 @@ final class VideoDetailShellViewController: UIViewController {
             playerViewModel: playerViewModel,
             detailViewModel: viewModel,
             dependencies: dependencies,
+            isPerformanceExperimentEnabled: isPerformanceExperimentEnabled,
             onRequestFullscreen: { [weak self] in self?.requestFullscreen() },
             onExitFullscreen: { [weak self] in self?.requestExitFullscreen() },
             onToggleDanmaku: { [weak self] in self?.viewModel.toggleDanmaku() },
