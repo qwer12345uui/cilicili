@@ -5,6 +5,7 @@ struct VideoDetailDanmakuOverlay: View {
     let playerViewModel: PlayerStateViewModel
     let clock: PlayerPlaybackClock
     let usesLandscapePlaybackChrome: Bool
+    let isLayoutTransitioning: Bool
     let onPlaybackTime: (TimeInterval, Bool) -> Void
     @StateObject private var state = VideoDetailDanmakuOverlayState()
 
@@ -22,6 +23,7 @@ struct VideoDetailDanmakuOverlay: View {
             settings: snapshot.settings,
             topInset: usesLandscapePlaybackChrome ? 28 : 8,
             bottomInset: usesLandscapePlaybackChrome ? 84 : 54,
+            isLayoutTransitioning: isLayoutTransitioning,
             playbackClock: clock,
             onPlaybackTime: onPlaybackTime
         )

@@ -1,6 +1,7 @@
 import SwiftUI
 
 struct SearchVideoResultRow: View {
+    @Environment(\.unifiedVideoCoverBorderExperimentEnabled) private var unifiedVideoCoverBorderExperimentEnabled
     private let video: VideoItem
     private let display: VideoCardDisplayModel
     private let coverSize = CGSize(width: 140, height: 88)
@@ -28,24 +29,20 @@ struct SearchVideoResultRow: View {
     }
 
     private var cover: some View {
-        ZStack(alignment: .bottomTrailing) {
-            AdaptiveVideoCoverImage(
-                display: display,
-                style: .exactCrop,
-                fixedSize: coverSize,
-                maximumPixelLength: 480
-            )
+        let shape = RoundedRectangle(cornerRadius: 12, style: .continuous)
 
-            if !display.durationText.isEmpty {
-                VideoCoverDurationBadge(
-                    display.durationText,
-                    maxWidth: max(coverSize.width - 12, 1)
-                )
-                    .padding(6)
-            }
-        }
+        return AdaptiveVideoCoverImage(
+            display: display,
+            style: .exactCrop,
+            fixedSize: coverSize,
+            maximumPixelLength: 480
+        )
         .frame(width: coverSize.width, height: coverSize.height)
-        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .clipShape(shape)
+        .unifiedVideoCoverExperimentBorder(
+            in: shape,
+            isEnabled: unifiedVideoCoverBorderExperimentEnabled
+        )
     }
 
     private var textColumn: some View {
@@ -72,10 +69,10 @@ struct SearchVideoResultRow: View {
                     .lineLimit(1)
             }
 
-            if !display.viewText.isEmpty || !display.publishTimeText.isEmpty {
+            if !display.durationText.isEmpty || !display.publishTimeText.isEmpty {
                 HStack(spacing: 8) {
-                    if !display.viewText.isEmpty {
-                        Label(display.viewText, systemImage: "play.fill")
+                    if !display.durationText.isEmpty {
+                        Label(display.durationText, systemImage: "clock")
                             .font(.system(size: 11))
                             .foregroundStyle(.secondary)
                             .labelStyle(.titleAndIcon)

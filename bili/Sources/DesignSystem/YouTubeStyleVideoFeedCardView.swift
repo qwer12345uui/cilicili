@@ -4,6 +4,8 @@ struct YouTubeStyleVideoFeedCardView: View, Equatable {
     let display: VideoCardDisplayModel
     private let showsMetadataSummary: Bool
     private let showsPlayBadge: Bool
+    private let usesGenericAuthorIcon: Bool
+    private let placesViewAndPublishTimeTrailing: Bool
     private let fixedCoverAspectRatio: CGFloat?
     private let fixedCoverSize: CGSize?
     private let coverMaximumPixelLength: Int
@@ -13,6 +15,8 @@ struct YouTubeStyleVideoFeedCardView: View, Equatable {
         video: VideoItem,
         showsMetadataSummary: Bool = true,
         showsPlayBadge: Bool = false,
+        usesGenericAuthorIcon: Bool = false,
+        placesViewAndPublishTimeTrailing: Bool = false,
         fixedCoverAspectRatio: CGFloat? = nil,
         fixedCoverSize: CGSize? = nil,
         coverMaximumPixelLength: Int = 1280,
@@ -21,6 +25,8 @@ struct YouTubeStyleVideoFeedCardView: View, Equatable {
         self.display = VideoCardDisplayModel(video: video)
         self.showsMetadataSummary = showsMetadataSummary
         self.showsPlayBadge = showsPlayBadge
+        self.usesGenericAuthorIcon = usesGenericAuthorIcon
+        self.placesViewAndPublishTimeTrailing = placesViewAndPublishTimeTrailing
         self.fixedCoverAspectRatio = fixedCoverAspectRatio
         self.fixedCoverSize = fixedCoverSize
         self.coverMaximumPixelLength = coverMaximumPixelLength
@@ -31,6 +37,8 @@ struct YouTubeStyleVideoFeedCardView: View, Equatable {
         display: VideoCardDisplayModel,
         showsMetadataSummary: Bool = true,
         showsPlayBadge: Bool = false,
+        usesGenericAuthorIcon: Bool = false,
+        placesViewAndPublishTimeTrailing: Bool = false,
         fixedCoverAspectRatio: CGFloat? = nil,
         fixedCoverSize: CGSize? = nil,
         coverMaximumPixelLength: Int = 1280,
@@ -39,6 +47,8 @@ struct YouTubeStyleVideoFeedCardView: View, Equatable {
         self.display = display
         self.showsMetadataSummary = showsMetadataSummary
         self.showsPlayBadge = showsPlayBadge
+        self.usesGenericAuthorIcon = usesGenericAuthorIcon
+        self.placesViewAndPublishTimeTrailing = placesViewAndPublishTimeTrailing
         self.fixedCoverAspectRatio = fixedCoverAspectRatio
         self.fixedCoverSize = fixedCoverSize
         self.coverMaximumPixelLength = coverMaximumPixelLength
@@ -49,6 +59,8 @@ struct YouTubeStyleVideoFeedCardView: View, Equatable {
         lhs.display == rhs.display
             && lhs.showsMetadataSummary == rhs.showsMetadataSummary
             && lhs.showsPlayBadge == rhs.showsPlayBadge
+            && lhs.usesGenericAuthorIcon == rhs.usesGenericAuthorIcon
+            && lhs.placesViewAndPublishTimeTrailing == rhs.placesViewAndPublishTimeTrailing
             && lhs.fixedCoverAspectRatio == rhs.fixedCoverAspectRatio
             && lhs.fixedCoverSize == rhs.fixedCoverSize
             && lhs.coverMaximumPixelLength == rhs.coverMaximumPixelLength
@@ -68,7 +80,9 @@ struct YouTubeStyleVideoFeedCardView: View, Equatable {
 
             YouTubeStyleVideoFeedMetadataRow(
                 display: display,
-                showsMetadataSummary: showsMetadataSummary
+                showsMetadataSummary: showsMetadataSummary,
+                usesGenericAuthorIcon: usesGenericAuthorIcon,
+                placesViewAndPublishTimeTrailing: placesViewAndPublishTimeTrailing
             )
         }
         .frame(maxWidth: .infinity, alignment: .topLeading)

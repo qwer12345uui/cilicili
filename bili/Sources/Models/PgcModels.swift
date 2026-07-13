@@ -108,9 +108,13 @@ nonisolated struct PgcSeasonInfo: Decodable, Hashable, Sendable {
 
     var continueWatchingEpisode: PgcEpisode? {
         guard let lastEpID = userStatus?.progress?.lastEpID else { return nil }
-        return episodes.first { episode in
+        return allPlayableEpisodes.first { episode in
             episode.epID == lastEpID || episode.idValue == lastEpID
         }
+    }
+
+    var preferredPlaybackEpisode: PgcEpisode? {
+        continueWatchingEpisode ?? allPlayableEpisodes.first
     }
 
     var allPlayableEpisodes: [PgcEpisode] {

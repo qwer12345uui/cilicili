@@ -8,6 +8,7 @@ struct BiliGlassSegmentedControl<Option: Identifiable & Hashable>: View {
     let selected: Option
     let title: (Option) -> String
     let select: (Option) -> Void
+    var showsContainer = true
     var animation: Animation = .smooth(duration: 0.28)
 
     private var selectedIndex: Int {
@@ -18,7 +19,17 @@ struct BiliGlassSegmentedControl<Option: Identifiable & Hashable>: View {
         reduceMotion ? nil : animation
     }
 
+    @ViewBuilder
     var body: some View {
+        if showsContainer {
+            controlContent
+                .biliBottomTabGlassEffect(interactive: false, in: Capsule())
+        } else {
+            controlContent
+        }
+    }
+
+    private var controlContent: some View {
         GeometryReader { proxy in
             let segmentWidth = segmentWidth(in: proxy.size.width)
 
@@ -37,7 +48,6 @@ struct BiliGlassSegmentedControl<Option: Identifiable & Hashable>: View {
             }
         }
         .frame(height: 36)
-        .biliBottomTabGlassEffect(interactive: false, in: Capsule())
         .animation(activeAnimation, value: selectedIndex)
         .accessibilityElement(children: .contain)
     }
@@ -49,10 +59,9 @@ struct BiliGlassSegmentedControl<Option: Identifiable & Hashable>: View {
     }
 
     private func selectedCapsule(width: CGFloat) -> some View {
-        Capsule()
-            .fill(.regularMaterial)
+        Color.clear
             .frame(width: width, height: 30)
-            .shadow(color: .black.opacity(0.08), radius: 6, x: 0, y: 2)
+            .biliBottomTabGlassEffect(interactive: true, in: Capsule())
     }
 
     private func segmentButton(for option: Option) -> some View {

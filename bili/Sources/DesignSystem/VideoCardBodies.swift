@@ -5,6 +5,7 @@ struct VideoCardElevatedBody<Cover: View>: View {
     let cover: Cover
     let showsPublishTimeInAuthorRow: Bool
     let showsAuthorIdentity: Bool
+    let usesGenericAuthorIcon: Bool
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -13,7 +14,8 @@ struct VideoCardElevatedBody<Cover: View>: View {
             VideoCardTextStack(
                 display: display,
                 showsPublishTimeInAuthorRow: showsPublishTimeInAuthorRow,
-                showsAuthorIdentity: showsAuthorIdentity
+                showsAuthorIdentity: showsAuthorIdentity,
+                usesGenericAuthorIcon: usesGenericAuthorIcon
             )
             .padding(.horizontal, 8)
             .padding(.top, 7)
@@ -34,6 +36,7 @@ struct VideoCardBlendedBody<Cover: View>: View {
     let cover: Cover
     let showsPublishTimeInAuthorRow: Bool
     let showsAuthorIdentity: Bool
+    let usesGenericAuthorIcon: Bool
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -43,7 +46,8 @@ struct VideoCardBlendedBody<Cover: View>: View {
             VideoCardTextStack(
                 display: display,
                 showsPublishTimeInAuthorRow: showsPublishTimeInAuthorRow,
-                showsAuthorIdentity: showsAuthorIdentity
+                showsAuthorIdentity: showsAuthorIdentity,
+                usesGenericAuthorIcon: usesGenericAuthorIcon
             )
             .padding(.horizontal, 2)
         }
@@ -55,6 +59,7 @@ struct VideoCardBorderedBody<Cover: View>: View {
     let cover: Cover
     let showsPublishTimeInAuthorRow: Bool
     let showsAuthorIdentity: Bool
+    let usesGenericAuthorIcon: Bool
 
     private let cornerRadius: CGFloat = 18
 
@@ -66,7 +71,8 @@ struct VideoCardBorderedBody<Cover: View>: View {
             VideoCardTextStack(
                 display: display,
                 showsPublishTimeInAuthorRow: showsPublishTimeInAuthorRow,
-                showsAuthorIdentity: showsAuthorIdentity
+                showsAuthorIdentity: showsAuthorIdentity,
+                usesGenericAuthorIcon: usesGenericAuthorIcon
             )
             .padding(.horizontal, 10)
             .padding(.bottom, 10)
@@ -79,6 +85,7 @@ struct VideoCardBorderedCompactBody: View, Equatable {
     let display: VideoCardDisplayModel
     let coverSize: CGSize
     var showsShadow = true
+    var usesGenericAuthorIcon = false
 
     var body: some View {
         HStack(alignment: .top, spacing: 12) {
@@ -99,8 +106,12 @@ struct VideoCardBorderedCompactBody: View, Equatable {
 
                 VStack(alignment: .leading, spacing: 4) {
                     HStack(spacing: 8) {
-                        Text(display.authorName)
-                            .lineLimit(1)
+                        HStack(spacing: 4) {
+                            authorIdentityIcon
+
+                            Text(display.authorName)
+                                .lineLimit(1)
+                        }
 
                         if !display.recommendReasonText.isEmpty {
                             Text(display.recommendReasonText)
@@ -135,6 +146,13 @@ struct VideoCardBorderedCompactBody: View, Equatable {
         .contentShape(Rectangle())
         .accessibilityElement(children: .combine)
         .accessibilityLabel(display.title)
+    }
+
+    @ViewBuilder
+    private var authorIdentityIcon: some View {
+        if usesGenericAuthorIcon {
+            BilibiliUPBadge(size: 14)
+        }
     }
 }
 

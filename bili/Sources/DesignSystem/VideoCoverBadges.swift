@@ -15,6 +15,22 @@ enum VideoCoverBottomScrimSettings {
     static let defaultIsEnabled = true
 }
 
+enum VideoCoverDurationBadgeSettings {
+    static let storageKey = "cc.bili.display.videoCoverDurationBadgesEnabled.v1"
+    static let defaultIsEnabled = false
+}
+
+private struct VideoCoverDurationBadgesVisibilityKey: EnvironmentKey {
+    static let defaultValue = VideoCoverDurationBadgeSettings.defaultIsEnabled
+}
+
+extension EnvironmentValues {
+    var showsVideoCoverDurationBadges: Bool {
+        get { self[VideoCoverDurationBadgesVisibilityKey.self] }
+        set { self[VideoCoverDurationBadgesVisibilityKey.self] = newValue }
+    }
+}
+
 enum VideoCoverBadgeContrastBacking {
     static let storageKey = "cc.bili.display.videoCoverBadgeContrastBackingOpacity.v1"
     static let defaultOpacity = 0.35
@@ -50,6 +66,7 @@ struct VideoCoverGlassBadge<Content: View>: View {
 }
 
 struct VideoCoverDurationBadge: View {
+    @Environment(\.showsVideoCoverDurationBadges) private var showsVideoCoverDurationBadges
     let duration: String
     private let maxWidth: CGFloat
 
@@ -59,21 +76,23 @@ struct VideoCoverDurationBadge: View {
     }
 
     var body: some View {
-        Text(duration)
-            .font(.system(size: 11, weight: .semibold))
-            .monospacedDigit()
-            .videoCoverBadgeForeground(opacity: 0)
-            .lineLimit(1)
-            .truncationMode(.tail)
-            .minimumScaleFactor(0.86)
-            .allowsTightening(true)
-            .padding(.horizontal, 6)
-            .padding(.vertical, 4)
-            .videoCoverBadgeBackground(style: .clear, in: Capsule())
-            .fixedSize(horizontal: true, vertical: false)
-            .frame(maxWidth: maxWidth, alignment: .trailing)
-            .clipped()
-            .accessibilityLabel("视频时长 \(duration)")
+        if showsVideoCoverDurationBadges {
+            Text(duration)
+                .font(.system(size: 11, weight: .semibold))
+                .monospacedDigit()
+                .videoCoverBadgeForeground(opacity: 0)
+                .lineLimit(1)
+                .truncationMode(.tail)
+                .minimumScaleFactor(0.86)
+                .allowsTightening(true)
+                .padding(.horizontal, 6)
+                .padding(.vertical, 4)
+                .videoCoverBadgeBackground(style: .clear, in: Capsule())
+                .fixedSize(horizontal: true, vertical: false)
+                .frame(maxWidth: maxWidth, alignment: .trailing)
+                .clipped()
+                .accessibilityLabel("视频时长 \(duration)")
+        }
     }
 }
 

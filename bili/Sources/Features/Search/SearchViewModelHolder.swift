@@ -25,6 +25,17 @@ final class SearchViewModelHolder: ObservableObject {
     }
 }
 
+@MainActor
+final class SearchBottomAccessoryStore: ObservableObject {
+    @Published private(set) var viewModel: SearchViewModel?
+    @Published var isSearchFocused = false
+
+    func attach(_ viewModel: SearchViewModel) {
+        guard self.viewModel !== viewModel else { return }
+        self.viewModel = viewModel
+    }
+}
+
 private struct SearchRenderSnapshot: Equatable {
     let query: String
     let selectedScope: SearchScope

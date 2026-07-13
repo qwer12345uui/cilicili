@@ -1,6 +1,7 @@
 import SwiftUI
 
 struct VideoCoverMetaOverlay: View {
+    @Environment(\.showsVideoCoverDurationBadges) private var showsVideoCoverDurationBadges
     let viewText: String
     let durationText: String
     var showsViewCount = true
@@ -17,7 +18,7 @@ struct VideoCoverMetaOverlay: View {
 
             Spacer(minLength: spacing)
 
-            if !durationText.isEmpty {
+            if showsVideoCoverDurationBadges, !durationText.isEmpty {
                 VideoCoverDurationBadge(durationText, maxWidth: durationMaxWidth)
             }
         }
@@ -28,6 +29,6 @@ struct VideoCoverMetaOverlay: View {
     }
 
     var showsAnyMetadata: Bool {
-        (showsViewCount && !viewText.isEmpty) || !durationText.isEmpty
+        (showsViewCount && !viewText.isEmpty) || (showsVideoCoverDurationBadges && !durationText.isEmpty)
     }
 }

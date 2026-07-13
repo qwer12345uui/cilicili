@@ -10,35 +10,45 @@ struct VideoDetailLoadedDetailContentPage: View {
     var body: some View {
         let renderPack = renderPack
 
-        VideoDetailSummaryCard(
-            viewModel: viewModel,
-            contentWidth: renderPack.contentWidth,
-            showsNetworkDiagnosticsButton: runtimeSettings.showsNetworkDiagnosticsButton,
-            onShowNetworkDiagnostics: onShowNetworkDiagnostics,
-            onShowFavoriteFolders: onShowFavoriteFolders
-        )
-        .padding(.horizontal, PlaybackDetailContentMetrics.horizontalPadding)
-
         if viewModel.detail.isPGCEpisode {
             VideoDetailPgcEpisodeSection(
                 detail: viewModel.detail,
                 selectEpisode: renderPack.actions.selectPgcEpisode
-            )
-                .padding(.horizontal, PlaybackDetailContentMetrics.horizontalPadding)
+            ) {
+                VideoDetailSummaryCard(
+                    viewModel: viewModel,
+                    contentWidth: renderPack.contentWidth,
+                    showsNetworkDiagnosticsButton: runtimeSettings.showsNetworkDiagnosticsButton,
+                    showsVideoInfo: false,
+                    onShowNetworkDiagnostics: onShowNetworkDiagnostics,
+                    onShowFavoriteFolders: onShowFavoriteFolders
+                )
+            }
+            .padding(.horizontal, PlaybackDetailContentMetrics.horizontalPadding)
         } else {
+            VideoDetailSummaryCard(
+                viewModel: viewModel,
+                contentWidth: renderPack.contentWidth,
+                showsNetworkDiagnosticsButton: runtimeSettings.showsNetworkDiagnosticsButton,
+                onShowNetworkDiagnostics: onShowNetworkDiagnostics,
+                onShowFavoriteFolders: onShowFavoriteFolders
+            )
+            .padding(.horizontal, PlaybackDetailContentMetrics.horizontalPadding)
+
             VideoDetailPageMenu(
                 store: renderPack.pageSelectorStore,
                 selectPage: renderPack.actions.selectPage
             )
             .padding(.horizontal, PlaybackDetailContentMetrics.horizontalPadding)
-
-            VideoDetailRelatedSection(
-                store: renderPack.relatedStore,
-                layoutWidth: layoutWidth,
-                runtimeSettings: runtimeSettings,
-                retryRelated: renderPack.actions.retryRelated
-            )
         }
+
+        VideoDetailRecommendationsSection(
+            detail: viewModel.detail,
+            relatedStore: renderPack.relatedStore,
+            layoutWidth: layoutWidth,
+            runtimeSettings: runtimeSettings,
+            retryRelated: renderPack.actions.retryRelated
+        )
     }
 
     private var renderPack: VideoDetailLoadedDetailContentPageRenderPack {
@@ -46,5 +56,25 @@ struct VideoDetailLoadedDetailContentPage: View {
             viewModel: viewModel,
             layoutWidth: layoutWidth
         )
+    }
+}
+
+private struct VideoDetailRecommendationsSection: View {
+    let detail: VideoItem
+    @ObservedObject var relatedStore: VideoDetailRelatedRenderStore
+    let layoutWidth: CGFloat
+    let runtimeSettings: VideoDetailRuntimeSettingsSnapshot
+    let retryRelated: () async -> Void
+
+    @ViewBuilder
+    var body: some View {
+        if !detail.isPGCEpisode {
+            VideoDetailRelatedSection(
+                store: relatedStore,
+                layoutWidth: layoutWidth,
+                runtimeSettings: runtimeSettings,
+                retryRelated: retryRelated
+            )
+        }
     }
 }

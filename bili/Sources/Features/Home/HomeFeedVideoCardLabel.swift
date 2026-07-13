@@ -4,12 +4,15 @@ struct HomeFeedVideoCardLabel: View {
     let metrics: HomeFeedLayoutMetrics
     let display: VideoCardDisplayModel
     var showsAuthorIdentity = true
+    var usesGenericAuthorIcon = true
 
     var body: some View {
         switch metrics.mode {
         case .singleColumn:
             YouTubeStyleVideoFeedCardView(
                 display: display,
+                usesGenericAuthorIcon: usesGenericAuthorIcon,
+                placesViewAndPublishTimeTrailing: true,
                 fixedCoverAspectRatio: 16 / 9,
                 fixedCoverSize: metrics.singleColumnFixedCoverSize,
                 coverMaximumPixelLength: 720
@@ -18,7 +21,8 @@ struct HomeFeedVideoCardLabel: View {
         case .borderedSingleColumn:
             VideoCardBorderedCompactBody(
                 display: display,
-                coverSize: metrics.borderedSingleColumnCoverSize ?? CGSize(width: 140, height: 88)
+                coverSize: metrics.borderedSingleColumnCoverSize ?? CGSize(width: 140, height: 88),
+                usesGenericAuthorIcon: usesGenericAuthorIcon
             )
             .equatable()
         case .doubleColumn:
@@ -26,6 +30,7 @@ struct HomeFeedVideoCardLabel: View {
                 display: display,
                 showsPublishTimeInAuthorRow: true,
                 showsAuthorIdentity: showsAuthorIdentity,
+                usesGenericAuthorIcon: usesGenericAuthorIcon,
                 showsCoverViewCountBadge: false,
                 surfaceStyle: .blended,
                 fixedCoverSize: metrics.doubleColumnFixedCoverSize,
@@ -37,6 +42,7 @@ struct HomeFeedVideoCardLabel: View {
                 display: display,
                 showsPublishTimeInAuthorRow: true,
                 showsAuthorIdentity: showsAuthorIdentity,
+                usesGenericAuthorIcon: usesGenericAuthorIcon,
                 showsCoverViewCountBadge: false,
                 surfaceStyle: .bordered,
                 coverAspectRatio: 16 / 10,

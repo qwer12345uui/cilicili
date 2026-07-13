@@ -1,6 +1,7 @@
 import SwiftUI
 
 struct VideoCardView: View, Equatable {
+    @Environment(\.showsVideoCoverDurationBadges) private var showsVideoCoverDurationBadges
     enum SurfaceStyle: Equatable {
         case elevated
         case blended
@@ -10,6 +11,7 @@ struct VideoCardView: View, Equatable {
     let display: VideoCardDisplayModel
     private let showsPublishTimeInAuthorRow: Bool
     private let showsAuthorIdentity: Bool
+    private let usesGenericAuthorIcon: Bool
     private let showsCoverViewCountBadge: Bool
     private let surfaceStyle: SurfaceStyle
     private let coverAspectRatio: CGFloat
@@ -21,6 +23,7 @@ struct VideoCardView: View, Equatable {
         video: VideoItem,
         showsPublishTimeInAuthorRow: Bool = false,
         showsAuthorIdentity: Bool = true,
+        usesGenericAuthorIcon: Bool = false,
         showsCoverViewCountBadge: Bool = true,
         surfaceStyle: SurfaceStyle = .elevated,
         coverAspectRatio: CGFloat = 16.0 / 9.0,
@@ -30,6 +33,7 @@ struct VideoCardView: View, Equatable {
         self.display = VideoCardDisplayModel(video: video)
         self.showsPublishTimeInAuthorRow = showsPublishTimeInAuthorRow
         self.showsAuthorIdentity = showsAuthorIdentity
+        self.usesGenericAuthorIcon = usesGenericAuthorIcon
         self.showsCoverViewCountBadge = showsCoverViewCountBadge
         self.surfaceStyle = surfaceStyle
         self.coverAspectRatio = coverAspectRatio
@@ -41,6 +45,7 @@ struct VideoCardView: View, Equatable {
         display: VideoCardDisplayModel,
         showsPublishTimeInAuthorRow: Bool = false,
         showsAuthorIdentity: Bool = true,
+        usesGenericAuthorIcon: Bool = false,
         showsCoverViewCountBadge: Bool = true,
         surfaceStyle: SurfaceStyle = .elevated,
         coverAspectRatio: CGFloat = 16.0 / 9.0,
@@ -50,6 +55,7 @@ struct VideoCardView: View, Equatable {
         self.display = display
         self.showsPublishTimeInAuthorRow = showsPublishTimeInAuthorRow
         self.showsAuthorIdentity = showsAuthorIdentity
+        self.usesGenericAuthorIcon = usesGenericAuthorIcon
         self.showsCoverViewCountBadge = showsCoverViewCountBadge
         self.surfaceStyle = surfaceStyle
         self.coverAspectRatio = coverAspectRatio
@@ -61,6 +67,7 @@ struct VideoCardView: View, Equatable {
         lhs.display == rhs.display
             && lhs.showsPublishTimeInAuthorRow == rhs.showsPublishTimeInAuthorRow
             && lhs.showsAuthorIdentity == rhs.showsAuthorIdentity
+            && lhs.usesGenericAuthorIcon == rhs.usesGenericAuthorIcon
             && lhs.showsCoverViewCountBadge == rhs.showsCoverViewCountBadge
             && lhs.surfaceStyle == rhs.surfaceStyle
             && lhs.coverAspectRatio == rhs.coverAspectRatio
@@ -88,7 +95,8 @@ struct VideoCardView: View, Equatable {
             display: display,
             cover: cover,
             showsPublishTimeInAuthorRow: showsPublishTimeInAuthorRow,
-            showsAuthorIdentity: showsAuthorIdentity
+            showsAuthorIdentity: showsAuthorIdentity,
+            usesGenericAuthorIcon: usesGenericAuthorIcon
         )
     }
 
@@ -97,7 +105,8 @@ struct VideoCardView: View, Equatable {
             display: display,
             cover: cover,
             showsPublishTimeInAuthorRow: showsPublishTimeInAuthorRow,
-            showsAuthorIdentity: showsAuthorIdentity
+            showsAuthorIdentity: showsAuthorIdentity,
+            usesGenericAuthorIcon: usesGenericAuthorIcon
         )
     }
 
@@ -106,7 +115,8 @@ struct VideoCardView: View, Equatable {
             display: display,
             cover: cover,
             showsPublishTimeInAuthorRow: showsPublishTimeInAuthorRow,
-            showsAuthorIdentity: showsAuthorIdentity
+            showsAuthorIdentity: showsAuthorIdentity,
+            usesGenericAuthorIcon: usesGenericAuthorIcon
         )
     }
 
@@ -152,7 +162,8 @@ struct VideoCardView: View, Equatable {
 
     @ViewBuilder
     private var coverBottomScrim: some View {
-        if (showsCoverViewCountBadge && !display.viewText.isEmpty) || !display.durationText.isEmpty {
+        if (showsCoverViewCountBadge && !display.viewText.isEmpty)
+            || (showsVideoCoverDurationBadges && !display.durationText.isEmpty) {
             VideoCoverBottomScrim()
         }
     }

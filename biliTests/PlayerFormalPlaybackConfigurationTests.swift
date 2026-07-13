@@ -25,6 +25,60 @@ final class PlayerFormalPlaybackConfigurationTests: XCTestCase {
         XCTAssertTrue(PlaybackHardwareDecodePolicy.stored(in: defaults))
     }
 
+    @MainActor
+    func testLibraryStorePersistsVideoCoverDurationBadgeVisibility() {
+        let defaults = makeUserDefaults()
+        let store = LibraryStore(userDefaults: defaults)
+
+        XCTAssertFalse(store.showsVideoCoverDurationBadges)
+        store.setShowsVideoCoverDurationBadges(true)
+
+        XCTAssertTrue(
+            LibraryStore(userDefaults: defaults).showsVideoCoverDurationBadges
+        )
+    }
+
+    @MainActor
+    func testLibraryStoreDefaultsAppIconPreferenceToSystemAndPersistsSelection() {
+        let defaults = makeUserDefaults()
+        let store = LibraryStore(userDefaults: defaults)
+
+        XCTAssertEqual(store.appIconPreference, .system)
+        store.setAppIconPreference(.dark)
+
+        XCTAssertEqual(
+            LibraryStore(userDefaults: defaults).appIconPreference,
+            .dark
+        )
+    }
+
+    @MainActor
+    func testLibraryStorePersistsUnifiedVideoCoverBorderExperiment() {
+        let defaults = makeUserDefaults()
+        let store = LibraryStore(userDefaults: defaults)
+
+        XCTAssertFalse(store.unifiedVideoCoverBorderExperimentEnabled)
+        store.setUnifiedVideoCoverBorderExperimentEnabled(true)
+
+        XCTAssertTrue(
+            LibraryStore(userDefaults: defaults).unifiedVideoCoverBorderExperimentEnabled
+        )
+    }
+
+    @MainActor
+    func testLibraryStoreAllowsHidingSearchRootTab() {
+        let defaults = makeUserDefaults()
+        let store = LibraryStore(userDefaults: defaults)
+
+        XCTAssertTrue(AppTab.search.canHideFromRootTabBar)
+        XCTAssertTrue(AppTab.search.participatesInRootTabVisibilitySettings)
+
+        store.setRootTab(.search, isVisible: false)
+
+        XCTAssertFalse(store.visibleRootTabs.contains(.search))
+        XCTAssertFalse(LibraryStore(userDefaults: defaults).visibleRootTabs.contains(.search))
+    }
+
     func testDolbyVisionQualityUsesAutomaticCodecNegotiation() {
         XCTAssertTrue(BiliAPIClient.requiresAutomaticCodecNegotiation(requestedQuality: 125))
         XCTAssertTrue(BiliAPIClient.requiresAutomaticCodecNegotiation(requestedQuality: 126))

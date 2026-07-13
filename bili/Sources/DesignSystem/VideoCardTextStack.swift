@@ -4,6 +4,7 @@ struct VideoCardTextStack: View {
     let display: VideoCardDisplayModel
     let showsPublishTimeInAuthorRow: Bool
     let showsAuthorIdentity: Bool
+    let usesGenericAuthorIcon: Bool
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
@@ -21,14 +22,7 @@ struct VideoCardTextStack: View {
     private var authorRow: some View {
         HStack(spacing: 4) {
             if showsAuthorIdentity {
-                AvatarRemoteImage(urlString: display.avatarURLString, pixelSize: 48) {
-                    Image(systemName: "person.crop.circle.fill")
-                        .font(.system(size: 13, weight: .medium))
-                        .foregroundStyle(.tertiary)
-                }
-                .frame(width: 14, height: 14)
-                .clipShape(Circle())
-                .mediaShadow(.subtle)
+                authorIdentityIcon
 
                 Text(display.authorName)
                     .font(.caption2)
@@ -49,5 +43,21 @@ struct VideoCardTextStack: View {
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    @ViewBuilder
+    private var authorIdentityIcon: some View {
+        if usesGenericAuthorIcon {
+            BilibiliUPBadge(size: 14)
+        } else {
+            AvatarRemoteImage(urlString: display.avatarURLString, pixelSize: 48) {
+                Image(systemName: "person.crop.circle.fill")
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundStyle(.tertiary)
+            }
+            .frame(width: 14, height: 14)
+            .clipShape(Circle())
+            .mediaShadow(.subtle)
+        }
     }
 }

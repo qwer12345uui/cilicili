@@ -4,6 +4,7 @@ struct VideoDetailSummaryCard: View {
     @ObservedObject var viewModel: VideoDetailViewModel
     let contentWidth: CGFloat
     let showsNetworkDiagnosticsButton: Bool
+    let showsVideoInfo: Bool
     let onShowNetworkDiagnostics: () -> Void
     let renderPack: VideoDetailSummaryCardRenderPack
 
@@ -11,12 +12,14 @@ struct VideoDetailSummaryCard: View {
         viewModel: VideoDetailViewModel,
         contentWidth: CGFloat,
         showsNetworkDiagnosticsButton: Bool,
+        showsVideoInfo: Bool = true,
         onShowNetworkDiagnostics: @escaping () -> Void,
         onShowFavoriteFolders: @escaping () -> Void
     ) {
         self.viewModel = viewModel
         self.contentWidth = contentWidth
         self.showsNetworkDiagnosticsButton = showsNetworkDiagnosticsButton
+        self.showsVideoInfo = showsVideoInfo
         self.onShowNetworkDiagnostics = onShowNetworkDiagnostics
         renderPack = VideoDetailSummaryCardRenderPack(
             viewModel: viewModel,
@@ -26,9 +29,11 @@ struct VideoDetailSummaryCard: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            VideoDetailInfoBlock(
-                store: renderPack.descriptionStore
-            )
+            if showsVideoInfo {
+                VideoDetailInfoBlock(
+                    store: renderPack.descriptionStore
+                )
+            }
 
             VideoDetailActionStripContainer(
                 descriptionStore: renderPack.descriptionStore,

@@ -3,7 +3,8 @@ import SwiftUI
 struct SearchListView: View {
     @ObservedObject var viewModel: SearchViewModel
     let showsHotSearches: Bool
-    @Binding var showsAllHotSearches: Bool
+    var topContentInset: CGFloat = 0
+    let scrollEdgeStore: SearchScrollEdgeStore
 
     private let discoveryColumns = [
         GridItem(.flexible(), spacing: 10),
@@ -24,13 +25,15 @@ struct SearchListView: View {
                 }
             }
             .padding(.horizontal, 16)
-            .padding(.top, 20)
+            .padding(.top, topContentInset + 20)
             .padding(.bottom, 18)
+            .background(SearchScrollViewProbe(store: scrollEdgeStore))
         }
-        .nativeTopScrollEdgeEffect()
         .scrollDismissesKeyboard(.immediately)
         .scrollBounceBehavior(.always, axes: .vertical)
         .background(Color(.systemBackground))
+        .ignoresSafeArea(.container, edges: .top)
+        .nativeTopScrollEdgeEffect(hidesRootNavigationTitle: false)
         .refreshable {
             await refresh()
         }
@@ -51,31 +54,11 @@ struct SearchListView: View {
         } else {
             SearchContentSection(title: "大家都在搜", systemImage: "flame.fill") {
                 LazyVGrid(columns: discoveryColumns, alignment: .leading, spacing: 10) {
-                    ForEach(Array(displayedHotSearches.enumerated()), id: \.element.id) { index, item in
-                        SearchDiscoveryChip(item: item, index: index) {
+                    ForEach(displayedHotSearches) { item in
+                        SearchDiscoveryChip(item: item) {
                             Task { await viewModel.searchHotSearch(item) }
                         }
                     }
-                }
-
-                if viewModel.hotSearches.count > 8 {
-                    Button {
-                        withAnimation(.smooth(duration: 0.2)) {
-                            showsAllHotSearches.toggle()
-                        }
-                    } label: {
-                        Label(
-                            showsAllHotSearches ? "收起热搜" : "查看更多热搜",
-                            systemImage: showsAllHotSearches ? "chevron.up" : "chevron.down"
-                        )
-                        .font(.caption.weight(.semibold))
-                        .frame(maxWidth: .infinity)
-                        .frame(height: 32)
-                    }
-                    .biliGlassButtonStyle()
-                    .controlSize(.small)
-                    .foregroundStyle(.secondary)
-                    .padding(.top, 2)
                 }
             }
         }
@@ -100,7 +83,7 @@ struct SearchListView: View {
     }
 
     private var displayedHotSearches: [HotSearchItem] {
-        showsAllHotSearches ? viewModel.hotSearches : Array(viewModel.hotSearches.prefix(8))
+        Array(viewModel.hotSearches.prefix(10))
     }
 
     private var emptyResultsView: some View {
@@ -148,19 +131,11 @@ private struct SearchContentSection<Content: View>: View {
 
 private struct SearchDiscoveryChip: View {
     let item: HotSearchItem
-    let index: Int
     let action: () -> Void
 
     var body: some View {
         Button(action: action) {
-            HStack(spacing: 8) {
-                Text("\(index + 1)")
-                    .font(.caption2.weight(.bold))
-                    .monospacedDigit()
-                    .foregroundStyle(index < 3 ? .white : rankColor)
-                    .frame(width: 22, height: 22)
-                    .background(rankBackground, in: Circle())
-
+            HStack {
                 Text(item.showName ?? item.keyword)
                     .font(.subheadline.weight(.medium))
                     .foregroundStyle(.primary)
@@ -171,7 +146,7 @@ private struct SearchDiscoveryChip: View {
             }
             .padding(.horizontal, 12)
             .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
-            .background(Color(.secondarySystemGroupedBackground).opacity(0.82))
+            .background(Color(.secondarySystemBackground))
             .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
             .overlay {
                 RoundedRectangle(cornerRadius: 14, style: .continuous)
@@ -179,28 +154,7 @@ private struct SearchDiscoveryChip: View {
             }
         }
         .buttonStyle(.plain)
-        .accessibilityLabel("热门搜索第 \(index + 1) 名，\(item.showName ?? item.keyword)")
-    }
-
-    private var rankColor: Color {
-        switch index {
-        case 0:
-            return .pink
-        case 1:
-            return .orange
-        case 2:
-            return .yellow
-        default:
-            return .secondary
-        }
-    }
-
-    private var rankBackground: AnyShapeStyle {
-        if index < 3 {
-            AnyShapeStyle(rankColor.gradient)
-        } else {
-            AnyShapeStyle(Color(.tertiarySystemFill))
-        }
+        .accessibilityLabel("热门搜索，\(item.showName ?? item.keyword)")
     }
 }
 
@@ -214,7 +168,7 @@ private struct SearchDiscoveryLoadingCard: View {
                 ],
                 spacing: 10
             ) {
-                ForEach(0..<8, id: \.self) { _ in
+                ForEach(0..<10, id: \.self) { _ in
                     SkeletonBlock(height: 44, shape: .rounded(14))
                 }
             }

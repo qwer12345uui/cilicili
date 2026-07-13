@@ -25,6 +25,7 @@ final class VideoDetailShellSurfaceHost: UIView {
     private let state: State
     private let overlayState: VideoDetailShellOverlayState
     private let experimentState: VideoDetailPerformanceExperimentState
+    private let libraryStore: LibraryStore
     private let surfaceHostView: UIKitPlayerSurfaceHostView
     private let overlayHostingController: UIHostingController<PlayerOverlayHostRoot>
     private var cancellables = Set<AnyCancellable>()
@@ -33,7 +34,6 @@ final class VideoDetailShellSurfaceHost: UIView {
         playerViewModel: PlayerStateViewModel,
         detailViewModel: VideoDetailViewModel,
         dependencies: AppDependencies,
-        isPerformanceExperimentEnabled: Bool,
         onRequestFullscreen: @escaping () -> Void,
         onExitFullscreen: @escaping () -> Void,
         onToggleDanmaku: @escaping () -> Void,
@@ -42,15 +42,14 @@ final class VideoDetailShellSurfaceHost: UIView {
     ) {
         let state = State(playerViewModel: playerViewModel)
         let experimentState = VideoDetailPerformanceExperimentState()
-        experimentState.setEnabled(isPerformanceExperimentEnabled)
         let overlayState = VideoDetailShellOverlayState(
             detailViewModel: detailViewModel,
-            isPerformanceExperimentEnabled: isPerformanceExperimentEnabled,
             experimentState: experimentState
         )
         self.state = state
         self.overlayState = overlayState
         self.experimentState = experimentState
+        self.libraryStore = dependencies.libraryStore
         self.surfaceHostView = UIKitPlayerSurfaceHostView(
             viewModel: playerViewModel,
             isPictureInPictureEnabled: dependencies.libraryStore.pictureInPictureEnabled
@@ -119,15 +118,14 @@ final class VideoDetailShellSurfaceHost: UIView {
         state.isLandscape = landscape
     }
 
-    /// 系统旋转期间退化成原型同款 bare surface：只保留 live video surface。
+    /// 系统旋转期间退化成 bare surface，但始终保留弹幕层以避免重建和闪烁。
     func setBareSurfaceTransitionActive(_ active: Bool) {
         overlayState.setBareSurfaceTransitionActive(active)
         experimentState.setBareSurfaceTransitionActive(active)
         state.isBareSurfaceTransitionActive = active
         UIView.performWithoutAnimation {
-            overlayHostingController.view.isHidden = active
+            overlayHostingController.view.isHidden = false
             overlayHostingController.view.isUserInteractionEnabled = !active
-            overlayHostingController.view.removeLayerAnimationsRecursively()
         }
     }
 
@@ -148,11 +146,6 @@ final class VideoDetailShellSurfaceHost: UIView {
         guard state.playerViewModel !== playerViewModel else { return }
         state.playerViewModel = playerViewModel
         surfaceHostView.setPlayerViewModel(playerViewModel)
-    }
-
-    func setPerformanceExperimentEnabled(_ isEnabled: Bool) {
-        experimentState.setEnabled(isEnabled)
-        overlayState.setPerformanceExperimentEnabled(isEnabled)
     }
 
     func setVideoGravity(_ gravity: AVLayerVideoGravity) {
@@ -190,7 +183,6 @@ private struct VideoDetailShellOverlaySnapshot: Equatable {
 @MainActor
 private final class VideoDetailShellOverlayState: ObservableObject {
     @Published private(set) var snapshot: VideoDetailShellOverlaySnapshot
-    private var isPerformanceExperimentEnabled: Bool
     private var isBareSurfaceTransitionActive = false
     private var pendingSnapshot: VideoDetailShellOverlaySnapshot?
     private weak var experimentState: VideoDetailPerformanceExperimentState?
@@ -198,10 +190,8 @@ private final class VideoDetailShellOverlayState: ObservableObject {
 
     init(
         detailViewModel: VideoDetailViewModel,
-        isPerformanceExperimentEnabled: Bool,
         experimentState: VideoDetailPerformanceExperimentState
     ) {
-        self.isPerformanceExperimentEnabled = isPerformanceExperimentEnabled
         self.experimentState = experimentState
         self.snapshot = VideoDetailShellOverlaySnapshot(
             detail: detailViewModel.detail,
@@ -231,14 +221,6 @@ private final class VideoDetailShellOverlayState: ObservableObject {
         .store(in: &cancellables)
     }
 
-    func setPerformanceExperimentEnabled(_ isEnabled: Bool) {
-        guard isPerformanceExperimentEnabled != isEnabled else { return }
-        isPerformanceExperimentEnabled = isEnabled
-        if !isEnabled {
-            flushPendingSnapshot()
-        }
-    }
-
     func setBareSurfaceTransitionActive(_ active: Bool) {
         guard isBareSurfaceTransitionActive != active else { return }
         isBareSurfaceTransitionActive = active
@@ -249,15 +231,13 @@ private final class VideoDetailShellOverlayState: ObservableObject {
 
     private func receive(_ nextSnapshot: VideoDetailShellOverlaySnapshot) {
         guard nextSnapshot != snapshot else { return }
-        if isPerformanceExperimentEnabled && isBareSurfaceTransitionActive {
+        if isBareSurfaceTransitionActive {
             pendingSnapshot = nextSnapshot
             experimentState?.recordOverlayDeferred()
             return
         }
         snapshot = nextSnapshot
-        if isPerformanceExperimentEnabled {
-            experimentState?.recordOverlayPublish()
-        }
+        experimentState?.recordOverlayPublish()
     }
 
     private func flushPendingSnapshot() {
@@ -265,9 +245,7 @@ private final class VideoDetailShellOverlayState: ObservableObject {
         self.pendingSnapshot = nil
         guard pendingSnapshot != snapshot else { return }
         snapshot = pendingSnapshot
-        if isPerformanceExperimentEnabled {
-            experimentState?.recordOverlayFlush()
-        }
+        experimentState?.recordOverlayFlush()
     }
 }
 
@@ -415,16 +393,19 @@ private struct SurfaceOnlyPlayerOverlayRoot: View {
 
                     BiliPlayerSurfaceOverlayLayer(state: chromeState)
                         .zIndex(2)
+                }
 
-                    VideoDetailPlayerSurfaceDanmakuLayer(
-                        store: detailViewModel.danmakuRenderStore,
-                        playerViewModel: viewModel,
-                        usesLandscapePlaybackChrome: configuration.isFullscreenActive,
-                        onPlaybackTime: { detailViewModel.updateDanmakuPlaybackTime($0, underLoad: $1) }
-                    )
-                    .allowsHitTesting(false)
-                    .zIndex(2.5)
+                VideoDetailPlayerSurfaceDanmakuLayer(
+                    store: detailViewModel.danmakuRenderStore,
+                    playerViewModel: viewModel,
+                    usesLandscapePlaybackChrome: configuration.isFullscreenActive,
+                    isLayoutTransitioning: isBareSurfaceTransitionActive,
+                    onPlaybackTime: { detailViewModel.updateDanmakuPlaybackTime($0, underLoad: $1) }
+                )
+                .allowsHitTesting(false)
+                .zIndex(2.5)
 
+                if !isBareSurfaceTransitionActive {
                     BiliPlayerControlsOverlayLayer(
                         state: chromeState,
                         playbackControls: AnyView(

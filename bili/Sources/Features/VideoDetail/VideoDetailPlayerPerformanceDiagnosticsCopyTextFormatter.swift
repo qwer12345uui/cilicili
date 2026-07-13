@@ -17,9 +17,7 @@ enum PlayerPerformanceOverlayDiagnosticsCopyTextFormatter {
             )
         ]
 
-        if experimentSnapshot.isVisible {
-            sections.append(experimentText(experimentSnapshot))
-        }
+        sections.append(experimentText(experimentSnapshot))
 
         sections.append(contentsOf: [
             PlayerPerformanceCopyTextFormatter.performanceCopyText(
@@ -39,8 +37,8 @@ enum PlayerPerformanceOverlayDiagnosticsCopyTextFormatter {
 
     private static func experimentText(_ snapshot: VideoDetailPerformanceExperimentSnapshot) -> String {
         [
-            "视频详情页省刷新实验",
-            "enabled: \(snapshot.isEnabled ? "true" : "false")",
+            "视频详情页刷新优化",
+            "enabled: true",
             "contentShell: narrowObservation",
             "rotationStrategy: videoSurfaceFirst",
             "bareSurfaceTransition: \(snapshot.isBareSurfaceTransitionActive ? "true" : "false")",

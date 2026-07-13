@@ -1,6 +1,7 @@
 import SwiftUI
 
 struct YouTubeStyleVideoFeedThumbnail: View {
+    @Environment(\.showsVideoCoverDurationBadges) private var showsVideoCoverDurationBadges
     let display: VideoCardDisplayModel
     let showsPlayBadge: Bool
     let coverAspectRatio: CGFloat
@@ -39,7 +40,7 @@ struct YouTubeStyleVideoFeedThumbnail: View {
 
     @ViewBuilder
     private var thumbnailBottomScrim: some View {
-        if showsPlayBadge || !display.durationText.isEmpty {
+        if showsPlayBadge || (showsVideoCoverDurationBadges && !display.durationText.isEmpty) {
             VideoCoverBottomScrim()
         }
     }
@@ -55,7 +56,7 @@ struct YouTubeStyleVideoFeedThumbnail: View {
 
     @ViewBuilder
     private var durationBadge: some View {
-        if !display.durationText.isEmpty {
+        if showsVideoCoverDurationBadges, !display.durationText.isEmpty {
             VideoCoverDurationBadge(display.durationText)
                 .padding(12)
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)

@@ -133,7 +133,6 @@ struct VideoDetailRuntimeSettingsSnapshot: Equatable {
     var effectivePlaybackCDNPreference: PlaybackCDNPreference = .automatic
     var playbackAutoOptimizationEnabled = true
     var minimizesTabBarOnScroll = true
-    var videoDetailPerformanceExperimentEnabled = false
 }
 
 @MainActor
@@ -150,7 +149,6 @@ final class VideoDetailRuntimeSettingsStore: ObservableObject {
     var effectivePlaybackCDNPreference: PlaybackCDNPreference { snapshot.effectivePlaybackCDNPreference }
     var playbackAutoOptimizationEnabled: Bool { snapshot.playbackAutoOptimizationEnabled }
     var minimizesTabBarOnScroll: Bool { snapshot.minimizesTabBarOnScroll }
-    var videoDetailPerformanceExperimentEnabled: Bool { snapshot.videoDetailPerformanceExperimentEnabled }
 
     func bind(_ libraryStore: LibraryStore) {
         guard self.libraryStore !== libraryStore else {
@@ -176,8 +174,7 @@ final class VideoDetailRuntimeSettingsStore: ObservableObject {
             preferredVideoQuality: libraryStore.effectivePreferredVideoQuality,
             effectivePlaybackCDNPreference: libraryStore.effectivePlaybackCDNPreference,
             playbackAutoOptimizationEnabled: libraryStore.isPlaybackAutoOptimizationEnabled,
-            minimizesTabBarOnScroll: libraryStore.minimizesTabBarOnScroll,
-            videoDetailPerformanceExperimentEnabled: libraryStore.videoDetailPerformanceExperimentEnabled
+            minimizesTabBarOnScroll: libraryStore.minimizesTabBarOnScroll
         )
         guard next != snapshot else { return }
         snapshot = next

@@ -1,6 +1,7 @@
 import SwiftUI
 
 struct DynamicFeedVideoCover: View {
+    @Environment(\.showsVideoCoverDurationBadges) private var showsVideoCoverDurationBadges
     let video: VideoItem
     let display: VideoCardDisplayModel
     @State private var coverLoadedState = VideoCoverLoadedState()
@@ -25,7 +26,7 @@ struct DynamicFeedVideoCover: View {
                         .padding(8)
                         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
 
-                    if video.duration != nil {
+                    if showsVideoCoverDurationBadges, video.duration != nil {
                         VideoCoverDurationBadge(BiliFormatters.duration(video.duration))
                             .padding(12)
                             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)

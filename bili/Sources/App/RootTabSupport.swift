@@ -35,7 +35,7 @@ extension View {
             VideoDetailView(seedVideo: video)
         }
         .navigationDestination(for: PgcSeasonRoute.self) { route in
-            PgcSeasonView(route: route)
+            PgcSeasonPlaybackRouteView(route: route)
         }
         .navigationDestination(for: VideoOwner.self) { owner in
             UploaderView(owner: owner)
@@ -114,16 +114,21 @@ struct RootTabBarAppearanceInstaller: UIViewControllerRepresentable {
     }
 
     func updateUIViewController(_ controller: Controller, context _: Context) {
+        controller.tintColorHex = tintColorHex
         controller.selectedColor = AppThemeTintColor.uiColor(for: tintColorHex)
         controller.applySoon()
     }
 
     final class Controller: UIViewController {
         var selectedColor = AppThemeTintColor.uiColor(for: AppThemeTintColor.defaultHex)
+        var tintColorHex = AppThemeTintColor.defaultHex
+        private weak var appliedTabBar: UITabBar?
+        private var appliedTintColorHex: String?
+        private var appliedInterfaceStyle: UIUserInterfaceStyle?
 
         override func viewDidAppear(_ animated: Bool) {
             super.viewDidAppear(animated)
-            applyAppearance()
+            applyAppearance(force: true)
         }
 
         override func viewDidLayoutSubviews() {
@@ -137,8 +142,15 @@ struct RootTabBarAppearanceInstaller: UIViewControllerRepresentable {
             }
         }
 
-        private func applyAppearance() {
+        private func applyAppearance(force: Bool = false) {
             guard let tabBar = tabBarController?.tabBar ?? enclosingTabBarController()?.tabBar else { return }
+            let interfaceStyle = tabBar.traitCollection.userInterfaceStyle
+            guard force
+                || appliedTabBar !== tabBar
+                || appliedTintColorHex != tintColorHex
+                || appliedInterfaceStyle != interfaceStyle else {
+                return
+            }
 
             let appearance = UITabBarAppearance()
             appearance.configureWithTransparentBackground()
@@ -162,9 +174,13 @@ struct RootTabBarAppearanceInstaller: UIViewControllerRepresentable {
             tabBar.isTranslucent = true
             tabBar.backgroundColor = .clear
             tabBar.layer.shadowColor = UIColor.black.cgColor
-            tabBar.layer.shadowOpacity = traitCollection.userInterfaceStyle == .dark ? 0.14 : 0.05
+            tabBar.layer.shadowOpacity = interfaceStyle == .dark ? 0.14 : 0.05
             tabBar.layer.shadowRadius = 14
             tabBar.layer.shadowOffset = CGSize(width: 0, height: -2)
+
+            appliedTabBar = tabBar
+            appliedTintColorHex = tintColorHex
+            appliedInterfaceStyle = interfaceStyle
         }
 
         private func configure(

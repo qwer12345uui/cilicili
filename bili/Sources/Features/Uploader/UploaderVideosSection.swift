@@ -117,7 +117,8 @@ private struct UploaderVideoGridItem: View {
             HomeFeedVideoCardLabel(
                 metrics: metrics,
                 display: VideoCardDisplayModel(video: video),
-                showsAuthorIdentity: false
+                showsAuthorIdentity: false,
+                usesGenericAuthorIcon: false
             )
         }
         .task {

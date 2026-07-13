@@ -23,7 +23,7 @@ struct MineRootTabSettingsSection: View {
         } header: {
             Text("底部 Tab")
         } footer: {
-            Text("首页和我的固定显示，搜索使用系统独立搜索按钮。")
+            Text("首页和我的固定显示，其余 Tab 可按需显示。")
         }
     }
 }

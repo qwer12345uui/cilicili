@@ -98,6 +98,7 @@ nonisolated struct StoredPlaybackProgress: Codable, Equatable {
 @MainActor
 final class LibraryStore: ObservableObject {
     @Published private(set) var appearanceMode: AppAppearanceMode
+    @Published private(set) var appIconPreference: AppIconPreference
     @Published private(set) var appTintColorHex: String
     @Published private(set) var defaultPlaybackRate: Double
     @Published private(set) var playbackHistorySyncThresholdSeconds: Int
@@ -133,7 +134,6 @@ final class LibraryStore: ObservableObject {
     @Published private(set) var playerControlEdgeScrimEnabled: Bool
     @Published private(set) var showsVideoDetailNetworkDiagnosticsButton: Bool
     @Published private(set) var showsVideoDetailPinnedProgressBar: Bool
-    @Published private(set) var videoDetailPerformanceExperimentEnabled: Bool
     @Published private(set) var incognitoModeEnabled: Bool
     @Published private(set) var guestModeEnabled: Bool
     @Published private(set) var minimizesTabBarOnScroll: Bool
@@ -142,6 +142,8 @@ final class LibraryStore: ObservableObject {
     @Published private(set) var remoteImageQualityPreference: RemoteImageQualityPreference
     @Published private(set) var videoCoverBadgeShadowOpacity: Double
     @Published private(set) var videoCoverBottomScrimEnabled: Bool
+    @Published private(set) var showsVideoCoverDurationBadges: Bool
+    @Published private(set) var unifiedVideoCoverBorderExperimentEnabled: Bool
     @Published private(set) var force120HzScrollingEnabled: Bool
     @Published private(set) var visibleRootTabs: [AppTab]
     @Published private(set) var homeRefreshTriggerDistance: Double
@@ -151,6 +153,7 @@ final class LibraryStore: ObservableObject {
 
     private let userDefaults: UserDefaults
     private static let appearanceModeKey = "cc.bili.appearance.mode.v1"
+    private static let appIconPreferenceKey = "cc.bili.appearance.appIconPreference.v1"
     private static let appTintColorHexKey = "cc.bili.appearance.tintColorHex.v1"
     private static let appTintColorDefaultMigrationKey = "cc.bili.appearance.tintColorDefaultPinkMigration.v1"
     private static let appTintColorDefaultToneMigrationKey = "cc.bili.appearance.tintColorDefaultToneMigration.v2"
@@ -190,7 +193,6 @@ final class LibraryStore: ObservableObject {
     nonisolated static let playerControlEdgeScrimEnabledKey = "cc.bili.playback.controlEdgeScrimEnabled.v1"
     private static let showsVideoDetailNetworkDiagnosticsButtonKey = "cc.bili.videoDetail.showsNetworkDiagnosticsButton.v1"
     private static let showsVideoDetailPinnedProgressBarKey = "cc.bili.videoDetail.showsPinnedProgressBar.v1"
-    private static let videoDetailPerformanceExperimentEnabledKey = "cc.bili.videoDetail.performanceExperimentEnabled.v1"
     private static let incognitoModeEnabledKey = "cc.bili.privacy.incognitoModeEnabled.v1"
     private static let guestModeEnabledKey = "cc.bili.privacy.guestModeEnabled.v1"
     private static let minimizesTabBarOnScrollKey = "cc.bili.display.minimizesTabBarOnScroll.v1"
@@ -199,6 +201,8 @@ final class LibraryStore: ObservableObject {
     private static let remoteImageQualityPreferenceKey = RemoteImageQualityPreference.storageKey
     private static let videoCoverBadgeShadowOpacityKey = VideoCoverBadgeShadow.storageKey
     private static let videoCoverBottomScrimEnabledKey = VideoCoverBottomScrimSettings.storageKey
+    private static let videoCoverDurationBadgesEnabledKey = VideoCoverDurationBadgeSettings.storageKey
+    private static let unifiedVideoCoverBorderExperimentEnabledKey = "cc.bili.display.unifiedVideoCoverBorderExperimentEnabled.v1"
     private static let force120HzScrollingEnabledKey = RefreshRateManager.isEnabledKey
     private static let visibleRootTabsKey = "cc.bili.display.visibleRootTabs.v1"
     private static let homeRefreshTriggerDistanceKey = "cc.bili.home.refreshTriggerDistance.v1"
@@ -289,6 +293,9 @@ final class LibraryStore: ObservableObject {
         self.userDefaults = userDefaults
         self.appearanceMode = AppAppearanceMode(
             rawValue: userDefaults.string(forKey: Self.appearanceModeKey) ?? ""
+        ) ?? .system
+        self.appIconPreference = AppIconPreference(
+            rawValue: userDefaults.string(forKey: Self.appIconPreferenceKey) ?? ""
         ) ?? .system
         let storedAppTintColorHex = AppThemeTintColor.normalizedHex(
             userDefaults.string(forKey: Self.appTintColorHexKey)
@@ -401,7 +408,6 @@ final class LibraryStore: ObservableObject {
         self.playerControlEdgeScrimEnabled = userDefaults.object(forKey: Self.playerControlEdgeScrimEnabledKey) as? Bool ?? true
         self.showsVideoDetailNetworkDiagnosticsButton = userDefaults.object(forKey: Self.showsVideoDetailNetworkDiagnosticsButtonKey) as? Bool ?? false
         self.showsVideoDetailPinnedProgressBar = userDefaults.object(forKey: Self.showsVideoDetailPinnedProgressBarKey) as? Bool ?? false
-        self.videoDetailPerformanceExperimentEnabled = userDefaults.object(forKey: Self.videoDetailPerformanceExperimentEnabledKey) as? Bool ?? false
         self.incognitoModeEnabled = userDefaults.object(forKey: Self.incognitoModeEnabledKey) as? Bool ?? false
         self.guestModeEnabled = userDefaults.object(forKey: Self.guestModeEnabledKey) as? Bool ?? false
         self.minimizesTabBarOnScroll = userDefaults.object(forKey: Self.minimizesTabBarOnScrollKey) as? Bool ?? true
@@ -418,6 +424,11 @@ final class LibraryStore: ObservableObject {
         )
         self.videoCoverBottomScrimEnabled = userDefaults.object(forKey: Self.videoCoverBottomScrimEnabledKey) as? Bool
             ?? VideoCoverBottomScrimSettings.defaultIsEnabled
+        self.showsVideoCoverDurationBadges = userDefaults.object(forKey: Self.videoCoverDurationBadgesEnabledKey) as? Bool
+            ?? VideoCoverDurationBadgeSettings.defaultIsEnabled
+        self.unifiedVideoCoverBorderExperimentEnabled = userDefaults.object(
+            forKey: Self.unifiedVideoCoverBorderExperimentEnabledKey
+        ) as? Bool ?? VideoCoverBorderExperiment.defaultIsEnabled
         self.force120HzScrollingEnabled = userDefaults.object(forKey: Self.force120HzScrollingEnabledKey) as? Bool ?? false
         self.visibleRootTabs = Self.normalizedVisibleRootTabs(
             userDefaults.stringArray(forKey: Self.visibleRootTabsKey)
@@ -437,6 +448,11 @@ final class LibraryStore: ObservableObject {
     func setAppearanceMode(_ mode: AppAppearanceMode) {
         appearanceMode = mode
         userDefaults.set(mode.rawValue, forKey: Self.appearanceModeKey)
+    }
+
+    func setAppIconPreference(_ preference: AppIconPreference) {
+        appIconPreference = preference
+        userDefaults.set(preference.rawValue, forKey: Self.appIconPreferenceKey)
     }
 
     @discardableResult
@@ -928,11 +944,6 @@ final class LibraryStore: ObservableObject {
         userDefaults.set(isEnabled, forKey: Self.showsVideoDetailPinnedProgressBarKey)
     }
 
-    func setVideoDetailPerformanceExperimentEnabled(_ isEnabled: Bool) {
-        videoDetailPerformanceExperimentEnabled = isEnabled
-        userDefaults.set(isEnabled, forKey: Self.videoDetailPerformanceExperimentEnabledKey)
-    }
-
     func setIncognitoModeEnabled(_ isEnabled: Bool) {
         incognitoModeEnabled = isEnabled
         userDefaults.set(isEnabled, forKey: Self.incognitoModeEnabledKey)
@@ -972,6 +983,16 @@ final class LibraryStore: ObservableObject {
     func setVideoCoverBottomScrimEnabled(_ isEnabled: Bool) {
         videoCoverBottomScrimEnabled = isEnabled
         userDefaults.set(isEnabled, forKey: Self.videoCoverBottomScrimEnabledKey)
+    }
+
+    func setShowsVideoCoverDurationBadges(_ isEnabled: Bool) {
+        showsVideoCoverDurationBadges = isEnabled
+        userDefaults.set(isEnabled, forKey: Self.videoCoverDurationBadgesEnabledKey)
+    }
+
+    func setUnifiedVideoCoverBorderExperimentEnabled(_ isEnabled: Bool) {
+        unifiedVideoCoverBorderExperimentEnabled = isEnabled
+        userDefaults.set(isEnabled, forKey: Self.unifiedVideoCoverBorderExperimentEnabledKey)
     }
 
     func setForce120HzScrollingEnabled(_ isEnabled: Bool) {

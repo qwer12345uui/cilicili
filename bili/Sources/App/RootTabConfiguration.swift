@@ -41,15 +41,15 @@ enum AppTab: String, CaseIterable, Codable, Identifiable, Hashable {
 
     var canHideFromRootTabBar: Bool {
         switch self {
-        case .home, .mine, .search:
+        case .home, .mine:
             return false
-        case .dynamic, .live:
+        case .dynamic, .live, .search:
             return true
         }
     }
 
     var participatesInRootTabVisibilitySettings: Bool {
-        self != .search
+        true
     }
 
     static let defaultVisibleTabs: [AppTab] = [.home, .dynamic, .live, .mine, .search]
@@ -65,9 +65,6 @@ enum AppTab: String, CaseIterable, Codable, Identifiable, Hashable {
         }
         if !normalized.contains(.mine) {
             normalized.append(.mine)
-        }
-        if !normalized.contains(.search) {
-            normalized.append(.search)
         }
         return normalized
     }

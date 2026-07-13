@@ -2397,35 +2397,43 @@ nonisolated final class BiliAPIClient {
     }
 
     func fetchPgcSeasonInfo(seasonID: Int?, epID: Int? = nil) async throws -> PgcSeasonInfo {
-        var query: [String: String] = [:]
-        if let seasonID {
-            query["season_id"] = String(seasonID)
+        var candidates = [(query: [String: String], referer: String)]()
+        if let epID, epID > 0 {
+            candidates.append((
+                query: ["ep_id": String(epID)],
+                referer: "https://www.bilibili.com/bangumi/play/ep\(epID)"
+            ))
         }
-        if let epID {
-            query["ep_id"] = String(epID)
+        if let seasonID, seasonID > 0 {
+            candidates.append((
+                query: ["season_id": String(seasonID)],
+                referer: "https://www.bilibili.com/bangumi/play/ss\(seasonID)"
+            ))
         }
-        guard !query.isEmpty else { throw BiliAPIError.missingPayload }
+        guard !candidates.isEmpty else { throw BiliAPIError.missingPayload }
 
-        let referer: String
-        if let epID {
-            referer = "https://www.bilibili.com/bangumi/play/ep\(epID)"
-        } else if let seasonID {
-            referer = "https://www.bilibili.com/bangumi/play/ss\(seasonID)"
-        } else {
-            referer = "https://www.bilibili.com/bangumi/play/"
+        var lastError: Error?
+        for candidate in candidates {
+            do {
+                let response: BiliResponse<PgcSeasonInfo> = try await get(
+                    base: baseURL,
+                    path: "/pgc/view/web/season",
+                    query: candidate.query,
+                    referer: candidate.referer,
+                    responseCachePolicy: .detail
+                )
+                guard response.code == 0 else {
+                    throw BiliAPIError.api(code: response.code, message: response.displayMessage)
+                }
+                guard let info = response.payload else { throw BiliAPIError.missingPayload }
+                return info
+            } catch is CancellationError {
+                throw CancellationError()
+            } catch {
+                lastError = error
+            }
         }
-        let response: BiliResponse<PgcSeasonInfo> = try await get(
-            base: baseURL,
-            path: "/pgc/view/web/season",
-            query: query,
-            referer: referer,
-            responseCachePolicy: .detail
-        )
-        guard response.code == 0 else {
-            throw BiliAPIError.api(code: response.code, message: response.displayMessage)
-        }
-        guard let info = response.payload else { throw BiliAPIError.missingPayload }
-        return info
+        throw lastError ?? BiliAPIError.missingPayload
     }
 
     func fetchPlayURL(

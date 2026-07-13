@@ -25,7 +25,6 @@ struct VideoDetailShellRepresentable: UIViewControllerRepresentable {
             fullscreenCoordinator: fullscreenCoordinator,
             runtimeSettings: runtimeSettings,
             dependencies: dependencies,
-            isPerformanceExperimentEnabled: runtimeSettings.videoDetailPerformanceExperimentEnabled,
             selectedContentTab: $selectedContentTab,
             onShowNetworkDiagnostics: { isShowingNetworkDiagnostics = true },
             onShowFavoriteFolders: { isShowingFavoriteFolders = true },
@@ -35,7 +34,5 @@ struct VideoDetailShellRepresentable: UIViewControllerRepresentable {
         )
     }
 
-    func updateUIViewController(_ uiViewController: VideoDetailShellViewController, context: Context) {
-        uiViewController.setPerformanceExperimentEnabled(runtimeSettings.videoDetailPerformanceExperimentEnabled)
-    }
+    func updateUIViewController(_: VideoDetailShellViewController, context _: Context) {}
 }

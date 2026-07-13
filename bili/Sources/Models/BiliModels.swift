@@ -221,7 +221,7 @@ nonisolated struct VideoItem: Identifiable, Decodable, Hashable, Sendable {
     }
 
     nonisolated var isPGCEpisode: Bool {
-        if pgcEpisodeID != nil || pgcSeasonID != nil {
+        if (pgcEpisodeID ?? 0) > 0 || (pgcSeasonID ?? 0) > 0 {
             return true
         }
         guard bvid.hasPrefix("ep") else { return false }
@@ -2996,6 +2996,8 @@ nonisolated struct AccountVideoEntry: Identifiable, Hashable {
     let savedAt: Date
     let playbackTime: TimeInterval?
     let playbackDuration: TimeInterval?
+    let pgcSeasonID: Int?
+    let pgcEpisodeID: Int?
 
     var videoItem: VideoItem {
         VideoItem(
@@ -3012,7 +3014,9 @@ nonisolated struct AccountVideoEntry: Identifiable, Hashable {
             pages: nil,
             dimension: nil,
             historyResumeTime: resumeTime,
-            historyCID: cid
+            historyCID: cid,
+            pgcSeasonID: pgcSeasonID,
+            pgcEpisodeID: pgcEpisodeID
         )
     }
 
@@ -4414,22 +4418,47 @@ nonisolated enum DynamicJSONValue: Codable, Hashable {
         let upper = object["upper"]?.objectValue
         let ownerObject = object["owner"]?.objectValue
         let statObject = object["stat"]?.objectValue ?? object["cnt_info"]?.objectValue
-        let bvid = firstNonBlankDynamicText([
-            object["bvid"]?.textValue,
-            history?["bvid"]?.textValue,
-            object["bvid_str"]?.textValue
-        ]) ?? Self.bvid(from: firstNonBlankDynamicText([
+        let routeURL = firstNonBlankDynamicText([
             object["uri"]?.textValue,
             object["url"]?.textValue,
             object["link"]?.textValue
-        ]))
+        ])
+        let historyBusiness = history?["business"]?.textValue?.lowercased()
+        let isPGCHistory = historyBusiness?.contains("pgc") == true
+        let routePGCEpisodeID = Self.pgcID(from: routeURL, prefix: "ep")
+        let rawPGCEpisodeID = Self.positiveID(history?["epid"]?.intValue)
+            ?? Self.positiveID(history?["ep_id"]?.intValue)
+            ?? Self.positiveID(object["epid"]?.intValue)
+            ?? Self.positiveID(object["ep_id"]?.intValue)
+            ?? (isPGCHistory ? Self.positiveID(history?["oid"]?.intValue) : nil)
+        let isPGC = routePGCEpisodeID != nil
+            || rawPGCEpisodeID != nil
+            || isPGCHistory
+            || routeURL?.contains("/bangumi/play/") == true
+        let pgcEpisodeID = isPGC
+            ? routePGCEpisodeID ?? rawPGCEpisodeID
+            : nil
+        let pgcSeasonID = isPGC
+            ? Self.positiveID(object["season_id"]?.intValue)
+                ?? Self.positiveID(history?["season_id"]?.intValue)
+                ?? Self.pgcID(from: routeURL, prefix: "ss")
+            : nil
+
+        let routeBVID = firstNonBlankDynamicText([
+            object["bvid"]?.textValue,
+            history?["bvid"]?.textValue,
+            object["bvid_str"]?.textValue
+        ]) ?? Self.bvid(from: routeURL)
+        let bvid = routeBVID
+            ?? pgcEpisodeID.map { "ep\($0)" }
+            ?? pgcSeasonID.map { "ss\($0)" }
         guard let bvid, !bvid.isEmpty else { return nil }
 
         let aid = object["aid"]?.intValue
-            ?? object["id"]?.intValue
-            ?? object["rid"]?.intValue
-            ?? history?["oid"]?.intValue
             ?? history?["aid"]?.intValue
+            ?? (!isPGC ? object["id"]?.intValue : nil)
+            ?? (!isPGC ? object["rid"]?.intValue : nil)
+            ?? (!isPGC ? history?["oid"]?.intValue : nil)
         let title = firstNonBlankDynamicText([
             object["title"]?.textValue,
             object["long_title"]?.textValue,
@@ -4488,7 +4517,9 @@ nonisolated enum DynamicJSONValue: Codable, Hashable {
             cid: cid,
             savedAt: timestamp.map { Date(timeIntervalSince1970: $0) } ?? Date(),
             playbackTime: playbackTime,
-            playbackDuration: duration.map(TimeInterval.init)
+            playbackDuration: duration.map(TimeInterval.init),
+            pgcSeasonID: pgcSeasonID,
+            pgcEpisodeID: pgcEpisodeID
         )
     }
 
@@ -4598,6 +4629,19 @@ nonisolated enum DynamicJSONValue: Codable, Hashable {
         guard let text else { return nil }
         guard let range = text.range(of: #"BV[A-Za-z0-9]{10,}"#, options: .regularExpression) else { return nil }
         return String(text[range])
+    }
+
+    private static func pgcID(from text: String?, prefix: String) -> Int? {
+        guard let text,
+              let range = text.range(of: "\(prefix)/?[0-9]+", options: .regularExpression)
+        else { return nil }
+        let digits = String(text[range].filter(\.isNumber))
+        return positiveID(Int(digits))
+    }
+
+    private static func positiveID(_ value: Int?) -> Int? {
+        guard let value, value > 0 else { return nil }
+        return value
     }
 }
 

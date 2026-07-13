@@ -1,8 +1,9 @@
 import SwiftUI
 
-struct VideoDetailPgcEpisodeSection: View {
+struct VideoDetailPgcEpisodeSection<ActionContent: View>: View {
     let detail: VideoItem
     let selectEpisode: (VideoItem) -> Void
+    @ViewBuilder let actionContent: () -> ActionContent
 
     @EnvironmentObject private var dependencies: AppDependencies
     @State private var season: PgcSeasonInfo?
@@ -21,13 +22,22 @@ struct VideoDetailPgcEpisodeSection: View {
     var body: some View {
         Group {
             if let season {
-                VideoDetailPgcEpisodeLoadedSection(
-                    detail: detail,
-                    season: season,
-                    selectEpisode: selectEpisode,
-                    order: $order,
-                    showsEpisodeSheet: $isEpisodeSheetPresented
-                )
+                VStack(alignment: .leading, spacing: 18) {
+                    VideoDetailPgcSeasonInfoBlock(
+                        season: season,
+                        detail: detail
+                    )
+
+                    actionContent()
+
+                    VideoDetailPgcEpisodeLoadedSection(
+                        detail: detail,
+                        season: season,
+                        selectEpisode: selectEpisode,
+                        order: $order,
+                        showsEpisodeSheet: $isEpisodeSheetPresented
+                    )
+                }
             } else if state == .idle || state.isLoading {
                 VideoDetailPgcEpisodeLoadingSection()
             } else if case .failed(let message) = state {

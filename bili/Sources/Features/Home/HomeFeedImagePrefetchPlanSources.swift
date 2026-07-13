@@ -1,12 +1,12 @@
 import Foundation
 
 extension HomeFeedImagePrefetchPlan {
-    nonisolated static func targetPixelSizes(for layout: HomeFeedLayout) -> (cover: Int, avatar: Int) {
+    nonisolated static func targetPixelSize(for layout: HomeFeedLayout) -> Int {
         switch layout {
         case .singleColumn:
-            return (720, 64)
+            return 720
         case .borderedSingleColumn, .doubleColumn, .borderedDoubleColumn:
-            return (480, 48)
+            return 480
         }
     }
 

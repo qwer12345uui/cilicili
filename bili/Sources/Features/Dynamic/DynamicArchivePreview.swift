@@ -1,6 +1,7 @@
 import SwiftUI
 
 struct DynamicArchivePreview: View {
+    @Environment(\.showsVideoCoverDurationBadges) private var showsVideoCoverDurationBadges
     enum Style {
         case large
         case compact
@@ -87,7 +88,7 @@ struct DynamicArchivePreview: View {
 
                 AdaptiveVideoCoverImage(display: display, style: .exactCrop, fixedSize: fixedSize)
 
-                if showsPlayGlyph || showsDurationBadge {
+                if showsPlayGlyph || (showsVideoCoverDurationBadges && showsDurationBadge) {
                     VideoCoverBottomScrim()
                 }
 
@@ -97,7 +98,7 @@ struct DynamicArchivePreview: View {
                         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
                 }
 
-                if showsDurationBadge, video.duration != nil {
+                if showsVideoCoverDurationBadges, showsDurationBadge, video.duration != nil {
                     VideoCoverDurationBadge(BiliFormatters.duration(video.duration))
                         .padding(8)
                         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)

@@ -119,14 +119,14 @@ struct BiliPlayerLifecycleActionBuilder {
             releaseRotationSnapshotAfterSurfaceSettle()
         }
         applyVideoGravity()
-        visibilityActions.show(scheduleAutoHide: true, animated: !configuration.isLayoutTransitioning)
+        visibilityActions.scheduleAutoHide()
     }
 
     private func handlePresentationChange() {
         guard !viewModel.isTerminated else { return }
         guard allowsPlaybackActivation else { return }
         applyVideoGravity()
-        visibilityActions.show(scheduleAutoHide: true, animated: !configuration.isLayoutTransitioning)
+        visibilityActions.scheduleAutoHide()
     }
 
     private func handleLayoutTransitionChange(_ isTransitioning: Bool) {
@@ -151,10 +151,9 @@ struct BiliPlayerLifecycleActionBuilder {
             }
             viewModel.stabilizeSurfaceLayoutAfterGeometryChange()
             visibilityActions.cancelAutoHide()
-            visibilityActions.show(scheduleAutoHide: false, animated: false)
         } else {
             viewModel.stabilizeSurfaceLayoutAfterGeometryChange()
-            visibilityActions.show(scheduleAutoHide: true, animated: false)
+            visibilityActions.scheduleAutoHide()
             // 旋转布局结束：等 surface 真正就绪出帧后再淡出快照（轮询 ready，连续稳定再 reveal）。
             releaseRotationSnapshotAfterSurfaceSettle()
         }

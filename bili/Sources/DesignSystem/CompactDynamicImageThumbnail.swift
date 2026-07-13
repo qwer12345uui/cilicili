@@ -57,7 +57,8 @@ struct CompactDynamicImageThumbnail: View {
             cornerRadius: 8,
             shadowLevel: .subtle,
             shadowOpacityScale: thumbnailShadowOpacityScale,
-            borderOpacityScale: thumbnailShadowOpacityScale
+            borderOpacityScale: thumbnailShadowOpacityScale,
+            appliesUnifiedBorderExperiment: false
         )
         .contentShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
     }

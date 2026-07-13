@@ -21,6 +21,7 @@ struct MineContentView: View {
             MineAccountLibrarySection(viewModel: viewModel)
 
             MineSettingsSection(libraryStore: libraryStore)
+            MineAboutSection()
         }
         .tint(libraryStore.appTintColor)
         .formStyle(.grouped)

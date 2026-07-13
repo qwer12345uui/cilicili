@@ -23,7 +23,8 @@ struct SearchPosterCover: View {
         .videoCoverSurface(
             cornerRadius: 10,
             shadowLevel: .subtle,
-            emphasizesBorder: true
+            emphasizesBorder: true,
+            appliesUnifiedBorderExperiment: false
         )
     }
 }

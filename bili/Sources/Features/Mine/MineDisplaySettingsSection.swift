@@ -18,6 +18,18 @@ struct MineDisplaySettingsSection: View {
             }
             .tint(libraryStore.appTintColor)
 
+            Picker(selection: Binding(
+                get: { libraryStore.appIconPreference },
+                set: { libraryStore.setAppIconPreference($0) }
+            )) {
+                ForEach(AppIconPreference.allCases) { preference in
+                    Text(preference.title).tag(preference)
+                }
+            } label: {
+                Label("应用图标", systemImage: "app")
+            }
+            .pickerStyle(.navigationLink)
+
             MineThemeColorControl(libraryStore: libraryStore)
 
             Picker(selection: Binding(
@@ -41,6 +53,20 @@ struct MineDisplaySettingsSection: View {
 
             MineImageCacheControl()
 
+            Toggle(isOn: Binding(
+                get: { libraryStore.showsVideoCoverDurationBadges },
+                set: { libraryStore.setShowsVideoCoverDurationBadges($0) }
+            )) {
+                Label("显示视频封面时长", systemImage: "timer")
+            }
+
+            Toggle(isOn: Binding(
+                get: { libraryStore.unifiedVideoCoverBorderExperimentEnabled },
+                set: { libraryStore.setUnifiedVideoCoverBorderExperimentEnabled($0) }
+            )) {
+                Label("统一视频封面描边实验", systemImage: "rectangle.dashed")
+            }
+
             VStack(alignment: .leading, spacing: 10) {
                 HStack {
                     Label("封面角标暗色底", systemImage: "circle.lefthalf.filled")
@@ -63,6 +89,7 @@ struct MineDisplaySettingsSection: View {
                     step: 0.05
                 )
             }
+            .disabled(!libraryStore.showsVideoCoverDurationBadges)
 
             Toggle(isOn: Binding(
                 get: { libraryStore.minimizesTabBarOnScroll },

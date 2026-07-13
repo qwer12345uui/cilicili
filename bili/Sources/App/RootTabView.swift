@@ -7,6 +7,7 @@ struct RootTabView: View {
     @EnvironmentObject var libraryStore: LibraryStore
     @StateObject var runtimeSettings = RootRuntimeSettingsStore()
     @StateObject var homeViewModelHolder = RootHomeViewModelHolder()
+    @StateObject var searchBottomAccessoryStore = SearchBottomAccessoryStore()
     @State var selectedTab = Self.initialTab.appTab
     @State var bottomMode: BottomTabMode = .root
     @State var rootTabBarRestoreRequestID = 0
@@ -33,60 +34,20 @@ struct RootTabView: View {
     var body: some View {
         ZStack {
             TabView(selection: tabSelection) {
-                if visibleRootTabs.contains(.home) {
-                    Tab(value: AppTab.home) {
-                        NavigationStack(path: $navigationPath) {
-                            homePage()
-                        }
+                ForEach(visibleRootTabs) { tab in
+                    Tab(value: tab) {
+                        rootTabContent(for: tab)
                     } label: {
-                        Label(AppTab.home.title, systemImage: AppTab.home.systemImage)
+                        Label(tab.title, systemImage: tab.systemImage)
                     }
                 }
-
-                if visibleRootTabs.contains(.dynamic) {
-                    Tab(value: AppTab.dynamic) {
-                        NavigationStack(path: $dynamicNavigationPath) {
-                            DynamicView()
-                                .videoDestinations()
-                        }
-                    } label: {
-                        Label(AppTab.dynamic.title, systemImage: AppTab.dynamic.systemImage)
-                    }
-                }
-
-                if visibleRootTabs.contains(.live) {
-                    Tab(value: AppTab.live) {
-                        NavigationStack(path: $liveNavigationPath) {
-                            LiveView()
-                                .videoDestinations()
-                        }
-                    } label: {
-                        Label(AppTab.live.title, systemImage: AppTab.live.systemImage)
-                    }
-                }
-
-                if visibleRootTabs.contains(.mine) {
-                    Tab(value: AppTab.mine) {
-                        NavigationStack(path: $mineNavigationPath) {
-                            MineView()
-                                .videoDestinations()
-                        }
-                    } label: {
-                        Label(AppTab.mine.title, systemImage: AppTab.mine.systemImage)
-                    }
-                }
-
-                Tab(AppTab.search.title, systemImage: AppTab.search.systemImage, value: AppTab.search, role: .search) {
-                    NavigationStack(path: $searchNavigationPath) {
-                        SearchView(showsBottomControls: searchNavigationPath.isEmpty)
-                            .videoDestinations()
-                    }
-                }
-                .tabPlacement(.pinned)
             }
+            .id(rootTabConfigurationID)
             .tint(libraryStore.appTintColor)
-            .tabViewSearchActivation(.searchTabSelection)
-            .tabBarMinimizeBehavior(runtimeSettings.minimizesTabBarOnScroll ? .onScrollDown : .never)
+            .tabViewBottomAccessory(isEnabled: showsSearchBottomAccessory) {
+                SearchTabBottomAccessory(store: searchBottomAccessoryStore)
+            }
+            .tabBarMinimizeBehavior(rootTabBarMinimizeBehavior)
             .restoresRootTabBarWhenRequested(requestID: rootTabBarRestoreRequestID)
             .background(RootTabBarAppearanceInstaller(tintColorHex: libraryStore.appTintColorHex))
 
@@ -103,6 +64,8 @@ struct RootTabView: View {
         .environment(\.openVideoOwnerRouteAction, openVideoOwnerRoute)
         .environment(\.openAppURLAction, openAppURL)
         .environment(\.appThemeTintColor, libraryStore.appTintColor)
+        .environment(\.showsVideoCoverDurationBadges, libraryStore.showsVideoCoverDurationBadges)
+        .environment(\.unifiedVideoCoverBorderExperimentEnabled, libraryStore.unifiedVideoCoverBorderExperimentEnabled)
         .environment(\.scrollEdgeEffectPreference, runtimeSettings.scrollEdgeEffectPreference)
         .environment(\.openURL, OpenURLAction { url in
             guard AppLinkRouter.canHandle(url) else { return .systemAction }
@@ -111,18 +74,18 @@ struct RootTabView: View {
         })
         .background(NavigationChromeInstaller(isStandardChromeEnabled: bottomMode == .video))
         .animation(.smooth(duration: 0.28), value: bottomMode)
-        .animation(.smooth(duration: 0.22), value: selectedTab)
-        .animation(.smooth(duration: 0.22), value: runtimeSettings.visibleRootTabs)
         .preferredColorScheme(runtimeSettings.appearanceMode.preferredColorScheme)
         .sheet(item: $inAppBrowserItem) { item in
             InAppBrowserView(url: item.url)
                 .ignoresSafeArea()
         }
         .task {
+            AppIconController.apply(libraryStore.appIconPreference)
             PictureInPictureRestoreCoordinator.shared.restoreHandler = { video in
                 await restoreVideoPlaybackUIForPictureInPicture(video)
             }
             runtimeSettings.bind(dependencies.libraryStore)
+            repairSelectedTabIfNeeded(visibleTabs: runtimeSettings.visibleRootTabs)
             openStartupVideoIfNeeded()
             openStartupLiveRoomIfNeeded()
             openStartupUploaderIfNeeded()
@@ -130,6 +93,9 @@ struct RootTabView: View {
         }
         .onChange(of: runtimeSettings.visibleRootTabs) { _, tabs in
             repairSelectedTabIfNeeded(visibleTabs: tabs)
+        }
+        .onChange(of: libraryStore.appIconPreference) { _, preference in
+            AppIconController.apply(preference)
         }
         .onChange(of: scenePhase) { _, phase in
             guard phase == .background else { return }
@@ -146,6 +112,28 @@ struct RootTabView: View {
         .onReceive(NotificationCenter.default.publisher(for: .biliPlaybackNetworkClassDidChange)) { _ in
             cancelMediaWarmupsIfEnvironmentConstrained()
         }
+    }
+
+    private var showsSearchBottomAccessory: Bool {
+        guard visibleRootTabs.contains(.search),
+              selectedTab == .search,
+              searchBottomAccessoryStore.viewModel != nil,
+              !searchBottomAccessoryStore.isSearchFocused else {
+            return false
+        }
+        // Keep the accessory alive under pushed and overlay detail pages so it does not reappear late on return.
+        return true
+    }
+
+    private var rootTabBarMinimizeBehavior: TabBarMinimizeBehavior {
+        if selectedTab == .search {
+            return .onScrollDown
+        }
+        return runtimeSettings.minimizesTabBarOnScroll ? .onScrollDown : .never
+    }
+
+    private var rootTabConfigurationID: String {
+        visibleRootTabs.map(\.rawValue).joined(separator: "|")
     }
 
     private func cancelMediaWarmupsIfEnvironmentConstrained() {
@@ -181,6 +169,36 @@ struct RootTabView: View {
                         initialMode: .recommend
                     )
                 }
+        }
+    }
+
+    @ViewBuilder
+    private func rootTabContent(for tab: AppTab) -> some View {
+        switch tab {
+        case .home:
+            NavigationStack(path: $navigationPath) {
+                homePage()
+            }
+        case .dynamic:
+            NavigationStack(path: $dynamicNavigationPath) {
+                DynamicView()
+                    .videoDestinations()
+            }
+        case .live:
+            NavigationStack(path: $liveNavigationPath) {
+                LiveView()
+                    .videoDestinations()
+            }
+        case .mine:
+            NavigationStack(path: $mineNavigationPath) {
+                MineView()
+                    .videoDestinations()
+            }
+        case .search:
+            NavigationStack(path: $searchNavigationPath) {
+                SearchView(accessoryStore: searchBottomAccessoryStore)
+                    .videoDestinations()
+            }
         }
     }
 

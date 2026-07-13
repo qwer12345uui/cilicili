@@ -1,6 +1,8 @@
 import SwiftUI
 
 struct VideoFeedStoryMediaContainer: View {
+    @Environment(\.showsVideoCoverDurationBadges) private var showsVideoCoverDurationBadges
+    @Environment(\.unifiedVideoCoverBorderExperimentEnabled) private var unifiedVideoCoverBorderExperimentEnabled
     let display: VideoCardDisplayModel
     @State private var coverLoadedState = VideoCoverLoadedState()
 
@@ -23,7 +25,13 @@ struct VideoFeedStoryMediaContainer: View {
     }
 
     private var cover: some View {
-        Color.clear
+        let shape = UnevenRoundedRectangle(
+            topLeadingRadius: 16,
+            topTrailingRadius: 16,
+            style: .continuous
+        )
+
+        return Color.clear
             .aspectRatio(16.0 / 9.0, contentMode: .fit)
             .overlay {
                 ZStack(alignment: .bottom) {
@@ -43,6 +51,11 @@ struct VideoFeedStoryMediaContainer: View {
             }
             .frame(maxWidth: .infinity)
             .clipped()
+            .clipShape(shape)
+            .unifiedVideoCoverExperimentBorder(
+                in: shape,
+                isEnabled: unifiedVideoCoverBorderExperimentEnabled
+            )
     }
 
     private var coverMetaOverlay: some View {
@@ -56,7 +69,7 @@ struct VideoFeedStoryMediaContainer: View {
 
             Spacer(minLength: 8)
 
-            if !display.durationText.isEmpty {
+            if showsVideoCoverDurationBadges, !display.durationText.isEmpty {
                 VideoCoverDurationBadge(display.durationText)
             }
         }
@@ -68,7 +81,7 @@ struct VideoFeedStoryMediaContainer: View {
 
     @ViewBuilder
     private var coverBottomScrim: some View {
-        if !display.viewText.isEmpty || !display.durationText.isEmpty {
+        if !display.viewText.isEmpty || (showsVideoCoverDurationBadges && !display.durationText.isEmpty) {
             VideoCoverBottomScrim()
         }
     }

@@ -50,7 +50,8 @@ struct DynamicImageCell: View {
                     cornerRadius: 8,
                     shadowLevel: .regular,
                     shadowOpacityScale: thumbnailShadowOpacityScale,
-                    borderOpacityScale: thumbnailShadowOpacityScale
+                    borderOpacityScale: thumbnailShadowOpacityScale,
+                    appliesUnifiedBorderExperiment: false
                 )
         case .longImage(let cornerRadius):
             imageContent
@@ -61,7 +62,8 @@ struct DynamicImageCell: View {
                     cornerRadius: cornerRadius,
                     shadowLevel: .regular,
                     shadowOpacityScale: thumbnailShadowOpacityScale,
-                    borderOpacityScale: thumbnailShadowOpacityScale
+                    borderOpacityScale: thumbnailShadowOpacityScale,
+                    appliesUnifiedBorderExperiment: false
                 )
         case .square(let cornerRadius):
             imageContent
@@ -71,7 +73,8 @@ struct DynamicImageCell: View {
                     cornerRadius: cornerRadius,
                     shadowLevel: .subtle,
                     shadowOpacityScale: thumbnailShadowOpacityScale,
-                    borderOpacityScale: thumbnailShadowOpacityScale
+                    borderOpacityScale: thumbnailShadowOpacityScale,
+                    appliesUnifiedBorderExperiment: false
                 )
         case .hero(let aspectRatio, let cornerRadius):
             imageContent
@@ -82,7 +85,8 @@ struct DynamicImageCell: View {
                     cornerRadius: cornerRadius,
                     shadowLevel: .regular,
                     shadowOpacityScale: thumbnailShadowOpacityScale,
-                    borderOpacityScale: thumbnailShadowOpacityScale
+                    borderOpacityScale: thumbnailShadowOpacityScale,
+                    appliesUnifiedBorderExperiment: false
                 )
         case .fixedHeight(let height, let cornerRadius):
             imageContent
@@ -93,7 +97,8 @@ struct DynamicImageCell: View {
                     cornerRadius: cornerRadius,
                     shadowLevel: .regular,
                     shadowOpacityScale: thumbnailShadowOpacityScale,
-                    borderOpacityScale: thumbnailShadowOpacityScale
+                    borderOpacityScale: thumbnailShadowOpacityScale,
+                    appliesUnifiedBorderExperiment: false
                 )
         }
     }

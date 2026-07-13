@@ -1,6 +1,7 @@
 import SwiftUI
 
 struct VideoCompactCover: View, Equatable {
+    @Environment(\.showsVideoCoverDurationBadges) private var showsVideoCoverDurationBadges
     let display: VideoCardDisplayModel
     let size: CGSize
     let maximumPixelLength: Int
@@ -33,12 +34,12 @@ struct VideoCompactCover: View, Equatable {
         )
         .frame(width: size.width, height: size.height)
         .overlay {
-            if coverLoadedState.isLoaded(identity: display.coverLoadIdentity), !display.durationText.isEmpty {
+            if coverLoadedState.isLoaded(identity: display.coverLoadIdentity), showsDurationBadge {
                 VideoCoverBottomScrim()
             }
         }
         .overlay(alignment: .bottomTrailing) {
-            if coverLoadedState.isLoaded(identity: display.coverLoadIdentity), !display.durationText.isEmpty {
+            if coverLoadedState.isLoaded(identity: display.coverLoadIdentity), showsDurationBadge {
                 VideoCoverDurationBadge(
                     display.durationText,
                     maxWidth: max(size.width - badgeInset * 2, 1)
@@ -53,5 +54,9 @@ struct VideoCompactCover: View, Equatable {
             emphasizesBorder: showsBorder,
             borderOpacityScale: borderOpacityScale
         )
+    }
+
+    private var showsDurationBadge: Bool {
+        showsVideoCoverDurationBadges && !display.durationText.isEmpty
     }
 }

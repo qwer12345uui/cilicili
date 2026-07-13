@@ -20,7 +20,6 @@ final class VideoDetailShellViewController: UIViewController {
     private let dependencies: AppDependencies
     private let onShowDanmakuSettings: () -> Void
     private let onNavigateBack: () -> Void
-    private var isPerformanceExperimentEnabled: Bool
     private var cancellables = Set<AnyCancellable>()
 
     private var surfaceHost: VideoDetailShellSurfaceHost?
@@ -97,7 +96,6 @@ final class VideoDetailShellViewController: UIViewController {
         fullscreenCoordinator: VideoDetailFullscreenCoordinator,
         runtimeSettings: VideoDetailRuntimeSettingsStore,
         dependencies: AppDependencies,
-        isPerformanceExperimentEnabled: Bool,
         selectedContentTab: Binding<VideoDetailContentTab>,
         onShowNetworkDiagnostics: @escaping () -> Void,
         onShowFavoriteFolders: @escaping () -> Void,
@@ -111,7 +109,6 @@ final class VideoDetailShellViewController: UIViewController {
         self.dependencies = dependencies
         self.onShowDanmakuSettings = onShowDanmakuSettings
         self.onNavigateBack = onNavigateBack
-        self.isPerformanceExperimentEnabled = isPerformanceExperimentEnabled
         self.selectedContentTabBinding = selectedContentTab
         self.activeContentTab = selectedContentTab.wrappedValue
         self.contentHost = UIHostingController(
@@ -120,7 +117,6 @@ final class VideoDetailShellViewController: UIViewController {
                 runtimeSettings: runtimeSettings,
                 state: contentState,
                 layoutWidth: Self.initialLayoutWidth,
-                isPerformanceExperimentEnabled: isPerformanceExperimentEnabled,
                 selectedContentTab: selectedContentTab,
                 onShowNetworkDiagnostics: onShowNetworkDiagnostics,
                 onShowFavoriteFolders: onShowFavoriteFolders,
@@ -136,7 +132,6 @@ final class VideoDetailShellViewController: UIViewController {
             runtimeSettings: runtimeSettings,
             state: contentState,
             layoutWidth: Self.initialLayoutWidth,
-            isPerformanceExperimentEnabled: isPerformanceExperimentEnabled,
             selectedContentTab: selectedContentTab,
             onShowNetworkDiagnostics: onShowNetworkDiagnostics,
             onShowFavoriteFolders: onShowFavoriteFolders,
@@ -153,17 +148,6 @@ final class VideoDetailShellViewController: UIViewController {
     @available(*, unavailable)
     required init?(coder _: NSCoder) {
         fatalError("init(coder:) has not been implemented")
-    }
-
-    func setPerformanceExperimentEnabled(_ isEnabled: Bool) {
-        guard isPerformanceExperimentEnabled != isEnabled else { return }
-        isPerformanceExperimentEnabled = isEnabled
-        UIView.performWithoutAnimation {
-            contentHost.rootView = contentHost.rootView.withPerformanceExperimentEnabled(isEnabled)
-            contentHost.view.setNeedsLayout()
-            contentHost.view.layoutIfNeeded()
-        }
-        surfaceHost?.setPerformanceExperimentEnabled(isEnabled)
     }
 
     private static var initialLayoutWidth: CGFloat {
@@ -398,7 +382,6 @@ final class VideoDetailShellViewController: UIViewController {
             playerViewModel: playerViewModel,
             detailViewModel: viewModel,
             dependencies: dependencies,
-            isPerformanceExperimentEnabled: isPerformanceExperimentEnabled,
             onRequestFullscreen: { [weak self] in self?.requestFullscreen() },
             onExitFullscreen: { [weak self] in self?.requestExitFullscreen() },
             onToggleDanmaku: { [weak self] in self?.viewModel.toggleDanmaku() },
@@ -716,6 +699,7 @@ final class VideoDetailShellViewController: UIViewController {
         contentState.suppressesInteractiveContentActions = false
         contentHost.view.isUserInteractionEnabled = true
     }
+
 }
 
 extension VideoDetailShellViewController: UIGestureRecognizerDelegate {

@@ -1,5 +1,20 @@
 import SwiftUI
 
+enum VideoCoverBorderExperiment {
+    static let defaultIsEnabled = false
+}
+
+private struct UnifiedVideoCoverBorderExperimentKey: EnvironmentKey {
+    static let defaultValue = VideoCoverBorderExperiment.defaultIsEnabled
+}
+
+extension EnvironmentValues {
+    var unifiedVideoCoverBorderExperimentEnabled: Bool {
+        get { self[UnifiedVideoCoverBorderExperimentKey.self] }
+        set { self[UnifiedVideoCoverBorderExperimentKey.self] = newValue }
+    }
+}
+
 enum MediaShadowLevel {
     case control
     case subtle
@@ -86,7 +101,8 @@ extension View {
         shadowLevel: MediaShadowLevel? = nil,
         emphasizesBorder: Bool = false,
         shadowOpacityScale: Double = 1,
-        borderOpacityScale: Double = 1
+        borderOpacityScale: Double = 1,
+        appliesUnifiedBorderExperiment: Bool = true
     ) -> some View {
         modifier(
             VideoCoverSurfaceModifier(
@@ -94,7 +110,22 @@ extension View {
                 shadowLevel: shadowLevel,
                 emphasizesBorder: emphasizesBorder,
                 shadowOpacityScale: shadowOpacityScale,
-                borderOpacityScale: borderOpacityScale
+                borderOpacityScale: borderOpacityScale,
+                appliesUnifiedBorderExperiment: appliesUnifiedBorderExperiment
+            )
+        )
+    }
+
+    func unifiedVideoCoverExperimentBorder<BorderShape: Shape>(
+        in shape: BorderShape,
+        isEnabled: Bool,
+        opacityScale: Double = 1
+    ) -> some View {
+        modifier(
+            UnifiedVideoCoverExperimentBorderModifier(
+                shape: shape,
+                isEnabled: isEnabled,
+                opacityScale: opacityScale
             )
         )
     }
@@ -102,31 +133,50 @@ extension View {
 
 private struct VideoCoverSurfaceModifier: ViewModifier {
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.unifiedVideoCoverBorderExperimentEnabled) private var unifiedVideoCoverBorderExperimentEnabled
     let cornerRadius: CGFloat
     let shadowLevel: MediaShadowLevel?
     let emphasizesBorder: Bool
     let shadowOpacityScale: Double
     let borderOpacityScale: Double
+    let appliesUnifiedBorderExperiment: Bool
 
     @ViewBuilder
     func body(content: Content) -> some View {
         let shape = RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-        let surfaced = content
+        let baseSurface = content
             .background(Color(.secondarySystemGroupedBackground))
             .clipShape(shape)
-            .overlay {
-                shape.strokeBorder(outerStrokeColor, lineWidth: emphasizesBorder ? 0.9 : 0.7)
-            }
-            .overlay {
-                shape
-                    .inset(by: 1)
-                    .strokeBorder(innerStrokeColor, lineWidth: 0.6)
-            }
 
-        if let shadowLevel {
-            surfaced.mediaShadow(shadowLevel, opacityScale: shadowOpacityScale)
+        if appliesUnifiedBorderExperiment && unifiedVideoCoverBorderExperimentEnabled {
+            styledSurface(
+                baseSurface.unifiedVideoCoverExperimentBorder(
+                    in: shape,
+                    isEnabled: true,
+                    opacityScale: borderOpacityScale
+                )
+            )
         } else {
-            surfaced
+            styledSurface(
+                baseSurface
+                    .overlay {
+                        shape.strokeBorder(outerStrokeColor, lineWidth: emphasizesBorder ? 0.9 : 0.7)
+                    }
+                    .overlay {
+                        shape
+                            .inset(by: 1)
+                            .strokeBorder(innerStrokeColor, lineWidth: 0.6)
+                    }
+            )
+        }
+    }
+
+    @ViewBuilder
+    private func styledSurface<Surface: View>(_ surface: Surface) -> some View {
+        if let shadowLevel {
+            surface.mediaShadow(shadowLevel, opacityScale: shadowOpacityScale)
+        } else {
+            surface
         }
     }
 
@@ -147,5 +197,32 @@ private struct VideoCoverSurfaceModifier: ViewModifier {
         default:
             return Color.white.opacity(0.34 * borderOpacityScale)
         }
+    }
+}
+
+private struct UnifiedVideoCoverExperimentBorderModifier<BorderShape: Shape>: ViewModifier {
+    @Environment(\.displayScale) private var displayScale
+    let shape: BorderShape
+    let isEnabled: Bool
+    let opacityScale: Double
+
+    func body(content: Content) -> some View {
+        content.overlay {
+            if isEnabled {
+                ZStack {
+                    shape
+                        .stroke(.black.opacity(0.12 * opacityScale), lineWidth: physicalPixel)
+                        .padding(physicalPixel * 0.5)
+
+                    shape
+                        .stroke(.white.opacity(0.30 * opacityScale), lineWidth: physicalPixel)
+                        .padding(physicalPixel * 1.5)
+                }
+            }
+        }
+    }
+
+    private var physicalPixel: CGFloat {
+        1 / max(displayScale, 1)
     }
 }

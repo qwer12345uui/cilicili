@@ -2,7 +2,6 @@ import Combine
 import Foundation
 
 struct VideoDetailPerformanceExperimentSnapshot: Equatable {
-    var isEnabled = false
     var isBareSurfaceTransitionActive = false
     var overlayPublishCount = 0
     var overlayDeferredCount = 0
@@ -10,10 +9,9 @@ struct VideoDetailPerformanceExperimentSnapshot: Equatable {
     var rotationTransitionCount = 0
     var lastBareSurfaceDurationMilliseconds = 0
     var totalBareSurfaceDurationMilliseconds = 0
-    var lastEvent = "未启用"
+    var lastEvent = "运行中"
 
     nonisolated init(
-        isEnabled: Bool = false,
         isBareSurfaceTransitionActive: Bool = false,
         overlayPublishCount: Int = 0,
         overlayDeferredCount: Int = 0,
@@ -21,9 +19,8 @@ struct VideoDetailPerformanceExperimentSnapshot: Equatable {
         rotationTransitionCount: Int = 0,
         lastBareSurfaceDurationMilliseconds: Int = 0,
         totalBareSurfaceDurationMilliseconds: Int = 0,
-        lastEvent: String = "未启用"
+        lastEvent: String = "运行中"
     ) {
-        self.isEnabled = isEnabled
         self.isBareSurfaceTransitionActive = isBareSurfaceTransitionActive
         self.overlayPublishCount = overlayPublishCount
         self.overlayDeferredCount = overlayDeferredCount
@@ -34,22 +31,12 @@ struct VideoDetailPerformanceExperimentSnapshot: Equatable {
         self.lastEvent = lastEvent
     }
 
-    var isVisible: Bool {
-        isEnabled
-    }
 }
 
 @MainActor
 final class VideoDetailPerformanceExperimentState: ObservableObject {
     @Published private(set) var snapshot = VideoDetailPerformanceExperimentSnapshot()
     private var bareSurfaceTransitionBeganAt: Date?
-
-    func setEnabled(_ isEnabled: Bool) {
-        update { snapshot in
-            snapshot.isEnabled = isEnabled
-            snapshot.lastEvent = isEnabled ? "实验已开启" : "实验已关闭"
-        }
-    }
 
     func setBareSurfaceTransitionActive(_ active: Bool) {
         let now = Date()

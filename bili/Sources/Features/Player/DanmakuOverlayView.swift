@@ -54,6 +54,7 @@ struct DanmakuOverlayView: UIViewRepresentable {
     let settings: DanmakuSettings
     let topInset: CGFloat
     let bottomInset: CGFloat
+    let isLayoutTransitioning: Bool
     let playbackClock: PlayerPlaybackClock?
     let onPlaybackTime: ((TimeInterval, Bool) -> Void)?
 
@@ -69,6 +70,7 @@ struct DanmakuOverlayView: UIViewRepresentable {
         settings: DanmakuSettings,
         topInset: CGFloat,
         bottomInset: CGFloat,
+        isLayoutTransitioning: Bool = false,
         playbackClock: PlayerPlaybackClock? = nil,
         onPlaybackTime: ((TimeInterval, Bool) -> Void)? = nil
     ) {
@@ -83,6 +85,7 @@ struct DanmakuOverlayView: UIViewRepresentable {
         self.settings = settings
         self.topInset = topInset
         self.bottomInset = bottomInset
+        self.isLayoutTransitioning = isLayoutTransitioning
         self.playbackClock = playbackClock
         self.onPlaybackTime = onPlaybackTime
     }
@@ -93,6 +96,7 @@ struct DanmakuOverlayView: UIViewRepresentable {
 
     func makeUIView(context: Context) -> DanmakuAnimationOverlayView {
         let view = DanmakuAnimationOverlayView()
+        view.setLayoutTransitioning(isLayoutTransitioning)
         let resolvedCurrentTime = playbackClock?.currentTime ?? currentTime
         let signature = configurationSignature(resolvedCurrentTime: resolvedCurrentTime)
         view.apply(
@@ -114,6 +118,9 @@ struct DanmakuOverlayView: UIViewRepresentable {
     }
 
     func updateUIView(_ uiView: DanmakuAnimationOverlayView, context: Context) {
+        if isLayoutTransitioning {
+            uiView.setLayoutTransitioning(true)
+        }
         let resolvedCurrentTime = playbackClock?.currentTime ?? currentTime
         let signature = configurationSignature(resolvedCurrentTime: resolvedCurrentTime)
         if context.coordinator.shouldApply(signature) {
@@ -131,6 +138,9 @@ struct DanmakuOverlayView: UIViewRepresentable {
                 bottomInset: bottomInset
             )
             context.coordinator.markApplied(signature)
+        }
+        if !isLayoutTransitioning {
+            uiView.setLayoutTransitioning(false)
         }
         context.coordinator.bind(clock: playbackClock, uiView: uiView, onPlaybackTime: onPlaybackTime)
     }
@@ -278,6 +288,8 @@ final class DanmakuAnimationOverlayView: UIView {
     private var animationGeneration = 0
     private var layoutSettlingGeneration = 0
     private var isLayoutSettling = false
+    private var isLayoutTransitioning = false
+    private var needsLayoutRebuildAfterTransition = false
 
     override init(frame: CGRect) {
         super.init(frame: frame)
@@ -298,6 +310,10 @@ final class DanmakuAnimationOverlayView: UIView {
         let size = bounds.size
         guard size.width > 1, size.height > 1 else { return }
         guard abs(size.width - lastLayoutSize.width) > 1 || abs(size.height - lastLayoutSize.height) > 1 else { return }
+        if isLayoutTransitioning {
+            needsLayoutRebuildAfterTransition = true
+            return
+        }
         lastLayoutSize = size
         beginLayoutSettling(animated: isPlaying)
         guard shouldRenderDanmaku else {
@@ -314,6 +330,23 @@ final class DanmakuAnimationOverlayView: UIView {
 
     override func didMoveToWindow() {
         super.didMoveToWindow()
+        updateDisplayLinkState()
+        updateAnimationPauseState()
+    }
+
+    func setLayoutTransitioning(_ isTransitioning: Bool) {
+        guard isLayoutTransitioning != isTransitioning else { return }
+        isLayoutTransitioning = isTransitioning
+        if isTransitioning {
+            cancelLayoutSettling()
+            return
+        }
+        guard needsLayoutRebuildAfterTransition else { return }
+        needsLayoutRebuildAfterTransition = false
+        lastLayoutSize = bounds.size
+        // Keep active Core Animation instances intact. Rebuilding here restarts fixed
+        // danmaku opacity and scrolling trajectories on the rotation completion frame.
+        setNextSpawnPosition(after: effectivePlaybackTime())
         updateDisplayLinkState()
         updateAnimationPauseState()
     }
@@ -378,8 +411,25 @@ final class DanmakuAnimationOverlayView: UIView {
         let jumped = abs(sanitizedTime - previousEffectiveTime) > seekJumpThreshold || sanitizedTime + 0.2 < previousEffectiveTime
         syncPlaybackAnchor(to: sanitizedTime)
 
-        if !previousShouldRender || didChangeRenderedSettings || didChangeInsets || jumped {
+        if isLayoutTransitioning, didChangeInsets {
+            needsLayoutRebuildAfterTransition = true
+            updateDisplayLinkState()
+            updateAnimationPauseState()
+            return
+        }
+
+        if !previousShouldRender || didChangeRenderedSettings || jumped {
             rebuildVisibleItems(at: sanitizedTime, animated: newIsPlaying)
+            updateDisplayLinkState()
+            updateAnimationPauseState()
+            return
+        }
+
+        if didChangeInsets {
+            rebuildVisibleItemsAfterLayoutChange(
+                at: sanitizedTime,
+                animated: newIsPlaying
+            )
             updateDisplayLinkState()
             updateAnimationPauseState()
             return
@@ -436,7 +486,7 @@ final class DanmakuAnimationOverlayView: UIView {
         guard shouldRenderDanmaku, isPlaying else { return }
         let playbackTime = effectivePlaybackTime(hostTime: displayLink.timestamp)
         retireExpiredActiveEntries(at: playbackTime)
-        guard !isLayoutSettling else { return }
+        guard !isLayoutSettling, !isLayoutTransitioning else { return }
         spawnDueItems(at: playbackTime)
     }
 
