@@ -9,6 +9,7 @@ struct BiliPlayerNativeControlsHost: View {
         PlayerNativePlaybackControls(
             clock: context.viewModel.playbackClock,
             metrics: renderState.controlMetrics,
+            layout: context.configuration.controlLayout,
             canSeek: context.surfaceState.canSeek,
             isPlaying: context.surfaceState.isPlaying,
             isDanmakuEnabled: context.configuration.isDanmakuEnabled,

@@ -9,6 +9,9 @@ struct BiliPlayerViewConfiguration {
     let surfaceOverlay: AnyView?
     let controlsAccessory: AnyView?
     let topLeadingControlsAccessory: AnyView?
+    let controlLayout: BiliPlayerControlLayout
+    let moreControlsContent: AnyView?
+    let replacesStandardMoreControls: Bool
     let controlsBottomLift: CGFloat
     let isDanmakuEnabled: Bool
     let onToggleDanmaku: (() -> Void)?
@@ -48,6 +51,9 @@ struct BiliPlayerViewConfiguration {
         surfaceOverlay: AnyView?,
         controlsAccessory: AnyView?,
         topLeadingControlsAccessory: AnyView?,
+        controlLayout: BiliPlayerControlLayout,
+        moreControlsContent: AnyView?,
+        replacesStandardMoreControls: Bool,
         controlsBottomLift: CGFloat,
         isDanmakuEnabled: Bool,
         onToggleDanmaku: (() -> Void)?,
@@ -75,6 +81,9 @@ struct BiliPlayerViewConfiguration {
         self.surfaceOverlay = surfaceOverlay
         self.controlsAccessory = controlsAccessory
         self.topLeadingControlsAccessory = topLeadingControlsAccessory
+        self.controlLayout = controlLayout
+        self.moreControlsContent = moreControlsContent
+        self.replacesStandardMoreControls = replacesStandardMoreControls
         self.controlsBottomLift = controlsBottomLift
         self.isDanmakuEnabled = isDanmakuEnabled
         self.onToggleDanmaku = onToggleDanmaku

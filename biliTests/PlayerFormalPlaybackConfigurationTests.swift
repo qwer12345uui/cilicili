@@ -2,6 +2,16 @@ import XCTest
 @testable import bili
 
 final class PlayerFormalPlaybackConfigurationTests: XCTestCase {
+    func testLivePlayerControlLayoutOnlyKeepsNavigationActions() {
+        XCTAssertFalse(BiliPlayerControlLayout.live.showsProgress)
+        XCTAssertFalse(BiliPlayerControlLayout.live.showsPlaybackToggle)
+        XCTAssertFalse(BiliPlayerControlLayout.live.showsTimeLabel)
+
+        XCTAssertTrue(BiliPlayerControlLayout.standard.showsProgress)
+        XCTAssertTrue(BiliPlayerControlLayout.standard.showsPlaybackToggle)
+        XCTAssertTrue(BiliPlayerControlLayout.standard.showsTimeLabel)
+    }
+
     @MainActor
     func testPlayerSettingsMigratesLegacyAV1CodecPreferenceToAuto() {
         let defaults = makeUserDefaults()

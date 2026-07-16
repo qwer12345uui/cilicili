@@ -3,20 +3,34 @@ import SwiftUI
 struct InitialPageMenuPlaceholder: View {
     let pageCount: Int?
 
-    private var title: String {
-        pageCount.map { "\($0)P" } ?? "分P"
-    }
-
     var body: some View {
-        HStack(spacing: 8) {
-            Image(systemName: "rectangle.stack")
-                .font(.subheadline.weight(.semibold))
-                .foregroundStyle(.tertiary)
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 10) {
+                Text("分P")
+                    .font(.headline)
+                    .foregroundStyle(.secondary)
 
-            SkeletonBlock(width: title.count > 2 ? 34 : 24, height: 12, shape: .capsule)
+                if let pageCount {
+                    Text("\(pageCount) P")
+                        .font(.caption)
+                        .foregroundStyle(.tertiary)
+                }
+
+                Spacer()
+
+                SkeletonBlock(width: 28, height: 28, shape: .circle)
+            }
+
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 10) {
+                    ForEach(0..<min(max(pageCount ?? 4, 2), 6), id: \.self) { _ in
+                        SkeletonBlock(width: 124, height: 54, shape: .rounded(12))
+                    }
+                }
+            }
+            .scrollDisabled(true)
+            .frame(height: 54)
         }
-        .frame(maxWidth: .infinity)
-        .initialPageMenuPlaceholderBackground()
         .allowsHitTesting(false)
         .accessibilityHidden(true)
     }

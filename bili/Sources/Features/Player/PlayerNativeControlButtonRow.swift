@@ -3,6 +3,7 @@ import SwiftUI
 struct PlayerNativeControlButtonRow: View {
     @ObservedObject var clock: PlayerPlaybackClock
     let metrics: PlayerNativeControlMetrics
+    let layout: BiliPlayerControlLayout
     let isPlaying: Bool
     let isDanmakuEnabled: Bool
     let showsDanmakuButton: Bool
@@ -13,19 +14,23 @@ struct PlayerNativeControlButtonRow: View {
 
     var body: some View {
         HStack(spacing: metrics.controlSpacing) {
-            PlayerNativeGlassIconButton(
-                systemName: isPlaying ? "pause.fill" : "play.fill",
-                accessibilityLabel: isPlaying ? "暂停" : "播放",
-                metrics: metrics,
-                action: actions.onTogglePlayback
-            )
-
-            PlayerNativeTimeLabel(clock: clock, metrics: metrics)
-                .frame(
-                    width: metrics.timeLabelWidth,
-                    height: metrics.controlHeight
+            if layout.showsPlaybackToggle {
+                PlayerNativeGlassIconButton(
+                    systemName: isPlaying ? "pause.fill" : "play.fill",
+                    accessibilityLabel: isPlaying ? "暂停" : "播放",
+                    metrics: metrics,
+                    action: actions.onTogglePlayback
                 )
-                .biliPlayerClearGlass(interactive: false, in: Capsule())
+            }
+
+            if layout.showsTimeLabel {
+                PlayerNativeTimeLabel(clock: clock, metrics: metrics)
+                    .frame(
+                        width: metrics.timeLabelWidth,
+                        height: metrics.controlHeight
+                    )
+                    .biliPlayerClearGlass(interactive: false, in: Capsule())
+            }
 
             Spacer(minLength: 0)
 

@@ -262,7 +262,7 @@ private struct LiveRoomSurfaceRoot: View {
                         usesLandscapeChrome: state.usesLandscapeChrome
                     )
                 ),
-                controlsAccessory: controlsAccessory(!state.usesLandscapeChrome),
+                controlsAccessory: nil,
                 topLeadingControlsAccessory: AnyView(
                     VideoDetailPlayerSurfaceBackButtonHost {
                         if state.usesLandscapeChrome {
@@ -272,10 +272,12 @@ private struct LiveRoomSurfaceRoot: View {
                         }
                     }
                 ),
+                controlLayout: .live,
+                moreControlsContent: AnyView(
+                    LivePlayerMoreControlsContent(viewModel: viewModel)
+                ),
+                replacesStandardMoreControls: true,
                 isDanmakuEnabled: viewModel.isDanmakuEnabled,
-                onToggleDanmaku: {
-                    viewModel.toggleDanmaku()
-                },
                 keepsPlayerSurfaceStable: true,
                 fullscreenMode: state.usesLandscapeChrome ? .landscape(.landscapeRight) : nil,
                 isLayoutTransitioning: state.isBareSurfaceTransitionActive,

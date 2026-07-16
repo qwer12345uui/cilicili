@@ -131,6 +131,10 @@ private struct BiliPlayerMoreControlsSheet: View {
     var body: some View {
         NavigationStack {
             List {
+                if let moreControlsContent = configuration.moreControlsContent {
+                    moreControlsContent
+                }
+
                 if showsRateChoices {
                     ForEach(BiliPlaybackRate.allCases) { rate in
                         Button {
@@ -143,7 +147,7 @@ private struct BiliPlayerMoreControlsSheet: View {
                             )
                         }
                     }
-                } else {
+                } else if !configuration.replacesStandardMoreControls {
                     if configuration.onShowDanmakuSettings != nil || configuration.onToggleDanmaku != nil {
                         Button {
                             dismiss()
@@ -191,7 +195,11 @@ private struct BiliPlayerMoreControlsSheet: View {
                 }
             }
             .foregroundStyle(.primary)
-            .navigationTitle(showsRateChoices ? "倍速" : "播放设置")
+            .navigationTitle(
+                showsRateChoices
+                    ? "倍速"
+                    : (configuration.replacesStandardMoreControls ? "更多设置" : "播放设置")
+            )
             .navigationBarTitleDisplayMode(.inline)
         }
         .presentationDetents([.medium])

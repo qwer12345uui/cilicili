@@ -1,5 +1,14 @@
 import SwiftUI
 
+enum BiliPlayerControlLayout: Equatable {
+    case standard
+    case live
+
+    var showsProgress: Bool { self == .standard }
+    var showsPlaybackToggle: Bool { self == .standard }
+    var showsTimeLabel: Bool { self == .standard }
+}
+
 struct BiliPlayerViewOptions {
     let presentation: BiliPlayerPresentation
     let showsNavigationChrome: Bool
@@ -9,6 +18,9 @@ struct BiliPlayerViewOptions {
     let surfaceOverlay: AnyView?
     let controlsAccessory: AnyView?
     let topLeadingControlsAccessory: AnyView?
+    let controlLayout: BiliPlayerControlLayout
+    let moreControlsContent: AnyView?
+    let replacesStandardMoreControls: Bool
     let controlsBottomLift: CGFloat
     let isDanmakuEnabled: Bool
     let onToggleDanmaku: (() -> Void)?
@@ -37,6 +49,9 @@ struct BiliPlayerViewOptions {
         surfaceOverlay: AnyView? = nil,
         controlsAccessory: AnyView? = nil,
         topLeadingControlsAccessory: AnyView? = nil,
+        controlLayout: BiliPlayerControlLayout = .standard,
+        moreControlsContent: AnyView? = nil,
+        replacesStandardMoreControls: Bool = false,
         controlsBottomLift: CGFloat = 0,
         isDanmakuEnabled: Bool = true,
         onToggleDanmaku: (() -> Void)? = nil,
@@ -64,6 +79,9 @@ struct BiliPlayerViewOptions {
         self.surfaceOverlay = surfaceOverlay
         self.controlsAccessory = controlsAccessory
         self.topLeadingControlsAccessory = topLeadingControlsAccessory
+        self.controlLayout = controlLayout
+        self.moreControlsContent = moreControlsContent
+        self.replacesStandardMoreControls = replacesStandardMoreControls
         self.controlsBottomLift = controlsBottomLift
         self.isDanmakuEnabled = isDanmakuEnabled
         self.onToggleDanmaku = onToggleDanmaku
@@ -94,6 +112,9 @@ struct BiliPlayerViewOptions {
             surfaceOverlay: surfaceOverlay,
             controlsAccessory: controlsAccessory,
             topLeadingControlsAccessory: topLeadingControlsAccessory,
+            controlLayout: controlLayout,
+            moreControlsContent: moreControlsContent,
+            replacesStandardMoreControls: replacesStandardMoreControls,
             controlsBottomLift: controlsBottomLift,
             isDanmakuEnabled: isDanmakuEnabled,
             onToggleDanmaku: onToggleDanmaku,
