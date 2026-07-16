@@ -4,7 +4,6 @@ import UIKit
 struct LiveRoomContentView: View {
     @Environment(\.scenePhase) private var scenePhase
     @ObservedObject var viewModel: LiveRoomViewModel
-    @State var isShowingDescription = false
     @State var fullscreenMode: PlayerFullscreenMode?
     @State var isCompletingFullscreenExit = false
     @State var pendingFullscreenExitTask: Task<Void, Never>?
@@ -63,9 +62,6 @@ struct LiveRoomContentView: View {
             AppOrientationLock.restorePortrait()
             fullscreenMode = nil
             isCompletingFullscreenExit = false
-        }
-        .sheet(isPresented: $isShowingDescription) {
-            LiveRoomDescriptionSheet(viewModel: viewModel)
         }
         .onChange(of: scenePhase) { _, phase in
             guard phase == .active, fullscreenMode == nil else { return }
@@ -137,7 +133,9 @@ struct LiveRoomContentView: View {
             fullscreenMode: fullscreenMode,
             playerWidth: playerWidth,
             playerHeight: playerHeight,
-            controlsAccessory: { AnyView(livePlayerAccessory(viewModel)) },
+            controlsAccessory: { usesCompactLayout in
+                AnyView(livePlayerAccessory(viewModel, usesCompactLayout: usesCompactLayout))
+            },
             loadingPlaceholder: { AnyView(liveLoadingPlaceholder(viewModel)) },
             onRequestFullscreen: enterInlineFullscreenPlayback(playerViewModel:),
             onExitFullscreen: exitInlineFullscreenPlayback(playerViewModel:)

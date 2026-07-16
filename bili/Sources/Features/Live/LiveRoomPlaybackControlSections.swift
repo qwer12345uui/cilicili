@@ -11,18 +11,14 @@ extension LiveRoomContentView {
         LiveQualityMenu(viewModel: viewModel)
     }
 
-    @ViewBuilder
-    func liveStreamInlineMenu(_ viewModel: LiveRoomViewModel) -> some View {
-        LiveStreamInlineMenu(viewModel: viewModel)
-    }
-
-    @ViewBuilder
-    func liveQualityInlineMenu(_ viewModel: LiveRoomViewModel) -> some View {
-        LiveQualityInlineMenu(viewModel: viewModel)
-    }
-
-    func livePlayerAccessory(_ viewModel: LiveRoomViewModel) -> some View {
-        LivePlayerAccessory(viewModel: viewModel)
+    func livePlayerAccessory(
+        _ viewModel: LiveRoomViewModel,
+        usesCompactLayout: Bool
+    ) -> some View {
+        LivePlayerAccessory(
+            viewModel: viewModel,
+            usesCompactLayout: usesCompactLayout
+        )
     }
 
     @ViewBuilder

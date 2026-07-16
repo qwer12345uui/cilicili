@@ -20,6 +20,13 @@ struct MinePlaybackToolsSection: View {
             }
 
             Toggle(isOn: Binding(
+                get: { libraryStore.diagnosticsBackgroundProcessingExperimentEnabled },
+                set: { libraryStore.setDiagnosticsBackgroundProcessingExperimentEnabled($0) }
+            )) {
+                Label("播放诊断后台化实验", systemImage: "arrow.trianglehead.2.clockwise.rotate.90")
+            }
+
+            Toggle(isOn: Binding(
                 get: { libraryStore.videoRotationFrameReportOverlayEnabled },
                 set: { libraryStore.setVideoRotationFrameReportOverlayEnabled($0) }
             )) {

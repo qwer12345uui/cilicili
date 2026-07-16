@@ -32,6 +32,37 @@ final class LiveRoomPlaybackLifecycleTests: XCTestCase {
         XCTAssertFalse(coordinator.isActive(player))
     }
 
+    func testFormalPlaybackSessionFollowsLivePlayerReplacement() {
+        let defaultsName = "LiveRoomPlaybackSessionTests.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: defaultsName)!
+        defer { defaults.removePersistentDomain(forName: defaultsName) }
+        let viewModel = makeViewModel(defaults: defaults, keychainService: defaultsName)
+        let initialPlayer = PlayerStateViewModel(
+            videoURL: nil,
+            audioURL: nil,
+            title: "直播会话初始播放器",
+            referer: "https://live.bilibili.com/1"
+        )
+        let replacementPlayer = PlayerStateViewModel(
+            videoURL: nil,
+            audioURL: nil,
+            title: "直播会话替换播放器",
+            referer: "https://live.bilibili.com/1"
+        )
+
+        viewModel.playerViewModel = initialPlayer
+
+        XCTAssertTrue(viewModel.playbackSession.activePlayer === initialPlayer)
+
+        viewModel.playerViewModel = replacementPlayer
+
+        XCTAssertTrue(viewModel.playbackSession.activePlayer === replacementPlayer)
+
+        viewModel.playbackSession.detach()
+        initialPlayer.stop(reason: .navigation)
+        replacementPlayer.stop(reason: .navigation)
+    }
+
     private func makeViewModel(defaults: UserDefaults, keychainService: String) -> LiveRoomViewModel {
         let libraryStore = LibraryStore(userDefaults: defaults)
         let sessionStore = SessionStore(keychain: KeychainStore(service: keychainService))

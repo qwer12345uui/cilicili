@@ -130,6 +130,7 @@ final class LibraryStore: ObservableObject {
     @Published private(set) var sponsorBlockEnabled: Bool
     @Published private(set) var pictureInPictureEnabled: Bool
     @Published private(set) var playerPerformanceOverlayEnabled: Bool
+    @Published private(set) var diagnosticsBackgroundProcessingExperimentEnabled: Bool
     @Published private(set) var videoRotationFrameReportOverlayEnabled: Bool
     @Published private(set) var playerControlEdgeScrimEnabled: Bool
     @Published private(set) var showsVideoDetailNetworkDiagnosticsButton: Bool
@@ -189,6 +190,7 @@ final class LibraryStore: ObservableObject {
     private static let sponsorBlockEnabledKey = "cc.bili.playback.sponsorBlockEnabled.v1"
     private static let pictureInPictureEnabledKey = "cc.bili.playback.pictureInPictureEnabled.v1"
     private static let playerPerformanceOverlayEnabledKey = "cc.bili.playback.performanceOverlayEnabled.v1"
+    private static let diagnosticsBackgroundProcessingExperimentEnabledKey = PlayerDiagnosticsBackgroundProcessingExperiment.storageKey
     private static let videoRotationFrameReportOverlayEnabledKey = "cc.bili.playback.rotationFrameReportOverlayEnabled.v1"
     nonisolated static let playerControlEdgeScrimEnabledKey = "cc.bili.playback.controlEdgeScrimEnabled.v1"
     private static let showsVideoDetailNetworkDiagnosticsButtonKey = "cc.bili.videoDetail.showsNetworkDiagnosticsButton.v1"
@@ -404,6 +406,7 @@ final class LibraryStore: ObservableObject {
         self.sponsorBlockEnabled = userDefaults.object(forKey: Self.sponsorBlockEnabledKey) as? Bool ?? false
         self.pictureInPictureEnabled = userDefaults.object(forKey: Self.pictureInPictureEnabledKey) as? Bool ?? false
         self.playerPerformanceOverlayEnabled = userDefaults.object(forKey: Self.playerPerformanceOverlayEnabledKey) as? Bool ?? false
+        self.diagnosticsBackgroundProcessingExperimentEnabled = userDefaults.object(forKey: Self.diagnosticsBackgroundProcessingExperimentEnabledKey) as? Bool ?? false
         self.videoRotationFrameReportOverlayEnabled = userDefaults.object(forKey: Self.videoRotationFrameReportOverlayEnabledKey) as? Bool ?? false
         self.playerControlEdgeScrimEnabled = userDefaults.object(forKey: Self.playerControlEdgeScrimEnabledKey) as? Bool ?? true
         self.showsVideoDetailNetworkDiagnosticsButton = userDefaults.object(forKey: Self.showsVideoDetailNetworkDiagnosticsButtonKey) as? Bool ?? false
@@ -922,6 +925,11 @@ final class LibraryStore: ObservableObject {
     func setPlayerPerformanceOverlayEnabled(_ isEnabled: Bool) {
         playerPerformanceOverlayEnabled = isEnabled
         userDefaults.set(isEnabled, forKey: Self.playerPerformanceOverlayEnabledKey)
+    }
+
+    func setDiagnosticsBackgroundProcessingExperimentEnabled(_ isEnabled: Bool) {
+        diagnosticsBackgroundProcessingExperimentEnabled = isEnabled
+        userDefaults.set(isEnabled, forKey: Self.diagnosticsBackgroundProcessingExperimentEnabledKey)
     }
 
     func setVideoRotationFrameReportOverlayEnabled(_ isEnabled: Bool) {

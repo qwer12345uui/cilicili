@@ -61,6 +61,7 @@ final class VideoDetailViewModel: ObservableObject {
     }
     @Published var stablePlayerViewModel: PlayerStateViewModel? {
         didSet {
+            stablePlayerState.playbackSession.replaceActivePlayer(with: stablePlayerViewModel)
             cleanupStablePlaybackBeforeDeinit = Self.makeDeinitPlaybackCleanup(for: stablePlayerViewModel)
             scheduleRenderStoreSync([.networkDiagnostics, .playerIdentity])
         }

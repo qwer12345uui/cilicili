@@ -582,9 +582,15 @@ enum PlayerMetricsLog {
     nonisolated static func diagnostic(_ message: String) {
         let timestamp = ISO8601DateFormatter().string(from: Date())
         let line = "\(timestamp) \(message)"
-        print("[PlayerDiagnostics] \(line)")
-        Task { @MainActor in
-            appendDiagnosticLine(line)
+        if PlayerDiagnosticsBackgroundProcessingExperiment.isEnabled {
+            Task.detached(priority: .utility) {
+                await PlayerDiagnosticsFileWriter.shared.enqueue(line)
+            }
+        } else {
+            print("[PlayerDiagnostics] \(line)")
+            Task { @MainActor in
+                appendDiagnosticLine(line)
+            }
         }
     }
 
@@ -614,6 +620,68 @@ enum PlayerMetricsLog {
             return trimmed
         }
         return "\(trimmed.prefix(36))..."
+    }
+}
+
+enum PlayerDiagnosticsBackgroundProcessingExperiment {
+    nonisolated static let storageKey = "cc.bili.playback.diagnosticsBackgroundProcessingExperimentEnabled.v1"
+
+    nonisolated static var isEnabled: Bool {
+        UserDefaults.standard.bool(forKey: storageKey)
+    }
+}
+
+private actor PlayerDiagnosticsFileWriter {
+    static let shared = PlayerDiagnosticsFileWriter()
+
+    private let fileName = "player-diagnostics.log"
+    private let flushDelayNanoseconds: UInt64 = 400_000_000
+    private let maximumPendingLineCount = 32
+    private var pendingLines: [String] = []
+    private var flushTask: Task<Void, Never>?
+
+    func enqueue(_ line: String) {
+        pendingLines.append(line)
+        if pendingLines.count >= maximumPendingLineCount {
+            flushTask?.cancel()
+            flushTask = nil
+            flush()
+            return
+        }
+
+        guard flushTask == nil else { return }
+        let flushDelayNanoseconds = flushDelayNanoseconds
+        flushTask = Task.detached(priority: .utility) { [weak self] in
+            try? await Task.sleep(nanoseconds: flushDelayNanoseconds)
+            guard !Task.isCancelled else { return }
+            await self?.flush()
+        }
+    }
+
+    private func flush() {
+        flushTask = nil
+        guard !pendingLines.isEmpty,
+              let directory = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first
+        else { return }
+
+        let lines = pendingLines
+        pendingLines.removeAll(keepingCapacity: true)
+        let payload = lines.joined(separator: "\n") + "\n"
+        guard let data = payload.data(using: .utf8) else { return }
+
+        let consolePayload = lines
+            .map { "[PlayerDiagnostics] \($0)" }
+            .joined(separator: "\n") + "\n"
+        print(consolePayload, terminator: "")
+        let url = directory.appendingPathComponent(fileName)
+        guard FileManager.default.fileExists(atPath: url.path) else {
+            try? data.write(to: url, options: .atomic)
+            return
+        }
+        guard let handle = try? FileHandle(forWritingTo: url) else { return }
+        defer { handle.closeFile() }
+        handle.seekToEndOfFile()
+        handle.write(data)
     }
 }
 
@@ -891,7 +959,7 @@ private struct PlayerPerformanceSampleGroupAccumulator {
     }
 }
 
-private struct PlayerPerformancePersistedSession: Codable, Equatable {
+private struct PlayerPerformancePersistedSession: Codable, Equatable, Sendable {
     let id: String
     var title: String?
     var lastUpdatedAt: Date
@@ -1060,6 +1128,15 @@ private struct PlayerPerformancePersistedSession: Codable, Equatable {
     }
 }
 
+private actor PlayerPerformanceSessionPersistenceWriter {
+    static let shared = PlayerPerformanceSessionPersistenceWriter()
+
+    func persist(_ sessions: [PlayerPerformancePersistedSession], forKey key: String) {
+        guard let data = try? JSONEncoder().encode(sessions) else { return }
+        UserDefaults.standard.set(data, forKey: key)
+    }
+}
+
 struct PlayerStartupPerformanceSample: Identifiable, Codable, Equatable, Sendable {
     let id: UUID
     let date: Date
@@ -1225,6 +1302,10 @@ struct PlayerPerformanceSession: Identifiable, Equatable {
     var failureMessage: String?
     var recentStartupSamples: [PlayerStartupPerformanceSample] = []
     var timeline: [PlayerPerformanceTimelineEntry] = []
+}
+
+struct PlayerPerformanceStoreUpdate {
+    let metricsID: String?
 }
 
 enum PlayerPerformanceCopyTextFormatter {
@@ -1616,11 +1697,13 @@ final class PlayerPerformanceStore: ObservableObject {
 
     private(set) var events: [PlayerPerformanceEvent] = []
     private(set) var sessions: [PlayerPerformanceSession] = []
+    let updates = PassthroughSubject<PlayerPerformanceStoreUpdate, Never>()
     private let maxEventCount = 160
     private let maxSessionCount = 24
     private let maxPersistedSessionCount = 48
     private var sessionsByID: [String: PlayerPerformanceSession] = [:]
     private var persistTask: Task<Void, Never>?
+    private var persistGeneration = 0
     private var performanceCopyLogTasks: [String: Task<Void, Never>] = [:]
     private var lastPerformanceCopyLogSignatures: [String: String] = [:]
 
@@ -1641,6 +1724,7 @@ final class PlayerPerformanceStore: ObservableObject {
             events.removeFirst(events.count - maxEventCount)
         }
         updateSession(with: event)
+        updates.send(PlayerPerformanceStoreUpdate(metricsID: metricsID))
     }
 
     func session(for metricsID: String) -> PlayerPerformanceSession? {
@@ -1732,6 +1816,7 @@ final class PlayerPerformanceStore: ObservableObject {
         objectWillChange.send()
         persistTask?.cancel()
         persistTask = nil
+        persistGeneration &+= 1
         performanceCopyLogTasks.values.forEach { $0.cancel() }
         performanceCopyLogTasks.removeAll()
         lastPerformanceCopyLogSignatures.removeAll()
@@ -1739,6 +1824,7 @@ final class PlayerPerformanceStore: ObservableObject {
         sessions.removeAll()
         sessionsByID.removeAll()
         UserDefaults.standard.removeObject(forKey: Self.persistedSessionsKey)
+        updates.send(PlayerPerformanceStoreUpdate(metricsID: nil))
     }
 
     private func relevantPlaybackSessions(for metricsID: String?) -> [PlayerPerformanceSession] {
@@ -2205,19 +2291,34 @@ final class PlayerPerformanceStore: ObservableObject {
 
     private func schedulePersist() {
         persistTask?.cancel()
+        persistGeneration &+= 1
+        let generation = persistGeneration
         let cutoff = Date().addingTimeInterval(-Self.persistedSessionMaxAge)
         let persistedSessions = sessions
             .filter { Self.hasStartupSample($0) && $0.lastUpdatedAt >= cutoff }
             .prefix(maxPersistedSessionCount)
             .map(PlayerPerformancePersistedSession.init(session:))
 
-        persistTask = Task { @MainActor [weak self, persistedSessions] in
+        persistTask = Task { @MainActor [weak self, persistedSessions, generation] in
             try? await Task.sleep(nanoseconds: 350_000_000)
-            guard !Task.isCancelled else { return }
-            if let data = try? JSONEncoder().encode(persistedSessions) {
+            guard !Task.isCancelled,
+                  let self,
+                  self.persistGeneration == generation
+            else { return }
+
+            if PlayerDiagnosticsBackgroundProcessingExperiment.isEnabled {
+                await PlayerPerformanceSessionPersistenceWriter.shared.persist(
+                    persistedSessions,
+                    forKey: Self.persistedSessionsKey
+                )
+            } else if let data = try? JSONEncoder().encode(persistedSessions) {
                 UserDefaults.standard.set(data, forKey: Self.persistedSessionsKey)
             }
-            self?.persistTask = nil
+
+            guard !Task.isCancelled,
+                  self.persistGeneration == generation
+            else { return }
+            self.persistTask = nil
         }
     }
 

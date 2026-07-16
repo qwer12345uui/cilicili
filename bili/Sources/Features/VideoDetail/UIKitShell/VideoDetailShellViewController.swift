@@ -1,5 +1,6 @@
 import AVFoundation
 import Combine
+import QuartzCore
 import SwiftUI
 import UIKit
 
@@ -22,7 +23,18 @@ final class VideoDetailShellViewController: UIViewController {
     private let onNavigateBack: () -> Void
     private var cancellables = Set<AnyCancellable>()
 
-    private var surfaceHost: VideoDetailShellSurfaceHost?
+    private lazy var playerSurfaceController: PlayerSurfaceController = {
+        PlayerSurfaceController(
+            parentViewController: self,
+            containerView: playerContainer,
+            makeHost: { [weak self] playerViewModel in
+                self?.makeSurfaceHost(for: playerViewModel)
+            },
+            onActivePlayerChange: { [weak self] playerViewModel in
+                self?.bindPlaybackState(to: playerViewModel)
+            }
+        )
+    }()
     private let playerContainer = UIView()
     private let contentHost: UIHostingController<VideoDetailShellContentView>
     private let contentState = VideoDetailShellContentView.State()
@@ -45,6 +57,11 @@ final class VideoDetailShellViewController: UIViewController {
     private var isSystemRotationTransitioning = false
     private let rotationFrameProbe = VideoRotationFrameProbe()
     private var rotationFrameProbeGeneration = 0
+    private var rotationCompletionRecoveryDisplayLink: CADisplayLink?
+    private var pendingRotationCompletionPreparation: (() -> Void)?
+    private var pendingRotationCompletionRecovery: (() -> Void)?
+    private var pendingRotationCompletionRecoveryGeneration: Int?
+    private var rotationCompletionRecoveryGeneration = 0
     /// VC 是否处于可见活跃态（viewDidAppear~viewWillDisappear 之间）。
     /// 用于防止 $detail sink 在 VC 消失后重新解锁横屏，导致全局朝向锁卡在 landscape。
     private var isViewActive = false
@@ -55,7 +72,7 @@ final class VideoDetailShellViewController: UIViewController {
 
     /// 竖屏标准高度（对齐原项目：固定 16:9，与视频真实比例无关）。
     private func standardPlayerHeight(forWidth width: CGFloat) -> CGFloat {
-        (width * 9 / 16).rounded()
+        PlaybackDetailShellLayout.standardPlayerHeight(for: width)
     }
 
     /// 是否竖屏视频（aspectRatio < 0.9，对齐原项目）。
@@ -220,6 +237,7 @@ final class VideoDetailShellViewController: UIViewController {
     override func viewWillDisappear(_ animated: Bool) {
         super.viewWillDisappear(animated)
         isViewActive = false
+        cancelPendingRotationCompletionRecovery()
         rotationFrameProbe.cancel()
         // 离开页面恢复竖屏锁定，避免横屏解锁残留影响其它页面（首页/动态/直播/我的）。
         AppOrientationLock.restorePortrait(in: view.window?.windowScene)
@@ -228,6 +246,7 @@ final class VideoDetailShellViewController: UIViewController {
     override func viewDidDisappear(_ animated: Bool) {
         super.viewDidDisappear(animated)
         isViewActive = false
+        cancelPendingRotationCompletionRecovery()
         // 双保险：tab 切换等场景 viewWillDisappear 可能不触发，这里再兜一次。
         AppOrientationLock.restorePortrait(in: view.window?.windowScene)
     }
@@ -246,6 +265,9 @@ final class VideoDetailShellViewController: UIViewController {
     ) {
         super.viewWillTransition(to: size, with: coordinator)
         let toLandscape = size.width > size.height
+        rotationCompletionRecoveryGeneration &+= 1
+        let completionRecoveryGeneration = rotationCompletionRecoveryGeneration
+        cancelPendingRotationCompletionRecovery()
         let performanceContext = PlaybackDetailPerformanceContext.video(viewModel.detail)
         PlaybackDetailPerformanceMonitor.shared.mark(
             .fullscreenTransitionStarted,
@@ -270,26 +292,17 @@ final class VideoDetailShellViewController: UIViewController {
             self?.rotationFrameProbe.mark("系统动画布局开始")
             self?.applyLayout(forBoundsSize: size)
             self?.view.layoutIfNeeded()
-            self?.surfaceHost?.refreshLayoutImmediately()
+            self?.refreshSurfaceLayoutImmediately()
             self?.setNeedsStatusBarAppearanceUpdate()
             self?.setNeedsUpdateOfHomeIndicatorAutoHidden()
             self?.rotationFrameProbe.mark("系统动画布局完成")
         }, completion: { [weak self] _ in
             guard let self else { return }
-            self.contentHost.view.isHidden = toLandscape
-            self.contentHost.view.isUserInteractionEnabled = !toLandscape
-            self.surfaceHost?.setLandscape(toLandscape || self.isPortraitFullscreen)
-            self.isSystemRotationTransitioning = false
-            self.applyLayout()
-            self.view.layoutIfNeeded()
-            self.setBareSurfaceTransitionActive(false)
-            self.surfaceHost?.refreshLayoutImmediately()
-            PlaybackDetailPerformanceMonitor.shared.mark(
-                .fullscreenLayoutUpdated,
-                context: PlaybackDetailPerformanceContext.video(self.viewModel.detail),
-                detail: "landscape=\(toLandscape)"
+            guard self.rotationCompletionRecoveryGeneration == completionRecoveryGeneration else { return }
+            self.finishSystemRotationWithStagedRecovery(
+                toLandscape: toLandscape,
+                generation: completionRecoveryGeneration
             )
-            self.rotationFrameProbe.finish(reason: "系统旋转完成 landscape=\(toLandscape)")
         })
     }
 
@@ -302,7 +315,8 @@ final class VideoDetailShellViewController: UIViewController {
         guard !detail.bvid.isEmpty else { return }
         rotationFrameProbeGeneration &+= 1
         let durationMs = Int((coordinator.transitionDuration * 1000).rounded())
-        let coordinatorSummary = "coordinatorDuration=\(durationMs)ms animated=\(coordinator.isAnimated) interactive=\(coordinator.isInteractive)"
+        let recoveryStrategy = "retainedChromeStagedDisplayFrames"
+        let coordinatorSummary = "coordinatorDuration=\(durationMs)ms animated=\(coordinator.isAnimated) interactive=\(coordinator.isInteractive) completionRecovery=\(recoveryStrategy)"
         rotationFrameProbe.start(
             metricsID: detail.bvid,
             title: detail.title,
@@ -314,10 +328,125 @@ final class VideoDetailShellViewController: UIViewController {
         )
     }
 
+    private func finishSystemRotationWithStagedRecovery(
+        toLandscape: Bool,
+        generation: Int
+    ) {
+        rotationFrameProbe.mark("系统完成：保持视频层与已挂载控件树")
+        contentHost.view.isHidden = toLandscape
+        contentHost.view.isUserInteractionEnabled = false
+
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        applyLayout()
+        CATransaction.commit()
+        rotationFrameProbe.mark("视频层几何已提交，等待下一帧")
+
+        scheduleRotationCompletionRecovery(
+            generation: generation,
+            preparation: { [weak self] in
+                guard let self,
+                      self.rotationCompletionRecoveryGeneration == generation
+                else { return }
+
+                // 先单独让 SwiftUI 控件树切到目标方向，仍保持 bare surface。
+                // 下一次显示刷新再把控件、手势与交互加回来，避免压在系统结束帧。
+                self.rotationFrameProbe.mark("第一帧：预热已挂载控件状态")
+                self.setSurfaceLandscape(toLandscape || self.isPortraitFullscreen)
+                self.rotationFrameProbe.mark("第一帧：控件方向已就绪")
+            },
+            recovery: { [weak self] in
+                guard let self,
+                      self.rotationCompletionRecoveryGeneration == generation
+                else { return }
+
+                self.rotationFrameProbe.mark("第二帧：恢复内容开始")
+                self.isSystemRotationTransitioning = false
+                self.contentHost.view.isHidden = toLandscape
+                self.contentHost.view.isUserInteractionEnabled = !toLandscape
+                self.rotationFrameProbe.mark("第二帧：内容已恢复")
+
+                self.setBareSurfaceTransitionActive(false)
+                self.rotationFrameProbe.mark("第二帧：叠层和手势已恢复")
+                self.recordCompletedSystemRotation(
+                    toLandscape: toLandscape,
+                    strategy: "retainedChromeStagedDisplayFrames"
+                )
+            }
+        )
+    }
+
+    private func recordCompletedSystemRotation(toLandscape: Bool, strategy: String) {
+        PlaybackDetailPerformanceMonitor.shared.mark(
+            .fullscreenLayoutUpdated,
+            context: PlaybackDetailPerformanceContext.video(viewModel.detail),
+            detail: "landscape=\(toLandscape) strategy=\(strategy)"
+        )
+        rotationFrameProbe.finish(
+            reason: "系统旋转完成 landscape=\(toLandscape) strategy=\(strategy)"
+        )
+    }
+
+    private func scheduleRotationCompletionRecovery(
+        generation: Int,
+        preparation: @escaping () -> Void,
+        recovery: @escaping () -> Void
+    ) {
+        cancelPendingRotationCompletionRecovery()
+        pendingRotationCompletionPreparation = preparation
+        pendingRotationCompletionRecovery = recovery
+        pendingRotationCompletionRecoveryGeneration = generation
+        let displayLink = CADisplayLink(
+            target: self,
+            selector: #selector(runPendingRotationCompletionRecovery(_:))
+        )
+        if #available(iOS 15.0, *) {
+            let maximumFrameRate = Float(max(view.window?.windowScene?.screen.maximumFramesPerSecond ?? 60, 60))
+            displayLink.preferredFrameRateRange = CAFrameRateRange(
+                minimum: 30,
+                maximum: maximumFrameRate,
+                preferred: maximumFrameRate
+            )
+        }
+        displayLink.add(to: .main, forMode: .common)
+        rotationCompletionRecoveryDisplayLink = displayLink
+    }
+
+    @objc private func runPendingRotationCompletionRecovery(_ displayLink: CADisplayLink) {
+        guard rotationCompletionRecoveryDisplayLink === displayLink,
+              let generation = pendingRotationCompletionRecoveryGeneration,
+              let recovery = pendingRotationCompletionRecovery
+        else { return }
+
+        guard generation == rotationCompletionRecoveryGeneration else {
+            cancelPendingRotationCompletionRecovery()
+            return
+        }
+        if let preparation = pendingRotationCompletionPreparation {
+            pendingRotationCompletionPreparation = nil
+            preparation()
+            return
+        }
+
+        cancelPendingRotationCompletionRecovery()
+        recovery()
+    }
+
+    private func cancelPendingRotationCompletionRecovery() {
+        rotationCompletionRecoveryDisplayLink?.invalidate()
+        rotationCompletionRecoveryDisplayLink = nil
+        pendingRotationCompletionPreparation = nil
+        pendingRotationCompletionRecovery = nil
+        pendingRotationCompletionRecoveryGeneration = nil
+    }
+
     // MARK: - Layout
 
     private func setBareSurfaceTransitionActive(_ active: Bool) {
-        surfaceHost?.setBareSurfaceTransitionActive(active)
+        setSurfaceBareTransitionActive(
+            active,
+            retainsChromeTree: active
+        )
         collapsedDimmingView.isHidden = active
         collapsedBarHost?.view.isHidden = active
         if active {
@@ -331,54 +460,36 @@ final class VideoDetailShellViewController: UIViewController {
         let bounds = CGRect(origin: .zero, size: size ?? view.bounds.size)
         let landscape = bounds.width > bounds.height
 
-        if landscape || isPortraitFullscreen {
-            // 横屏全屏 或 竖屏视频的竖屏全屏：播放器占满整屏，内容区移出屏幕。
-            playerContainer.frame = bounds
-            contentHost.view.frame = CGRect(
-                x: 0,
-                y: bounds.height,
-                width: bounds.width,
-                height: max(bounds.height, 1)
-            )
-        } else {
-            let topInset = view.safeAreaInsets.top
-            let expanded = expandedPlayerHeight(bounds: bounds.size)
-            // 叠放结构（对齐原项目）：内容区始终占满屏幕，顶部留白 = expanded 高度；
-            // 播放器盖在顶部、高度随缩放在 [min, expanded] 间变。滚动只改播放器高度，
-            // 内容区 frame 不变 → 无 ScrollView 尺寸反馈抽搐。
-            contentHost.view.frame = CGRect(
-                x: 0,
-                y: topInset,
-                width: bounds.width,
-                height: bounds.height - topInset
-            )
+        let usesFullscreenLayout = landscape || isPortraitFullscreen
+        let expanded = expandedPlayerHeight(bounds: bounds.size)
+        let shellLayout = PlaybackDetailShellLayout(
+            bounds: bounds,
+            safeAreaTop: view.safeAreaInsets.top,
+            playerHeight: usesFullscreenLayout
+                ? bounds.height
+                : resolvedPlayerHeight(bounds: bounds.size),
+            contentTopInset: expanded,
+            usesFullscreenLayout: usesFullscreenLayout
+        )
+        playerContainer.frame = shellLayout.playerFrame
+        contentHost.view.frame = shellLayout.contentFrame
+        if let contentTopInset = shellLayout.contentTopInset {
             // 内容留白 = expanded（固定，对齐原项目）：播放器覆盖在内容上层、随滚动
             // 收缩，内容顶部始终贴播放器底部。这样"拖动先把播放器收到最小、再正常
             // 滚内容"是自然结果，且内容不会双倍滚动。
-            contentState.topInset = expanded
-
-            let playerHeight = resolvedPlayerHeight(bounds: bounds.size)
-            playerContainer.frame = CGRect(
-                x: 0,
-                y: topInset,
-                width: bounds.width,
-                height: playerHeight
-            )
+            contentState.topInset = contentTopInset
         }
 
-        surfaceHost?.frame = playerContainer.bounds
-        surfaceHost?.setVideoGravity(.resizeAspect)
+        updateSurfaceLayout(usesLandscapeChrome: landscape || isPortraitFullscreen)
         if !isSystemRotationTransitioning {
             updateCollapsedChrome(playerHeight: playerContainer.bounds.height)
-            surfaceHost?.setLandscape(landscape || isPortraitFullscreen)
         }
     }
 
     // MARK: - Player surface
 
-    private func installSurfaceHost(for playerViewModel: PlayerStateViewModel) {
-        guard surfaceHost == nil else { return }
-        let host = VideoDetailShellSurfaceHost(
+    private func makeSurfaceHost(for playerViewModel: PlayerStateViewModel) -> VideoDetailShellSurfaceHost {
+        VideoDetailShellSurfaceHost(
             playerViewModel: playerViewModel,
             detailViewModel: viewModel,
             dependencies: dependencies,
@@ -388,14 +499,41 @@ final class VideoDetailShellViewController: UIViewController {
             onShowDanmakuSettings: { [weak self] in self?.onShowDanmakuSettings() },
             onNavigateBack: { [weak self] in self?.handleBackButton() }
         )
-        host.attach(to: self)
-        host.frame = playerContainer.bounds
-        host.setLandscape(isLandscape)
-        host.setVideoAspectRatio(videoAspectRatio)
-        playerContainer.insertSubview(host, at: 0)
-        surfaceHost = host
-        playerViewModel.play()
-        applyLayout()
+    }
+
+    private func currentSurfaceLayout(usesLandscapeChrome: Bool) -> PlayerSurfaceLayout {
+        PlayerSurfaceLayout(
+            frame: playerContainer.bounds,
+            videoAspectRatio: videoAspectRatio,
+            videoGravity: .resizeAspect,
+            usesLandscapeChrome: usesLandscapeChrome,
+            isTransitioning: isSystemRotationTransitioning
+        )
+    }
+
+    private func updateSurfaceLayout(usesLandscapeChrome: Bool) {
+        playerSurfaceController.updateLayout(
+            currentSurfaceLayout(usesLandscapeChrome: usesLandscapeChrome)
+        )
+    }
+
+    private func setSurfaceVideoAspectRatio(_ aspectRatio: CGFloat) {
+        playerSurfaceController.setVideoAspectRatio(aspectRatio)
+    }
+
+    private func setSurfaceLandscape(_ landscape: Bool) {
+        playerSurfaceController.setLandscape(landscape)
+    }
+
+    private func setSurfaceBareTransitionActive(_ active: Bool, retainsChromeTree: Bool) {
+        playerSurfaceController.setBareSurfaceTransitionActive(
+            active,
+            retainsChromeTree: retainsChromeTree
+        )
+    }
+
+    private func refreshSurfaceLayoutImmediately() {
+        playerSurfaceController.refreshLayoutImmediately()
     }
 
     // MARK: - Fullscreen
@@ -431,7 +569,7 @@ final class VideoDetailShellViewController: UIViewController {
     private func setPortraitFullscreen(_ active: Bool) {
         guard isPortraitFullscreen != active else { return }
         isPortraitFullscreen = active
-        surfaceHost?.setLandscape(active) // 复用全屏 chrome 样式（隐藏导航栏等）
+        setSurfaceLandscape(active) // 复用全屏 chrome 样式（隐藏导航栏等）
         UIView.animate(withDuration: 0.28, delay: 0, options: [.curveEaseInOut]) {
             self.applyLayout()
             self.setNeedsStatusBarAppearanceUpdate()
@@ -530,7 +668,7 @@ final class VideoDetailShellViewController: UIViewController {
             width: view.bounds.width,
             height: playerHeight
         )
-        surfaceHost?.frame = playerContainer.bounds
+        updateSurfaceLayout(usesLandscapeChrome: false)
         updateCollapsedChrome(playerHeight: playerHeight)
         // 注意：滚动路径不改 topInset（改 contentSize 会引发 offset 反馈抽搐）。
     }
@@ -598,7 +736,7 @@ final class VideoDetailShellViewController: UIViewController {
             .sink { [weak self] detail in
                 guard let self, let ratio = detail.dimension?.aspectRatio, ratio > 0.1 else { return }
                 self.videoAspectRatio = CGFloat(ratio)
-                self.surfaceHost?.setVideoAspectRatio(self.videoAspectRatio)
+                self.setSurfaceVideoAspectRatio(self.videoAspectRatio)
                 // 真实宽高比到达后才知道是否竖屏视频，更新朝向锁（竖屏视频锁竖屏）。
                 self.updateOrientationLock()
                 // 真实宽高比变化后（影响 isPortraitVideo→expanded），若已缩放则重新 clamp。
@@ -611,44 +749,45 @@ final class VideoDetailShellViewController: UIViewController {
             }
             .store(in: &cancellables)
 
-        viewModel.$stablePlayerViewModel
+        playerSurfaceController.bind(
+            to: viewModel.playbackSession,
+            layout: currentSurfaceLayout(
+                usesLandscapeChrome: isLandscape || isPortraitFullscreen
+            )
+        )
+    }
+
+    private func bindPlaybackState(to playerViewModel: PlayerStateViewModel?) {
+        guard let playerViewModel else {
+            playbackStateCancellable = nil
+            return
+        }
+        // 订阅播放状态：暂停只放宽最小高度，不主动收起播放器；恢复播放时
+        // 再按当前滚动位置回到播放态允许的高度。
+        playbackStateCancellable = playerViewModel.$isPlaying
+            .combineLatest(playerViewModel.$isUserSeeking)
             .receive(on: RunLoop.main)
-            .sink { [weak self] playerViewModel in
-                guard let self, let playerViewModel else { return }
-                if let surfaceHost = self.surfaceHost {
-                    // 清晰度切换等会重建 player 实例，重绑到现有 surface host。
-                    surfaceHost.setPlayerViewModel(playerViewModel)
-                } else {
-                    self.installSurfaceHost(for: playerViewModel)
+            .map { isPlaying, isUserSeeking in isPlaying || isUserSeeking }
+            .removeDuplicates()
+            .sink { [weak self] isPlaybackActive in
+                guard let self, !self.isLandscape, !self.isPortraitFullscreen else { return }
+                guard isPlaybackActive else {
+                    self.updatePlayerContainerHeight()
+                    return
                 }
-                // 订阅播放状态：暂停只放宽最小高度，不主动收起播放器；恢复播放时
-                // 再按当前滚动位置回到播放态允许的高度。
-                self.playbackStateCancellable = playerViewModel.$isPlaying
-                    .combineLatest(playerViewModel.$isUserSeeking)
-                    .receive(on: RunLoop.main)
-                    .map { isPlaying, isUserSeeking in isPlaying || isUserSeeking }
-                    .removeDuplicates()
-                    .sink { [weak self] isPlaybackActive in
-                        guard let self, !self.isLandscape, !self.isPortraitFullscreen else { return }
-                        guard isPlaybackActive else {
-                            self.updatePlayerContainerHeight()
-                            return
-                        }
-                        guard self.lastScrollOffset > 0.5 else {
-                            self.updatePlayerContainerHeight()
-                            return
-                        }
-                        let minimum = self.minimumPlayerHeight(forWidth: self.view.bounds.width)
-                        let expanded = self.expandedPlayerHeight(bounds: self.view.bounds.size)
-                        let target = max(minimum, min(expanded, expanded - self.lastScrollOffset))
-                        guard self.currentPlayerHeight.map({ abs($0 - target) > 0.5 }) ?? true else { return }
-                        self.currentPlayerHeight = target
-                        UIView.animate(withDuration: 0.24, delay: 0, options: [.curveEaseInOut]) {
-                            self.updatePlayerContainerHeight()
-                        }
-                    }
+                guard self.lastScrollOffset > 0.5 else {
+                    self.updatePlayerContainerHeight()
+                    return
+                }
+                let minimum = self.minimumPlayerHeight(forWidth: self.view.bounds.width)
+                let expanded = self.expandedPlayerHeight(bounds: self.view.bounds.size)
+                let target = max(minimum, min(expanded, expanded - self.lastScrollOffset))
+                guard self.currentPlayerHeight.map({ abs($0 - target) > 0.5 }) ?? true else { return }
+                self.currentPlayerHeight = target
+                UIView.animate(withDuration: 0.24, delay: 0, options: [.curveEaseInOut]) {
+                    self.updatePlayerContainerHeight()
+                }
             }
-            .store(in: &cancellables)
     }
 
     // MARK: - System back gestures

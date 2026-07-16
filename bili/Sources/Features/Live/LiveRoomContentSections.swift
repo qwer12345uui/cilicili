@@ -15,12 +15,7 @@ extension LiveRoomContentView {
     }
 
     func liveDetailControls(_ viewModel: LiveRoomViewModel, contentWidth: CGFloat) -> some View {
-        VStack(alignment: .leading, spacing: 12) {
-            LiveRoomInfoCard(viewModel: viewModel)
-            liveActionStrip(viewModel, contentWidth: contentWidth)
-            liveInlineControlStrip(viewModel)
-            liveStatusNotice(viewModel)
-        }
+        LiveRoomMinimalDetailHeader(viewModel: viewModel)
         .frame(width: contentWidth, alignment: .leading)
     }
 }

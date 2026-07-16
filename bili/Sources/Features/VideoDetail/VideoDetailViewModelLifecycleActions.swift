@@ -3,6 +3,7 @@ import Foundation
 
 extension VideoDetailViewModel {
     func configureLifecycleBindings() {
+        lastDanmakuAdaptationProfile = playbackAdaptationProfile
         filterCancellable = libraryStore.$blocksGoodsComments
             .removeDuplicates()
             .dropFirst()
@@ -26,15 +27,24 @@ extension VideoDetailViewModel {
             .dropFirst()
             .sink { [weak self] _ in
                 guard self?.isPlaybackInvalidatedForNavigation != true else { return }
-                self?.scheduleRenderStoreSync(.danmaku)
+                self?.refreshDanmakuRenderStoreForPlaybackPerformance(force: true)
             }
-        playbackPerformanceCancellable = PlayerPerformanceStore.shared.objectWillChange
+        playbackPerformanceCancellable = PlayerPerformanceStore.shared.updates
             .sink { [weak self] _ in
-                Task { @MainActor [weak self] in
-                    guard self?.isPlaybackInvalidatedForNavigation != true else { return }
-                    self?.scheduleRenderStoreSync(.danmaku)
-                }
+                guard let self,
+                      !self.isPlaybackInvalidatedForNavigation
+                else { return }
+                self.refreshDanmakuRenderStoreForPlaybackPerformance(
+                    force: !self.libraryStore.diagnosticsBackgroundProcessingExperimentEnabled
+                )
             }
+    }
+
+    private func refreshDanmakuRenderStoreForPlaybackPerformance(force: Bool) {
+        let nextProfile = playbackAdaptationProfile
+        defer { lastDanmakuAdaptationProfile = nextProfile }
+        guard force || lastDanmakuAdaptationProfile != nextProfile else { return }
+        scheduleRenderStoreSync(.danmaku)
     }
 
 }

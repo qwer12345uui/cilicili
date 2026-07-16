@@ -2,10 +2,6 @@ import SwiftUI
 import UIKit
 
 extension LiveRoomContentView {
-    func toggleDescriptionSheet() {
-        isShowingDescription = true
-    }
-
     func enterInlineFullscreenPlayback(playerViewModel: PlayerStateViewModel? = nil) {
         pendingFullscreenExitTask?.cancel()
         isCompletingFullscreenExit = false

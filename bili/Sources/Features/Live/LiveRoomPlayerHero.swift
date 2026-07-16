@@ -1,12 +1,13 @@
 import SwiftUI
 
 struct LiveRoomPlayerHero: View {
+    @EnvironmentObject private var dependencies: AppDependencies
     @ObservedObject var viewModel: LiveRoomViewModel
     let isLandscape: Bool
     let fullscreenMode: PlayerFullscreenMode?
     let playerWidth: CGFloat?
     let playerHeight: CGFloat
-    let controlsAccessory: () -> AnyView
+    let controlsAccessory: (Bool) -> AnyView
     let loadingPlaceholder: () -> AnyView
     let onRequestFullscreen: (PlayerStateViewModel?) -> Void
     let onExitFullscreen: (PlayerStateViewModel?) -> Void
@@ -14,8 +15,8 @@ struct LiveRoomPlayerHero: View {
     var body: some View {
         PlaybackDetailPlayerSurface(width: playerWidth, height: playerHeight) {
             ZStack {
-                if let playerViewModel = viewModel.playerViewModel {
-                    livePlayer(playerViewModel)
+                if viewModel.playerViewModel != nil {
+                    coordinatedLivePlayer()
                 } else {
                     loadingPlaceholder()
                         .frame(width: playerWidth)
@@ -51,46 +52,17 @@ struct LiveRoomPlayerHero: View {
         }
     }
 
-    private func livePlayer(_ playerViewModel: PlayerStateViewModel) -> some View {
-        BiliPlayerView(
-            viewModel: playerViewModel,
-            historyVideo: nil,
-            historyCID: nil,
-            options: BiliPlayerViewOptions(
-                presentation: usesLandscapeChrome ? .fullScreen : .embedded,
-                showsNavigationChrome: false,
-                showsStartupLoadingIndicator: false,
-                pausesOnDisappear: false,
-                surfaceOverlay: AnyView(
-                    LiveDanmakuOverlay(
-                        store: viewModel.liveDanmakuRenderStore,
-                        playerViewModel: playerViewModel,
-                        usesLandscapeChrome: usesLandscapeChrome
-                    )
-                ),
-                controlsAccessory: usesLandscapeChrome ? controlsAccessory() : nil,
-                isDanmakuEnabled: viewModel.isDanmakuEnabled,
-                onToggleDanmaku: {
-                    viewModel.toggleDanmaku()
-                },
-                keepsPlayerSurfaceStable: true,
-                fullscreenMode: fullscreenMode,
-                onRequestFullscreen: {
-                    onRequestFullscreen(playerViewModel)
-                },
-                onExitFullscreen: {
-                    onExitFullscreen(playerViewModel)
-                }
-            )
+    private func coordinatedLivePlayer() -> some View {
+        LiveRoomSurfaceCoordinatorView(
+            viewModel: viewModel,
+            playbackSession: viewModel.playbackSession,
+            dependencies: dependencies,
+            usesLandscapeChrome: usesLandscapeChrome,
+            controlsAccessory: controlsAccessory,
+            onRequestFullscreen: onRequestFullscreen,
+            onExitFullscreen: onExitFullscreen
         )
-        .id(ObjectIdentifier(playerViewModel))
         .frame(width: playerWidth)
         .frame(height: playerHeight)
-        .background {
-            PlaybackDetailPlayerReadinessProbe(
-                playerViewModel: playerViewModel,
-                context: .live(roomID: viewModel.roomID, title: viewModel.title)
-            )
-        }
     }
 }

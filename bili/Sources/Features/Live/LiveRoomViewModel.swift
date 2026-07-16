@@ -6,7 +6,12 @@ final class LiveRoomViewModel: ObservableObject {
     @Published private(set) var roomSummary: LiveRoomSummary?
     @Published private(set) var roomInfo: LiveRoomInfo?
     @Published private(set) var anchorInfo: LiveAnchorInfoData?
-    @Published var playerViewModel: PlayerStateViewModel?
+    @Published var playerViewModel: PlayerStateViewModel? {
+        didSet {
+            playbackSession.replaceActivePlayer(with: playerViewModel)
+        }
+    }
+    let playbackSession = PlaybackSession()
     @Published var state: LoadingState = .idle
     @Published var streamFallbackMessage: String?
     @Published var streamMenuItems: [LiveStreamMenuItem] = []

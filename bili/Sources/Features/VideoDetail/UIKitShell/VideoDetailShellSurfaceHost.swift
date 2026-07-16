@@ -14,11 +14,24 @@ final class VideoDetailShellSurfaceHost: UIView {
     final class State: ObservableObject {
         @Published var isLandscape = false
         @Published var isBareSurfaceTransitionActive = false
+        @Published var retainsChromeDuringBareSurfaceTransition = false
         @Published var playerViewModel: PlayerStateViewModel
         @Published var videoAspectRatio: CGFloat = 16.0 / 9.0
 
         init(playerViewModel: PlayerStateViewModel) {
             self.playerViewModel = playerViewModel
+        }
+
+        func setBareSurfaceTransitionActive(_ active: Bool, retainsChromeTree: Bool) {
+            if active {
+                // 保留控件树时，先设标志再进入 bare state，避免 SwiftUI 删除子树。
+                retainsChromeDuringBareSurfaceTransition = retainsChromeTree
+                isBareSurfaceTransitionActive = true
+            } else {
+                // 先退出 bare state，再清标志，保证控件树连续存在。
+                isBareSurfaceTransitionActive = false
+                retainsChromeDuringBareSurfaceTransition = false
+            }
         }
     }
 
@@ -119,10 +132,11 @@ final class VideoDetailShellSurfaceHost: UIView {
     }
 
     /// 系统旋转期间退化成 bare surface，但始终保留弹幕层以避免重建和闪烁。
-    func setBareSurfaceTransitionActive(_ active: Bool) {
+    /// 实验路径可保留不可见的控件树，避免旋转结束时集中重建 SwiftUI 叠层。
+    func setBareSurfaceTransitionActive(_ active: Bool, retainsChromeTree: Bool = false) {
         overlayState.setBareSurfaceTransitionActive(active)
         experimentState.setBareSurfaceTransitionActive(active)
-        state.isBareSurfaceTransitionActive = active
+        state.setBareSurfaceTransitionActive(active, retainsChromeTree: retainsChromeTree)
         UIView.performWithoutAnimation {
             overlayHostingController.view.isHidden = false
             overlayHostingController.view.isUserInteractionEnabled = !active
@@ -157,6 +171,10 @@ final class VideoDetailShellSurfaceHost: UIView {
         state.videoAspectRatio = aspectRatio
     }
 
+}
+
+extension VideoDetailShellSurfaceHost: PlayerSurfaceHosting {
+    var surfaceView: UIView { self }
 }
 
 private struct VideoDetailShellOverlaySnapshot: Equatable {
@@ -278,6 +296,7 @@ private struct PlayerOverlayHostRoot: View {
             dependencies: dependencies,
             isLandscape: state.isLandscape,
             isBareSurfaceTransitionActive: state.isBareSurfaceTransitionActive,
+            retainsChromeDuringBareSurfaceTransition: state.retainsChromeDuringBareSurfaceTransition,
             videoAspectRatio: state.videoAspectRatio,
             onToggleDanmaku: onToggleDanmaku,
             onShowDanmakuSettings: onShowDanmakuSettings,
@@ -301,6 +320,7 @@ private struct SurfaceOnlyPlayerOverlayRoot: View {
     let dependencies: AppDependencies
     let isLandscape: Bool
     let isBareSurfaceTransitionActive: Bool
+    let retainsChromeDuringBareSurfaceTransition: Bool
     let videoAspectRatio: CGFloat
     let onToggleDanmaku: () -> Void
     let onShowDanmakuSettings: () -> Void
@@ -327,6 +347,7 @@ private struct SurfaceOnlyPlayerOverlayRoot: View {
         dependencies: AppDependencies,
         isLandscape: Bool,
         isBareSurfaceTransitionActive: Bool,
+        retainsChromeDuringBareSurfaceTransition: Bool,
         videoAspectRatio: CGFloat,
         onToggleDanmaku: @escaping () -> Void,
         onShowDanmakuSettings: @escaping () -> Void,
@@ -342,6 +363,7 @@ private struct SurfaceOnlyPlayerOverlayRoot: View {
         self.libraryStore = dependencies.libraryStore
         self.isLandscape = isLandscape
         self.isBareSurfaceTransitionActive = isBareSurfaceTransitionActive
+        self.retainsChromeDuringBareSurfaceTransition = retainsChromeDuringBareSurfaceTransition
         self.videoAspectRatio = videoAspectRatio
         self.onToggleDanmaku = onToggleDanmaku
         self.onShowDanmakuSettings = onShowDanmakuSettings
@@ -368,6 +390,7 @@ private struct SurfaceOnlyPlayerOverlayRoot: View {
             prepareUserSeekWarmup: prepareUserSeekWarmupIfNeeded,
             resetPreparedScrubProgress: { lastPreparedScrubProgress = -1 }
         ).actions
+        let shouldKeepChromeMounted = keepsChromeMounted
 
         GeometryReader { proxy in
             let videoInsets = visibleVideoInsets(in: proxy.size)
@@ -378,21 +401,69 @@ private struct SurfaceOnlyPlayerOverlayRoot: View {
             )
 
             ZStack {
-                if !isBareSurfaceTransitionActive {
-                    BiliPlayerSurfaceGestureLayerHost(
-                        content: Color.clear
-                            .frame(maxWidth: .infinity, maxHeight: .infinity),
-                        visibilityActions: visibilityActions,
-                        speedBoostActions: speedActions,
-                        viewModel: viewModel,
-                        holdCurrentFrameForSeek: holdCurrentFrameForSeek,
-                        prepareUserSeekWarmup: prepareUserSeekWarmupIfNeeded,
-                        resetPreparedScrubProgress: { lastPreparedScrubProgress = -1 }
-                    )
-                    .zIndex(1)
+                if shouldKeepChromeMounted {
+                    Group {
+                        BiliPlayerSurfaceGestureLayerHost(
+                            content: Color.clear
+                                .frame(maxWidth: .infinity, maxHeight: .infinity),
+                            visibilityActions: visibilityActions,
+                            speedBoostActions: speedActions,
+                            viewModel: viewModel,
+                            holdCurrentFrameForSeek: holdCurrentFrameForSeek,
+                            prepareUserSeekWarmup: prepareUserSeekWarmupIfNeeded,
+                            resetPreparedScrubProgress: { lastPreparedScrubProgress = -1 }
+                        )
+                        .zIndex(1)
 
-                    BiliPlayerSurfaceOverlayLayer(state: chromeState)
-                        .zIndex(2)
+                        BiliPlayerSurfaceOverlayLayer(state: chromeState)
+                            .zIndex(2)
+
+                        BiliPlayerControlsOverlayLayer(
+                            state: chromeState,
+                            playbackControls: AnyView(
+                                BiliPlayerNativeControlsHost(
+                                    context: renderContext,
+                                    renderState: renderState,
+                                    actions: nativeActions
+                                )
+                            )
+                        )
+                        .zIndex(3)
+
+                        persistentMoreControlsButton(contentInsets: videoInsets)
+
+                        if libraryStore.playerPerformanceOverlayEnabled {
+                            performanceOverlay(contentInsets: videoInsets, in: proxy.size)
+                                .zIndex(8)
+                        }
+
+                        let rotationReportMetricsID = overlaySnapshot.historyVideo.bvid
+                        if libraryStore.videoRotationFrameReportOverlayEnabled,
+                           !rotationReportMetricsID.isEmpty {
+                            VideoRotationFrameReportFloatingWindow(
+                                metricsID: rotationReportMetricsID,
+                                contentInsets: videoInsets
+                            )
+                            .zIndex(8.5)
+                        }
+
+                        if isLandscape, isMoreControlsPresented {
+                            SurfaceOnlyLandscapeMoreControlsOverlay(
+                                detailViewModel: detailViewModel,
+                                viewModel: viewModel,
+                                libraryStore: libraryStore,
+                                qualityStore: detailViewModel.playbackRenderStore.qualityControlStore,
+                                selectPlayVariant: { detailViewModel.selectPlayVariant($0) },
+                                onToggleDanmaku: onToggleDanmaku,
+                                contentInsets: videoInsets,
+                                close: { isMoreControlsPresented = false }
+                            )
+                            .transition(.opacity)
+                            .zIndex(9)
+                        }
+                    }
+                    .opacity(isBareSurfaceTransitionActive ? 0 : 1)
+                    .allowsHitTesting(!isBareSurfaceTransitionActive)
                 }
 
                 VideoDetailPlayerSurfaceDanmakuLayer(
@@ -404,52 +475,6 @@ private struct SurfaceOnlyPlayerOverlayRoot: View {
                 )
                 .allowsHitTesting(false)
                 .zIndex(2.5)
-
-                if !isBareSurfaceTransitionActive {
-                    BiliPlayerControlsOverlayLayer(
-                        state: chromeState,
-                        playbackControls: AnyView(
-                            BiliPlayerNativeControlsHost(
-                                context: renderContext,
-                                renderState: renderState,
-                                actions: nativeActions
-                            )
-                        )
-                    )
-                    .zIndex(3)
-
-                    persistentMoreControlsButton(contentInsets: videoInsets)
-
-                    if libraryStore.playerPerformanceOverlayEnabled {
-                        performanceOverlay(contentInsets: videoInsets, in: proxy.size)
-                            .zIndex(8)
-                    }
-
-                    let rotationReportMetricsID = overlaySnapshot.historyVideo.bvid
-                    if libraryStore.videoRotationFrameReportOverlayEnabled,
-                       !rotationReportMetricsID.isEmpty {
-                        VideoRotationFrameReportFloatingWindow(
-                            metricsID: rotationReportMetricsID,
-                            contentInsets: videoInsets
-                        )
-                        .zIndex(8.5)
-                    }
-
-                    if isLandscape, isMoreControlsPresented {
-                        SurfaceOnlyLandscapeMoreControlsOverlay(
-                            detailViewModel: detailViewModel,
-                            viewModel: viewModel,
-                            libraryStore: libraryStore,
-                            qualityStore: detailViewModel.playbackRenderStore.qualityControlStore,
-                            selectPlayVariant: { detailViewModel.selectPlayVariant($0) },
-                            onToggleDanmaku: onToggleDanmaku,
-                            contentInsets: videoInsets,
-                            close: { isMoreControlsPresented = false }
-                        )
-                        .transition(.opacity)
-                        .zIndex(9)
-                    }
-                }
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -525,18 +550,22 @@ private struct SurfaceOnlyPlayerOverlayRoot: View {
         isLandscape ? .landscape(.landscapeRight) : nil
     }
 
+    private var keepsChromeMounted: Bool {
+        !isBareSurfaceTransitionActive || retainsChromeDuringBareSurfaceTransition
+    }
+
     private var configuration: BiliPlayerViewConfiguration {
         BiliPlayerViewOptions(
             presentation: isLandscape ? .fullScreen : .embedded,
             showsNavigationChrome: false,
-            showsPlaybackControls: !isBareSurfaceTransitionActive,
-            showsStartupLoadingIndicator: !isBareSurfaceTransitionActive,
+            showsPlaybackControls: keepsChromeMounted,
+            showsStartupLoadingIndicator: keepsChromeMounted,
             pausesOnDisappear: false,
-            topLeadingControlsAccessory: isBareSurfaceTransitionActive ? nil : AnyView(backButton),
-            isDanmakuEnabled: !isBareSurfaceTransitionActive && overlaySnapshot.isDanmakuEnabled,
+            topLeadingControlsAccessory: keepsChromeMounted ? AnyView(backButton) : nil,
+            isDanmakuEnabled: keepsChromeMounted && overlaySnapshot.isDanmakuEnabled,
             onToggleDanmaku: onToggleDanmaku,
             onShowDanmakuSettings: onShowDanmakuSettings,
-            isSecondaryControlsPresented: !isBareSurfaceTransitionActive
+            isSecondaryControlsPresented: keepsChromeMounted
                 && (isMoreControlsPresented || isMoreControlsSheetPresented),
             ignoresContainerSafeArea: true,
             keepsPlayerSurfaceStable: true,

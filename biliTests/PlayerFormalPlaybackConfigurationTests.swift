@@ -66,6 +66,39 @@ final class PlayerFormalPlaybackConfigurationTests: XCTestCase {
     }
 
     @MainActor
+    func testPlaybackSessionTracksActivePlayerIdentityAndDetaches() {
+        let player = PlayerStateViewModel(
+            videoURL: nil,
+            audioURL: nil,
+            title: "Playback session test",
+            referer: "https://www.bilibili.com"
+        )
+        let session = PlaybackSession()
+
+        session.replaceActivePlayer(with: player)
+
+        XCTAssertTrue(session.activePlayer === player)
+        XCTAssertEqual(session.snapshot.playerID, ObjectIdentifier(player))
+        XCTAssertEqual(session.snapshot.phase, .preparing)
+
+        player.isPreparing = false
+        player.isPlaying = true
+        XCTAssertEqual(session.snapshot.phase, .playing)
+
+        player.isBuffering = true
+        XCTAssertEqual(session.snapshot.phase, .buffering)
+
+        player.errorMessage = "Test failure"
+        XCTAssertEqual(session.snapshot.phase, .failed)
+
+        session.detach()
+
+        XCTAssertNil(session.activePlayer)
+        XCTAssertEqual(session.snapshot, .idle)
+        player.stop(reason: .navigation)
+    }
+
+    @MainActor
     func testLibraryStoreAllowsHidingSearchRootTab() {
         let defaults = makeUserDefaults()
         let store = LibraryStore(userDefaults: defaults)

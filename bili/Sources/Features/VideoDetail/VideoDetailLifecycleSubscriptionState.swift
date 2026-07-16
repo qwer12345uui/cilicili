@@ -5,6 +5,7 @@ struct VideoDetailLifecycleSubscriptionState {
     var sponsorBlockCancellable: AnyCancellable?
     var playbackAutoOptimizationCancellable: AnyCancellable?
     var playbackPerformanceCancellable: AnyCancellable?
+    var lastDanmakuAdaptationProfile: PlayerPlaybackAdaptationProfile?
 }
 
 extension VideoDetailViewModel {
@@ -26,5 +27,10 @@ extension VideoDetailViewModel {
     var playbackPerformanceCancellable: AnyCancellable? {
         get { lifecycleSubscriptionState.playbackPerformanceCancellable }
         set { lifecycleSubscriptionState.playbackPerformanceCancellable = newValue }
+    }
+
+    var lastDanmakuAdaptationProfile: PlayerPlaybackAdaptationProfile? {
+        get { lifecycleSubscriptionState.lastDanmakuAdaptationProfile }
+        set { lifecycleSubscriptionState.lastDanmakuAdaptationProfile = newValue }
     }
 }

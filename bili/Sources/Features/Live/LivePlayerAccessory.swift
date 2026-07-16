@@ -2,17 +2,94 @@ import SwiftUI
 
 struct LivePlayerAccessory: View {
     @ObservedObject var viewModel: LiveRoomViewModel
+    let usesCompactLayout: Bool
+
+    init(viewModel: LiveRoomViewModel, usesCompactLayout: Bool = false) {
+        self.viewModel = viewModel
+        self.usesCompactLayout = usesCompactLayout
+    }
 
     var body: some View {
-        GlassEffectContainer(spacing: 8) {
-            HStack(spacing: 8) {
-                LiveQualityMenu(viewModel: viewModel)
-                LiveStreamMenu(viewModel: viewModel)
-                Spacer(minLength: 0)
-                LiveDanmakuToggleButton(viewModel: viewModel)
-                LiveDanmakuDiagnosticsButton(viewModel: viewModel)
+        Group {
+            if usesCompactLayout {
+                LiveCompactSettingsMenu(viewModel: viewModel)
+            } else {
+                GlassEffectContainer(spacing: 8) {
+                    HStack(spacing: 8) {
+                        LiveQualityMenu(viewModel: viewModel)
+                        LiveStreamMenu(viewModel: viewModel)
+                        Spacer(minLength: 0)
+                        LiveDanmakuToggleButton(viewModel: viewModel)
+                        LiveDanmakuDiagnosticsButton(viewModel: viewModel)
+                    }
+                }
             }
         }
+    }
+}
+
+private struct LiveCompactSettingsMenu: View {
+    @ObservedObject var viewModel: LiveRoomViewModel
+
+    var body: some View {
+        Menu {
+            if viewModel.hasMultipleQualities || viewModel.currentQualityTitle != nil {
+                Menu("画质") {
+                    ForEach(viewModel.qualityMenuItems) { item in
+                        Button {
+                            viewModel.selectQuality(qn: item.qn)
+                        } label: {
+                            Label(
+                                item.title,
+                                systemImage: item.isSelected ? "checkmark" : "slider.horizontal.3"
+                            )
+                        }
+                    }
+                }
+            }
+
+            if viewModel.hasMultipleStreamCandidates || viewModel.currentStreamTitle != nil {
+                Menu("线路") {
+                    ForEach(viewModel.streamMenuItems) { item in
+                        Button {
+                            viewModel.selectStreamCandidate(id: item.id)
+                        } label: {
+                            Label(
+                                item.title,
+                                systemImage: item.isSelected ? "checkmark" : "antenna.radiowaves.left.and.right"
+                            )
+                        }
+                    }
+                }
+            }
+
+            Divider()
+
+            Button {
+                viewModel.toggleDanmaku()
+            } label: {
+                Label(
+                    viewModel.isDanmakuEnabled ? "关闭弹幕" : "开启弹幕",
+                    systemImage: viewModel.isDanmakuEnabled ? "text.bubble.fill" : "text.bubble"
+                )
+            }
+
+            Button {
+                viewModel.toggleLiveDanmakuDiagnostics()
+            } label: {
+                Label(
+                    viewModel.isLiveDanmakuDiagnosticsEnabled ? "关闭弹幕诊断" : "开启弹幕诊断",
+                    systemImage: "waveform.path.ecg"
+                )
+            }
+        } label: {
+            Image(systemName: "slider.horizontal.3")
+                .font(.system(size: 14, weight: .semibold))
+                .frame(width: 32, height: 32)
+        }
+        .biliPlayerGlassButtonStyle()
+        .biliLiquidGlassForeground(shadowOpacity: 0.20)
+        .accessibilityLabel("直播设置")
     }
 }
 

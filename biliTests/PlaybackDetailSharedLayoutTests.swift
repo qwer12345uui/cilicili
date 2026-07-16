@@ -33,6 +33,34 @@ final class PlaybackDetailSharedLayoutTests: XCTestCase {
         XCTAssertEqual(PlaybackDetailContentMetrics.contentWidth(for: 12), 0)
     }
 
+    func testUIKitShellLayoutUsesStandardPortraitPlayerAndContentFrames() {
+        let layout = PlaybackDetailShellLayout(
+            bounds: CGRect(x: 0, y: 0, width: 393, height: 852),
+            safeAreaTop: 59,
+            playerHeight: PlaybackDetailShellLayout.standardPlayerHeight(for: 393),
+            contentTopInset: PlaybackDetailShellLayout.standardPlayerHeight(for: 393),
+            usesFullscreenLayout: false
+        )
+
+        XCTAssertEqual(layout.playerFrame, CGRect(x: 0, y: 59, width: 393, height: 221))
+        XCTAssertEqual(layout.contentFrame, CGRect(x: 0, y: 59, width: 393, height: 793))
+        XCTAssertEqual(layout.contentTopInset, 221)
+    }
+
+    func testUIKitShellLayoutMakesThePlayerTheOnlyLandscapeSurface() {
+        let layout = PlaybackDetailShellLayout(
+            bounds: CGRect(x: 0, y: 0, width: 852, height: 393),
+            safeAreaTop: 0,
+            playerHeight: 221,
+            contentTopInset: 221,
+            usesFullscreenLayout: true
+        )
+
+        XCTAssertEqual(layout.playerFrame, CGRect(x: 0, y: 0, width: 852, height: 393))
+        XCTAssertEqual(layout.contentFrame, CGRect(x: 0, y: 393, width: 852, height: 393))
+        XCTAssertNil(layout.contentTopInset)
+    }
+
     func testPageLifecycleActionsDeliverPageAndSceneEvents() {
         var events = [String]()
         let actions = PlaybackDetailPageLifecycleActions(

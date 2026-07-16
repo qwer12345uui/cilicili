@@ -29,11 +29,13 @@ final class PlayerPerformanceSessionObserver: ObservableObject {
         )
         refreshNow()
 
-        store.objectWillChange
+        store.updates
+            .filter { [weak self] update in
+                guard let metricsID = self?.metricsID else { return true }
+                return update.metricsID == nil || update.metricsID == metricsID
+            }
             .sink { [weak self] _ in
-                Task { @MainActor [weak self] in
-                    self?.scheduleRefresh()
-                }
+                self?.scheduleRefresh()
             }
             .store(in: &cancellables)
     }
