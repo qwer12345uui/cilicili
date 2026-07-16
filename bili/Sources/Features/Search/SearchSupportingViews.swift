@@ -11,20 +11,3 @@ struct SearchSectionHeader: View {
             .textCase(nil)
     }
 }
-
-extension View {
-    @ViewBuilder
-    func searchLoadMoreTask<ID: Equatable>(
-        if condition: Bool,
-        id: ID,
-        action: @escaping () async -> Void
-    ) -> some View {
-        if condition {
-            task(id: id) {
-                await action()
-            }
-        } else {
-            self
-        }
-    }
-}

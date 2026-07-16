@@ -13,7 +13,7 @@ struct SearchListView: View {
 
     var body: some View {
         ScrollView {
-            LazyVStack(alignment: .leading, spacing: 16) {
+            LazyVStack(alignment: .leading, spacing: 12) {
                 if viewModel.showsDiscovery {
                     discoveryContent
                 } else if viewModel.results.isEmpty && viewModel.state.isLoading {
@@ -66,19 +66,22 @@ struct SearchListView: View {
 
     @ViewBuilder
     private var resultsContent: some View {
-        LazyVStack(spacing: 12) {
-            ForEach(viewModel.results) { result in
-                SearchStructuredResultCard(
-                    result: result,
-                    isLast: result.id == viewModel.results.last?.id
-                ) {
-                    await viewModel.loadMoreIfNeeded(current: result)
-                }
-            }
+        ForEach(viewModel.results) { result in
+            SearchStructuredResultCard(result: result)
+                .equatable()
+        }
 
-            if viewModel.state.isLoading {
-                SearchLoadingContent(scope: viewModel.selectedScope, count: 4, showsTitle: false)
-            }
+        if let lastResult = viewModel.results.last {
+            Color.clear
+                .frame(height: 1)
+                .accessibilityHidden(true)
+                .task(id: lastResult.id) {
+                    await viewModel.loadMoreIfNeeded(current: lastResult)
+                }
+        }
+
+        if viewModel.state.isLoading {
+            SearchLoadingContent(scope: viewModel.selectedScope, count: 4, showsTitle: false)
         }
     }
 
@@ -187,10 +190,8 @@ private struct SearchDiscoveryEmptyCard: View {
     }
 }
 
-private struct SearchStructuredResultCard: View {
+private struct SearchStructuredResultCard: View, Equatable {
     let result: SearchResultItem
-    let isLast: Bool
-    let loadMore: () async -> Void
 
     var body: some View {
         Group {
@@ -203,25 +204,10 @@ private struct SearchStructuredResultCard: View {
                 SearchResultRouteRow(result: result)
                     .padding(14)
                     .frame(maxWidth: .infinity, alignment: .leading)
-                    .background(cardBackground)
-                    .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
-                    .shadow(color: .black.opacity(0.10), radius: 18, x: 0, y: 10)
-                    .shadow(color: .black.opacity(0.06), radius: 6, x: 0, y: 2)
+                    .compactVideoResultSurface(cornerRadius: 18)
                     .buttonStyle(.plain)
             }
         }
-        .searchLoadMoreTask(if: isLast, id: result.id) {
-            await loadMore()
-        }
-    }
-
-    private var cardBackground: some View {
-        RoundedRectangle(cornerRadius: 18, style: .continuous)
-            .fill(.ultraThinMaterial)
-            .overlay {
-                RoundedRectangle(cornerRadius: 18, style: .continuous)
-                    .stroke(Color.white.opacity(0.14), lineWidth: 1)
-            }
     }
 }
 
@@ -277,10 +263,7 @@ private struct SearchNonVideoResultSkeletonRow: View {
         }
         .padding(14)
         .frame(maxWidth: .infinity, alignment: .topLeading)
-        .background(cardBackground)
-        .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
-        .shadow(color: .black.opacity(0.10), radius: 18, x: 0, y: 10)
-        .shadow(color: .black.opacity(0.06), radius: 6, x: 0, y: 2)
+        .compactVideoResultSurface(cornerRadius: cornerRadius)
         .allowsHitTesting(false)
         .accessibilityLabel("正在加载搜索结果")
     }
@@ -317,12 +300,4 @@ private struct SearchNonVideoResultSkeletonRow: View {
         .frame(maxWidth: .infinity, minHeight: style == .user ? 58 : 102, alignment: .topLeading)
     }
 
-    private var cardBackground: some View {
-        RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-            .fill(.ultraThinMaterial)
-            .overlay {
-                RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-                    .stroke(Color.white.opacity(0.14), lineWidth: 1)
-            }
-    }
 }

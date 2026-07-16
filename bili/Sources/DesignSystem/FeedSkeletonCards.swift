@@ -65,7 +65,7 @@ struct VideoFeedSkeletonCard: View {
 
     private func borderedSingleColumnBody(coverSize: CGSize) -> some View {
         HStack(alignment: .top, spacing: 12) {
-            RoundedRectangle(cornerRadius: 18, style: .continuous)
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
                 .fill(Color(.tertiarySystemFill))
                 .frame(width: coverSize.width, height: coverSize.height)
 
@@ -86,13 +86,13 @@ struct VideoFeedSkeletonCard: View {
                     SkeletonBlock(width: 54, height: 11, shape: .capsule)
                 }
             }
-            .padding(.vertical, 10)
-            .padding(.trailing, 10)
-            .frame(maxWidth: .infinity, minHeight: max(coverSize.height - 20, 1), alignment: .topLeading)
+            .frame(maxWidth: .infinity, minHeight: coverSize.height, alignment: .topLeading)
         }
-        .frame(maxWidth: .infinity, minHeight: coverSize.height, alignment: .topLeading)
-        .videoCardBorderedSurface(cornerRadius: 18)
-        .padding(.vertical, 8)
+        .padding(10)
+        .frame(maxWidth: .infinity, alignment: .topLeading)
+        .frame(height: max(coverSize.height + 20, 108), alignment: .topLeading)
+        .compactVideoResultSurface(cornerRadius: 18)
+        .padding(.vertical, 6)
         .accessibilityLabel("正在加载视频")
     }
 }

@@ -127,9 +127,9 @@ final class SearchViewModel: ObservableObject {
     @Published var results: [SearchResultItem] = []
     @Published var state: LoadingState = .idle
     @Published var hotSearchState: LoadingState = .idle
-    @Published private(set) var hotSearchesRevision = 0
-    @Published private(set) var suggestionsRevision = 0
-    @Published private(set) var resultsRevision = 0
+    private(set) var hotSearchesRevision = 0
+    private(set) var suggestionsRevision = 0
+    private(set) var resultsRevision = 0
 
     private let api: BiliAPIClient
     private let debouncer = TaskDebouncer()

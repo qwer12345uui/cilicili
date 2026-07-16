@@ -19,7 +19,7 @@ struct HomeFeedLayoutMetrics {
             GridItem(.flexible(), spacing: doubleColumnSpacing),
             GridItem(.flexible(), spacing: doubleColumnSpacing)
         ]
-        singleColumnHorizontalPadding = 12
+        singleColumnHorizontalPadding = mode == .borderedSingleColumn ? 16 : 12
 
         switch mode {
         case .singleColumn, .borderedSingleColumn:
@@ -53,8 +53,7 @@ struct HomeFeedLayoutMetrics {
         }
 
         if singleWidth > 0 {
-            let coverWidth = min(max(singleWidth * 0.50, 148), 180)
-            borderedSingleColumnCoverSize = CGSize(width: coverWidth, height: coverWidth * 10 / 16)
+            borderedSingleColumnCoverSize = CGSize(width: 140, height: 88)
         } else {
             borderedSingleColumnCoverSize = nil
         }

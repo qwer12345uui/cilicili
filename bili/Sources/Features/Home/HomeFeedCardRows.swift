@@ -13,8 +13,8 @@ struct HomeFeedSingleColumnCard: View {
             display: cell.display,
             actions: actions
         )
-        .padding(.top, metrics.mode == .borderedSingleColumn ? 8 : 9)
-        .padding(.bottom, metrics.mode == .borderedSingleColumn ? 8 : 14)
+        .padding(.top, metrics.mode == .borderedSingleColumn ? 6 : 9)
+        .padding(.bottom, metrics.mode == .borderedSingleColumn ? 6 : 14)
         .homeFeedCardLifecycle(
             cell: cell,
             loadMoreTriggerCellID: loadMoreTriggerCellID,

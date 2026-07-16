@@ -82,87 +82,201 @@ struct VideoCardBorderedBody<Cover: View>: View {
 }
 
 struct VideoCardBorderedCompactBody: View, Equatable {
+    enum LeadingMetadata: Equatable {
+        case viewCount
+        case duration
+    }
+
+    @Environment(\.showsVideoCoverDurationBadges) private var showsVideoCoverDurationBadges
+    @Environment(\.unifiedVideoCoverBorderExperimentEnabled) private var unifiedVideoCoverBorderExperimentEnabled
     let display: VideoCardDisplayModel
     let coverSize: CGSize
     var showsShadow = true
     var usesGenericAuthorIcon = false
+    var leadingMetadata: LeadingMetadata = .viewCount
+    var showsRecommendReason = true
+    var showsCoverDurationBadge = true
+    @State private var coverLoadedState = VideoCoverLoadedState()
+
+    static func == (lhs: Self, rhs: Self) -> Bool {
+        lhs.display == rhs.display
+            && lhs.coverSize == rhs.coverSize
+            && lhs.showsShadow == rhs.showsShadow
+            && lhs.usesGenericAuthorIcon == rhs.usesGenericAuthorIcon
+            && lhs.leadingMetadata == rhs.leadingMetadata
+            && lhs.showsRecommendReason == rhs.showsRecommendReason
+            && lhs.showsCoverDurationBadge == rhs.showsCoverDurationBadge
+    }
 
     var body: some View {
         HStack(alignment: .top, spacing: 12) {
-            VideoCompactCover(
-                display: display,
-                size: coverSize,
-                maximumPixelLength: 480,
-                cornerRadius: 18,
-                showsBorder: true,
-                showsShadow: false
-            )
+            cover
 
-            VStack(alignment: .leading, spacing: 6) {
+            VStack(alignment: .leading, spacing: 8) {
                 StableVideoTitleText(display.title, style: .compactCard, lineLimit: 2)
                     .frame(minHeight: 38, alignment: .topLeading)
 
                 Spacer(minLength: 0)
 
-                VStack(alignment: .leading, spacing: 4) {
-                    HStack(spacing: 8) {
-                        HStack(spacing: 4) {
-                            authorIdentityIcon
-
-                            Text(display.authorName)
-                                .lineLimit(1)
-                        }
-
-                        if !display.recommendReasonText.isEmpty {
-                            Text(display.recommendReasonText)
-                                .lineLimit(1)
-                        }
-                    }
-
-                    HStack(spacing: 8) {
-                        if !display.viewText.isEmpty {
-                            Label(display.viewText, systemImage: "play.fill")
-                                .labelStyle(.titleAndIcon)
-                                .lineLimit(1)
-                        }
-
-                        Spacer(minLength: 6)
-
-                        if !display.publishTimeText.isEmpty {
-                            Text(display.publishTimeText)
-                                .lineLimit(1)
-                        }
-                    }
-                }
-                .font(.caption2)
-                .foregroundStyle(.secondary)
+                metadataStack
             }
-            .padding(.vertical, 10)
-            .padding(.trailing, 10)
-            .frame(maxWidth: .infinity, minHeight: max(coverSize.height - 20, 1), alignment: .topLeading)
+            .frame(maxWidth: .infinity, minHeight: coverSize.height, alignment: .topLeading)
         }
-        .frame(maxWidth: .infinity, minHeight: coverSize.height, alignment: .topLeading)
-        .videoCardBorderedSurface(cornerRadius: 18, showsShadow: showsShadow)
+        .padding(10)
+        .frame(maxWidth: .infinity, alignment: .topLeading)
+        .frame(height: max(coverSize.height + 20, 108), alignment: .topLeading)
+        .compactVideoResultSurface(cornerRadius: 18, showsShadow: showsShadow)
         .contentShape(Rectangle())
         .accessibilityElement(children: .combine)
         .accessibilityLabel(display.title)
     }
 
+    private var cover: some View {
+        let shape = RoundedRectangle(cornerRadius: 12, style: .continuous)
+
+        return AdaptiveVideoCoverImage(
+            display: display,
+            style: .exactCrop,
+            fixedSize: coverSize,
+            maximumPixelLength: 480,
+            onPhaseChange: coverPhaseChangeHandler
+        )
+        .frame(width: coverSize.width, height: coverSize.height)
+        .overlay {
+            if showsLoadedDurationBadge {
+                VideoCoverBottomScrim()
+            }
+        }
+        .overlay(alignment: .bottomTrailing) {
+            if showsLoadedDurationBadge {
+                VideoCoverDurationBadge(
+                    display.durationText,
+                    maxWidth: max(coverSize.width - 14, 1)
+                )
+                .padding(7)
+            }
+        }
+        .clipShape(shape)
+        .unifiedVideoCoverExperimentBorder(
+            in: shape,
+            isEnabled: unifiedVideoCoverBorderExperimentEnabled
+        )
+    }
+
+    private var metadataStack: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            if !display.authorName.isEmpty {
+                HStack(spacing: 4) {
+                    authorIdentityIcon
+
+                    Text(display.authorName)
+                        .lineLimit(1)
+
+                    if showsRecommendReason, !display.recommendReasonText.isEmpty {
+                        Text(display.recommendReasonText)
+                            .lineLimit(1)
+                    }
+                }
+                .font(.system(size: 12))
+            }
+
+            if !leadingMetadataText.isEmpty || !display.publishTimeText.isEmpty {
+                HStack(spacing: 8) {
+                    if !leadingMetadataText.isEmpty {
+                        Label(leadingMetadataText, systemImage: leadingMetadataSystemImage)
+                            .labelStyle(.titleAndIcon)
+                            .lineLimit(1)
+                    }
+
+                    Spacer(minLength: 6)
+
+                    if !display.publishTimeText.isEmpty {
+                        Text(display.publishTimeText)
+                            .lineLimit(1)
+                    }
+                }
+                .font(.system(size: 11))
+            }
+        }
+        .foregroundStyle(.secondary)
+    }
+
+    private var leadingMetadataText: String {
+        switch leadingMetadata {
+        case .viewCount:
+            return display.viewText
+        case .duration:
+            return display.durationText
+        }
+    }
+
+    private var leadingMetadataSystemImage: String {
+        switch leadingMetadata {
+        case .viewCount:
+            return "play.fill"
+        case .duration:
+            return "clock"
+        }
+    }
+
+    private var showsLoadedDurationBadge: Bool {
+        showsCoverDurationBadge
+            && showsVideoCoverDurationBadges
+            && !display.durationText.isEmpty
+            && coverLoadedState.isLoaded(identity: display.coverLoadIdentity)
+    }
+
+    private var coverPhaseChangeHandler: ((RemoteImageLoadingPhase) -> Void)? {
+        guard showsCoverDurationBadge else { return nil }
+        return { phase in
+            coverLoadedState.update(phase: phase, identity: display.coverLoadIdentity)
+        }
+    }
+
     @ViewBuilder
     private var authorIdentityIcon: some View {
         if usesGenericAuthorIcon {
-            BilibiliUPBadge(size: 14)
+            BilibiliUPBadge(size: 12)
         }
     }
 }
 
 extension View {
+    func compactVideoResultSurface(cornerRadius: CGFloat = 18, showsShadow: Bool = true) -> some View {
+        modifier(CompactVideoResultSurfaceModifier(cornerRadius: cornerRadius, showsShadow: showsShadow))
+    }
+
     func videoCardBorderedSurface(cornerRadius: CGFloat = 18, showsShadow: Bool = true) -> some View {
         modifier(VideoCardBorderedSurfaceModifier(cornerRadius: cornerRadius, showsShadow: showsShadow))
     }
 
     func videoCardBorderedCover(cornerRadius: CGFloat = 14) -> some View {
         videoCoverSurface(cornerRadius: cornerRadius, emphasizesBorder: true)
+    }
+}
+
+private struct CompactVideoResultSurfaceModifier: ViewModifier {
+    @Environment(\.colorScheme) private var colorScheme
+    let cornerRadius: CGFloat
+    let showsShadow: Bool
+
+    func body(content: Content) -> some View {
+        let shape = RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+
+        content
+            .background {
+                shape.fill(.ultraThinMaterial)
+            }
+            .overlay {
+                shape.strokeBorder(borderColor, lineWidth: 1)
+            }
+            .mediaShadow(.regular, opacityScale: showsShadow ? 1 : 0)
+    }
+
+    private var borderColor: Color {
+        colorScheme == .dark
+            ? Color.white.opacity(0.18)
+            : Color.black.opacity(0.12)
     }
 }
 

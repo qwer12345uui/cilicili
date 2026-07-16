@@ -27,8 +27,8 @@ struct HomeFeedSingleColumnContent: View {
                         metrics: metrics,
                         action: actions.onRefreshFromLastSeenMarker
                     )
-                    .padding(.top, metrics.mode == .borderedSingleColumn ? 8 : 9)
-                    .padding(.bottom, metrics.mode == .borderedSingleColumn ? 8 : 14)
+                    .padding(.top, metrics.mode == .borderedSingleColumn ? 6 : 9)
+                    .padding(.bottom, metrics.mode == .borderedSingleColumn ? 6 : 14)
                 }
 
                 HomeFeedSingleColumnCard(
