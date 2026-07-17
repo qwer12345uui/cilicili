@@ -75,18 +75,30 @@ private struct VideoRouteTapLink<Label: View>: View {
     @ViewBuilder let label: () -> Label
 
     var body: some View {
-        label()
-            .contentShape(Rectangle())
-            .onTapGesture(perform: open)
-            .accessibilityAddTraits(.isButton)
-            .accessibilityAction {
-                open()
-            }
+        Button(action: open) {
+            label()
+        }
+        .buttonStyle(VideoRouteTapPrewarmButtonStyle {
+            prewarmVideoRoute?(video)
+        })
     }
 
     private func open() {
         prewarmVideoRoute?(video)
         openVideo(video)
+    }
+}
+
+private struct VideoRouteTapPrewarmButtonStyle: ButtonStyle {
+    let onPress: () -> Void
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .contentShape(Rectangle())
+            .onChange(of: configuration.isPressed) { _, isPressed in
+                guard isPressed else { return }
+                onPress()
+            }
     }
 }
 
