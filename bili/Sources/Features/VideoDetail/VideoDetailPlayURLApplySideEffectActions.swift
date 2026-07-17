@@ -2,13 +2,11 @@ import Foundation
 import QuartzCore
 
 extension VideoDetailViewModel {
-    private static var startupPackageWarmupPlayerCreationWait: TimeInterval { 0.08 }
+    private static var coldStartPackageWarmupPlayerCreationWait: TimeInterval { 0.08 }
     private static var cachedPlayURLStartupPackageWarmupPlayerCreationWait: TimeInterval { 0.16 }
-    private static var slowPlayURLStartupPackageWarmupPlayerCreationWait: TimeInterval { 0.24 }
     private static var historyResumeWarmupPlayerCreationWait: TimeInterval {
         PlaybackEnvironment.current.shouldPreferConservativePlayback ? 0.18 : 0.12
     }
-    private static var slowPlayURLWarmupThresholdMilliseconds: Int { 350 }
 
     func schedulePostPlayURLApplicationWork(
         variants: [PlayVariant],
@@ -150,7 +148,7 @@ extension VideoDetailViewModel {
         let bvid = detail.bvid
         let selectedVariantID = selectedVariant.id
         let startedAt = CACurrentMediaTime()
-        let timeout = startupPackageWarmupPlayerCreationWaitForCurrentLoad(selectedVariant)
+        let timeout = startupPackageWarmupPlayerCreationWaitForCurrentLoad()
         let result = await VideoPreloadCenter.shared.prebuildStartupPackageAndWait(
             variant: selectedVariant,
             targetVariant: targetVariant,
@@ -179,14 +177,10 @@ extension VideoDetailViewModel {
         )
     }
 
-    private func startupPackageWarmupPlayerCreationWaitForCurrentLoad(_: PlayVariant) -> TimeInterval {
-        let isSlowPlayURL = (playURLElapsedMilliseconds ?? 0) >= Self.slowPlayURLWarmupThresholdMilliseconds
-        if isSlowPlayURL {
-            return Self.slowPlayURLStartupPackageWarmupPlayerCreationWait
-        }
+    private func startupPackageWarmupPlayerCreationWaitForCurrentLoad() -> TimeInterval {
         if lastPlayURLSource?.localizedCaseInsensitiveContains("cache") == true {
             return Self.cachedPlayURLStartupPackageWarmupPlayerCreationWait
         }
-        return Self.startupPackageWarmupPlayerCreationWait
+        return Self.coldStartPackageWarmupPlayerCreationWait
     }
 }
