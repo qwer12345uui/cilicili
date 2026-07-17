@@ -67,6 +67,13 @@ struct MineDisplaySettingsSection: View {
                 Label("统一视频封面描边实验", systemImage: "rectangle.dashed")
             }
 
+            Toggle(isOn: Binding(
+                get: { libraryStore.fastScrollImageLoadSuppressionExperimentEnabled },
+                set: { libraryStore.setFastScrollImageLoadSuppressionExperimentEnabled($0) }
+            )) {
+                Label("快速滚动图片负载抑制实验", systemImage: "photo.stack")
+            }
+
             VStack(alignment: .leading, spacing: 10) {
                 HStack {
                     Label("封面角标暗色底", systemImage: "circle.lefthalf.filled")

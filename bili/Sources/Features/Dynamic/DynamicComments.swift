@@ -19,6 +19,7 @@ struct DynamicCommentsSheet: View {
                     replySheetComment = comment
                 }
             }
+            .defersRemoteImageLoadsDuringFastScroll()
             .hiddenInlineNavigationTitle()
             .nativeTopScrollEdgeEffect(hidesRootNavigationTitle: false)
             .task {

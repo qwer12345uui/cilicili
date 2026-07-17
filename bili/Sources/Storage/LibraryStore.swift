@@ -145,6 +145,7 @@ final class LibraryStore: ObservableObject {
     @Published private(set) var videoCoverBottomScrimEnabled: Bool
     @Published private(set) var showsVideoCoverDurationBadges: Bool
     @Published private(set) var unifiedVideoCoverBorderExperimentEnabled: Bool
+    @Published private(set) var fastScrollImageLoadSuppressionExperimentEnabled: Bool
     @Published private(set) var force120HzScrollingEnabled: Bool
     @Published private(set) var visibleRootTabs: [AppTab]
     @Published private(set) var homeRefreshTriggerDistance: Double
@@ -205,6 +206,7 @@ final class LibraryStore: ObservableObject {
     private static let videoCoverBottomScrimEnabledKey = VideoCoverBottomScrimSettings.storageKey
     private static let videoCoverDurationBadgesEnabledKey = VideoCoverDurationBadgeSettings.storageKey
     private static let unifiedVideoCoverBorderExperimentEnabledKey = "cc.bili.display.unifiedVideoCoverBorderExperimentEnabled.v1"
+    private static let fastScrollImageLoadSuppressionExperimentEnabledKey = "cc.bili.display.fastScrollImageLoadSuppressionExperimentEnabled.v1"
     private static let force120HzScrollingEnabledKey = RefreshRateManager.isEnabledKey
     private static let visibleRootTabsKey = "cc.bili.display.visibleRootTabs.v1"
     private static let homeRefreshTriggerDistanceKey = "cc.bili.home.refreshTriggerDistance.v1"
@@ -432,6 +434,9 @@ final class LibraryStore: ObservableObject {
         self.unifiedVideoCoverBorderExperimentEnabled = userDefaults.object(
             forKey: Self.unifiedVideoCoverBorderExperimentEnabledKey
         ) as? Bool ?? VideoCoverBorderExperiment.defaultIsEnabled
+        self.fastScrollImageLoadSuppressionExperimentEnabled = userDefaults.object(
+            forKey: Self.fastScrollImageLoadSuppressionExperimentEnabledKey
+        ) as? Bool ?? FastScrollImageLoadSuppressionExperiment.defaultIsEnabled
         self.force120HzScrollingEnabled = userDefaults.object(forKey: Self.force120HzScrollingEnabledKey) as? Bool ?? false
         self.visibleRootTabs = Self.normalizedVisibleRootTabs(
             userDefaults.stringArray(forKey: Self.visibleRootTabsKey)
@@ -1001,6 +1006,11 @@ final class LibraryStore: ObservableObject {
     func setUnifiedVideoCoverBorderExperimentEnabled(_ isEnabled: Bool) {
         unifiedVideoCoverBorderExperimentEnabled = isEnabled
         userDefaults.set(isEnabled, forKey: Self.unifiedVideoCoverBorderExperimentEnabledKey)
+    }
+
+    func setFastScrollImageLoadSuppressionExperimentEnabled(_ isEnabled: Bool) {
+        fastScrollImageLoadSuppressionExperimentEnabled = isEnabled
+        userDefaults.set(isEnabled, forKey: Self.fastScrollImageLoadSuppressionExperimentEnabledKey)
     }
 
     func setForce120HzScrollingEnabled(_ isEnabled: Bool) {

@@ -46,6 +46,7 @@ struct CommentRepliesSheetContentHost: View {
                 )
             }
         }
+        .defersRemoteImageLoadsDuringFastScroll()
         .hiddenInlineNavigationTitle()
         .nativeTopScrollEdgeEffect()
         .commentSheetLoadLifecycle(load: actions.load)

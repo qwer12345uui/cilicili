@@ -3982,6 +3982,8 @@ actor RemoteImageCache {
         targetPixelSize: Int? = 760,
         maximumConcurrentLoads: Int = 3
     ) async {
+        await RemoteImageLoadSuppressionGate.shared.waitUntilAllowed()
+        guard !Task.isCancelled else { return }
         applyAdaptiveBudgetIfNeeded()
         let imageBudget = RemoteImagePrefetchBudget.current
         let uniqueSources = uniquedSources(sources)
@@ -4034,6 +4036,13 @@ actor RemoteImageCache {
             hits += 1
             return cached
         }
+        await RemoteImageLoadSuppressionGate.shared.waitUntilAllowed()
+        guard !Task.isCancelled else { return nil }
+        if cachePolicy == .standard,
+           let cached = cachedImage(for: url, scale: scale, targetPixelSize: targetPixelSize) {
+            hits += 1
+            return cached
+        }
         guard !isTemporarilyFailed(key) else {
             misses += 1
             return nil
@@ -4078,6 +4087,8 @@ actor RemoteImageCache {
     private func prefetchOne(_ source: RemoteImageSource, scale: CGFloat, targetPixelSize: Int?) async {
         guard !Task.isCancelled else { return }
         for url in source.urls {
+            await RemoteImageLoadSuppressionGate.shared.waitUntilAllowed()
+            guard !Task.isCancelled else { return }
             let key = cacheKey(for: url, scale: scale, targetPixelSize: targetPixelSize)
             guard cachedImage(for: url, scale: scale, targetPixelSize: targetPixelSize) == nil else { return }
             guard !isTemporarilyFailed(key) else { continue }

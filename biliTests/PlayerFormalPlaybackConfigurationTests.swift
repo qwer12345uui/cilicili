@@ -76,6 +76,19 @@ final class PlayerFormalPlaybackConfigurationTests: XCTestCase {
     }
 
     @MainActor
+    func testLibraryStorePersistsFastScrollImageLoadSuppressionExperiment() {
+        let defaults = makeUserDefaults()
+        let store = LibraryStore(userDefaults: defaults)
+
+        XCTAssertFalse(store.fastScrollImageLoadSuppressionExperimentEnabled)
+        store.setFastScrollImageLoadSuppressionExperimentEnabled(true)
+
+        XCTAssertTrue(
+            LibraryStore(userDefaults: defaults).fastScrollImageLoadSuppressionExperimentEnabled
+        )
+    }
+
+    @MainActor
     func testPlaybackSessionTracksActivePlayerIdentityAndDetaches() {
         let player = PlayerStateViewModel(
             videoURL: nil,

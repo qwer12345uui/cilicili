@@ -20,6 +20,7 @@ struct DynamicCommentRepliesSheet: View {
                     }
                 }
             }
+            .defersRemoteImageLoadsDuringFastScroll()
             .hiddenInlineNavigationTitle()
             .nativeTopScrollEdgeEffect(hidesRootNavigationTitle: false)
             .task {
@@ -52,6 +53,7 @@ private struct DynamicCommentDialogSheet: View {
                     DynamicCommentDialogContent(rootComment: rootComment, focusReply: focusReply, replyStore: replyStore)
                 }
             }
+            .defersRemoteImageLoadsDuringFastScroll()
             .hiddenInlineNavigationTitle()
             .nativeTopScrollEdgeEffect(hidesRootNavigationTitle: false)
             .task {

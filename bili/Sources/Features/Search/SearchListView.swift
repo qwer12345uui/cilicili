@@ -31,6 +31,7 @@ struct SearchListView: View {
         }
         .scrollDismissesKeyboard(.immediately)
         .scrollBounceBehavior(.always, axes: .vertical)
+        .defersRemoteImageLoadsDuringFastScroll()
         .background(Color(.systemGroupedBackground))
         .ignoresSafeArea(.container, edges: .top)
         .nativeTopScrollEdgeEffect(hidesRootNavigationTitle: false)

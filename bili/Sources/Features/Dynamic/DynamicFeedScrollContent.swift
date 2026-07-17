@@ -33,6 +33,7 @@ struct DynamicFeedScrollContent: View {
         .rootFloatingTabBarContentPadding()
         .nativeTopScrollEdgeEffect()
         .scrollBounceBehavior(.always, axes: .vertical)
+        .defersRemoteImageLoadsDuringFastScroll()
         .background(Color(.systemBackground))
         .onPreferenceChange(HomePullRefreshDistancePreferenceKey.self) { pullDistance in
             handlePullRefreshDistanceChange(pullDistance)

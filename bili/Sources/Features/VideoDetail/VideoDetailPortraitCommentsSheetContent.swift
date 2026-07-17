@@ -18,6 +18,7 @@ struct PortraitCommentsSheetContent: View {
             )
         }
         .listStyle(.plain)
+        .defersRemoteImageLoadsDuringFastScroll()
         .scrollContentBackground(.hidden)
         .background(.clear)
         .hiddenInlineNavigationTitle()

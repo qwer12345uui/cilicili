@@ -44,6 +44,7 @@ struct CommentDialogSheet: View {
                     )
                 }
             }
+            .defersRemoteImageLoadsDuringFastScroll()
             .hiddenInlineNavigationTitle()
             .nativeTopScrollEdgeEffect()
             .commentSheetLoadLifecycle(load: actions.load)
