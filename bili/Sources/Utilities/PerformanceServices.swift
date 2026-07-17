@@ -3967,6 +3967,14 @@ actor RemoteImageCache {
         )
     }
 
+    func resetDiagnostics() {
+        hits = 0
+        misses = 0
+        stores = 0
+        evictions = 0
+        RemoteImageCDNHealthMemory.shared.resetDiagnostics()
+    }
+
     func prefetch(
         _ urls: [URL],
         scale: CGFloat = 1,
@@ -4051,6 +4059,7 @@ actor RemoteImageCache {
             guard !Task.isCancelled else { return nil }
             if let image = await loadSingle(
                 url: candidateURL,
+                originalURL: url,
                 scale: scale,
                 targetPixelSize: targetPixelSize,
                 cachePolicy: cachePolicy,
@@ -4064,6 +4073,7 @@ actor RemoteImageCache {
 
     private func loadSingle(
         url: URL,
+        originalURL: URL,
         scale: CGFloat,
         targetPixelSize: Int?,
         cachePolicy: RemoteImageCachePolicy,
@@ -4089,6 +4099,7 @@ actor RemoteImageCache {
 
         let task = makeLoadTask(
             url: url,
+            originalURL: originalURL,
             scale: scale,
             targetPixelSize: targetPixelSize,
             cachePolicy: cachePolicy,
@@ -4132,6 +4143,7 @@ actor RemoteImageCache {
 
     private func makeLoadTask(
         url: URL,
+        originalURL: URL,
         scale: CGFloat,
         targetPixelSize: Int?,
         cachePolicy: RemoteImageCachePolicy,
@@ -4146,6 +4158,11 @@ actor RemoteImageCache {
         if cachePolicy == .standard {
             recordDiskRequest(key: cacheKey(for: url, scale: scale, targetPixelSize: targetPixelSize), request: request)
         }
+        RemoteImageCDNHealthMemory.shared.recordRequest(
+            for: url,
+            originalURL: originalURL,
+            experimentEnabled: usesCDNFailover
+        )
         return Task(priority: priority.taskPriority) { () -> UIImage? in
             do {
                 let (data, response) = try await BiliNetworkRetry.data(

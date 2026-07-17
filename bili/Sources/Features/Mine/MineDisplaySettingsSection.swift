@@ -81,6 +81,12 @@ struct MineDisplaySettingsSection: View {
                 Label("图片 CDN 自动切换实验", systemImage: "arrow.triangle.branch")
             }
 
+            NavigationLink {
+                RemoteImageDiagnosticsView(libraryStore: libraryStore)
+            } label: {
+                Label("图片加载诊断", systemImage: "chart.bar.xaxis")
+            }
+
             VStack(alignment: .leading, spacing: 10) {
                 HStack {
                     Label("封面角标暗色底", systemImage: "circle.lefthalf.filled")

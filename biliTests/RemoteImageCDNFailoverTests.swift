@@ -70,4 +70,64 @@ final class RemoteImageCDNFailoverTests: XCTestCase {
         XCTAssertEqual(BiliNetworkRetryPolicy.imageFailover.attempts, 1)
         XCTAssertEqual(BiliNetworkRetryPolicy.image.attempts, 2)
     }
+
+    func testDiagnosticsCountsRequestsFailuresAndAutomaticSwitches() throws {
+        let memory = RemoteImageCDNHealthMemory(failureTTL: 90)
+        let now = Date(timeIntervalSince1970: 1_700_000_000)
+        let originalURL = try XCTUnwrap(URL(string: "https://i0.hdslb.com/bfs/archive/example.jpg"))
+        let switchedURL = try XCTUnwrap(URL(string: "https://i1.hdslb.com/bfs/archive/example.jpg"))
+
+        memory.recordRequest(for: originalURL, originalURL: originalURL, experimentEnabled: true)
+        memory.recordSuccess(for: originalURL, experimentEnabled: true)
+        memory.recordRequest(for: switchedURL, originalURL: originalURL, experimentEnabled: true)
+        memory.recordTransientFailure(for: switchedURL, experimentEnabled: true, now: now)
+
+        let diagnostics = memory.diagnostics(now: now)
+        let originalNode = try XCTUnwrap(diagnostics.hosts.first { $0.host == "i0.hdslb.com" })
+        let switchedNode = try XCTUnwrap(diagnostics.hosts.first { $0.host == "i1.hdslb.com" })
+
+        XCTAssertEqual(diagnostics.requestCount, 2)
+        XCTAssertEqual(diagnostics.successCount, 1)
+        XCTAssertEqual(diagnostics.transientFailureCount, 1)
+        XCTAssertEqual(diagnostics.automaticSwitchCount, 1)
+        XCTAssertEqual(originalNode.requestCount, 1)
+        XCTAssertEqual(originalNode.successCount, 1)
+        XCTAssertEqual(switchedNode.requestCount, 1)
+        XCTAssertEqual(switchedNode.transientFailureCount, 1)
+        XCTAssertEqual(diagnostics.degradedHosts.map(\.host), ["i1.hdslb.com"])
+    }
+
+    func testDiagnosticsIgnoreThirdPartyImages() throws {
+        let memory = RemoteImageCDNHealthMemory()
+        let url = try XCTUnwrap(URL(string: "https://images.example.com/avatar.jpg"))
+
+        memory.recordRequest(for: url, originalURL: url, experimentEnabled: true)
+        memory.recordSuccess(for: url, experimentEnabled: true)
+        memory.recordTransientFailure(for: url, experimentEnabled: true)
+
+        let diagnostics = memory.diagnostics()
+
+        XCTAssertEqual(diagnostics.requestCount, 0)
+        XCTAssertEqual(diagnostics.successCount, 0)
+        XCTAssertEqual(diagnostics.transientFailureCount, 0)
+        XCTAssertEqual(diagnostics.automaticSwitchCount, 0)
+    }
+
+    func testResetDiagnosticsKeepsActiveNodeDemotion() throws {
+        let memory = RemoteImageCDNHealthMemory(failureTTL: 90)
+        let now = Date(timeIntervalSince1970: 1_700_000_000)
+        let url = try XCTUnwrap(URL(string: "https://i0.hdslb.com/bfs/archive/example.jpg"))
+        memory.recordRequest(for: url, originalURL: url, experimentEnabled: true)
+        memory.recordTransientFailure(for: url, experimentEnabled: true, now: now)
+
+        memory.resetDiagnostics()
+        let afterDiagnosticReset = memory.diagnostics(now: now)
+
+        XCTAssertEqual(afterDiagnosticReset.requestCount, 0)
+        XCTAssertEqual(afterDiagnosticReset.transientFailureCount, 0)
+        XCTAssertEqual(afterDiagnosticReset.degradedHosts.map(\.host), ["i0.hdslb.com"])
+
+        memory.reset()
+        XCTAssertTrue(memory.diagnostics(now: now).degradedHosts.isEmpty)
+    }
 }

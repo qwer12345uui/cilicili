@@ -11,7 +11,7 @@ nonisolated enum RemoteImageCDNFailoverExperiment {
 }
 
 nonisolated enum RemoteImageCDNFailoverPolicy {
-    private static let interchangeableHosts = [
+    static let interchangeableHosts = [
         "i0.hdslb.com",
         "i1.hdslb.com",
         "i2.hdslb.com"
@@ -61,12 +61,48 @@ nonisolated enum RemoteImageCDNFailoverPolicy {
     }
 }
 
+nonisolated struct RemoteImageCDNHostDiagnostics: Sendable, Equatable, Identifiable {
+    let host: String
+    let requestCount: Int
+    let successCount: Int
+    let transientFailureCount: Int
+
+    var id: String { host }
+}
+
+nonisolated struct RemoteImageCDNDegradedHost: Sendable, Equatable, Identifiable {
+    let host: String
+    let remainingTime: TimeInterval
+
+    var id: String { host }
+}
+
+nonisolated struct RemoteImageCDNDiagnosticsSnapshot: Sendable, Equatable {
+    let requestCount: Int
+    let successCount: Int
+    let transientFailureCount: Int
+    let automaticSwitchCount: Int
+    let hosts: [RemoteImageCDNHostDiagnostics]
+    let degradedHosts: [RemoteImageCDNDegradedHost]
+}
+
 nonisolated final class RemoteImageCDNHealthMemory: @unchecked Sendable {
     static let shared = RemoteImageCDNHealthMemory()
+
+    private struct HostCounters {
+        var requestCount = 0
+        var successCount = 0
+        var transientFailureCount = 0
+    }
 
     private let lock = NSLock()
     private let failureTTL: TimeInterval
     private var unhealthyUntilByHost: [String: Date] = [:]
+    private var requestCount = 0
+    private var successCount = 0
+    private var transientFailureCount = 0
+    private var automaticSwitchCount = 0
+    private var countersByHost: [String: HostCounters] = [:]
 
     init(failureTTL: TimeInterval = RemoteImageCDNFailoverExperiment.failureTTL) {
         self.failureTTL = max(failureTTL, 1)
@@ -98,27 +134,93 @@ nonisolated final class RemoteImageCDNHealthMemory: @unchecked Sendable {
         return healthy + unhealthy
     }
 
+    func recordRequest(
+        for url: URL,
+        originalURL: URL,
+        experimentEnabled: Bool
+    ) {
+        guard RemoteImageCDNFailoverPolicy.isEligible(url),
+              let host = url.host?.lowercased()
+        else { return }
+        let originalHost = originalURL.host?.lowercased()
+        lock.withLock {
+            requestCount += 1
+            countersByHost[host, default: HostCounters()].requestCount += 1
+            if experimentEnabled,
+               RemoteImageCDNFailoverPolicy.isEligible(originalURL),
+               originalHost != host {
+                automaticSwitchCount += 1
+            }
+        }
+    }
+
     func recordTransientFailure(
         for url: URL,
         experimentEnabled: Bool,
         now: Date = Date()
     ) {
-        guard experimentEnabled,
-              RemoteImageCDNFailoverPolicy.isEligible(url),
+        guard RemoteImageCDNFailoverPolicy.isEligible(url),
               let host = url.host?.lowercased()
         else { return }
         lock.withLock {
-            unhealthyUntilByHost[host] = now.addingTimeInterval(failureTTL)
+            transientFailureCount += 1
+            countersByHost[host, default: HostCounters()].transientFailureCount += 1
+            if experimentEnabled {
+                unhealthyUntilByHost[host] = now.addingTimeInterval(failureTTL)
+            }
         }
     }
 
     func recordSuccess(for url: URL, experimentEnabled: Bool) {
-        guard experimentEnabled,
-              RemoteImageCDNFailoverPolicy.isEligible(url),
+        guard RemoteImageCDNFailoverPolicy.isEligible(url),
               let host = url.host?.lowercased()
         else { return }
         lock.withLock {
-            unhealthyUntilByHost[host] = nil
+            successCount += 1
+            countersByHost[host, default: HostCounters()].successCount += 1
+            if experimentEnabled {
+                unhealthyUntilByHost[host] = nil
+            }
+        }
+    }
+
+    func diagnostics(now: Date = Date()) -> RemoteImageCDNDiagnosticsSnapshot {
+        lock.withLock {
+            unhealthyUntilByHost = unhealthyUntilByHost.filter { $0.value > now }
+            let hosts = RemoteImageCDNFailoverPolicy.interchangeableHosts.map { host in
+                let counters = countersByHost[host, default: HostCounters()]
+                return RemoteImageCDNHostDiagnostics(
+                    host: host,
+                    requestCount: counters.requestCount,
+                    successCount: counters.successCount,
+                    transientFailureCount: counters.transientFailureCount
+                )
+            }
+            let degradedHosts: [RemoteImageCDNDegradedHost] = RemoteImageCDNFailoverPolicy.interchangeableHosts.compactMap { host in
+                guard let unhealthyUntil = unhealthyUntilByHost[host] else { return nil }
+                return RemoteImageCDNDegradedHost(
+                    host: host,
+                    remainingTime: max(0, unhealthyUntil.timeIntervalSince(now))
+                )
+            }
+            return RemoteImageCDNDiagnosticsSnapshot(
+                requestCount: requestCount,
+                successCount: successCount,
+                transientFailureCount: transientFailureCount,
+                automaticSwitchCount: automaticSwitchCount,
+                hosts: hosts,
+                degradedHosts: degradedHosts
+            )
+        }
+    }
+
+    func resetDiagnostics() {
+        lock.withLock {
+            requestCount = 0
+            successCount = 0
+            transientFailureCount = 0
+            automaticSwitchCount = 0
+            countersByHost.removeAll()
         }
     }
 
