@@ -1,5 +1,9 @@
 import SwiftUI
 
-extension Color {
-    static let homeAdaptiveBackground = Color(.systemBackground)
+extension HomeFeedLayout {
+    var homeFeedBackground: Color {
+        self == .borderedSingleColumn
+            ? Color(.systemGroupedBackground)
+            : Color(.systemBackground)
+    }
 }

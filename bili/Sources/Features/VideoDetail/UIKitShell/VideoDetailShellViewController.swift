@@ -61,6 +61,7 @@ final class VideoDetailShellViewController: UIViewController {
     private var pendingRotationCompletionPreparation: (() -> Void)?
     private var pendingRotationCompletionRecovery: (() -> Void)?
     private var pendingRotationCompletionRecoveryGeneration: Int?
+    private var rotationCompletionRecoveryNotBefore: TimeInterval?
     private var rotationCompletionRecoveryGeneration = 0
     /// VC 是否处于可见活跃态（viewDidAppear~viewWillDisappear 之间）。
     /// 用于防止 $detail sink 在 VC 消失后重新解锁横屏，导致全局朝向锁卡在 landscape。
@@ -184,7 +185,7 @@ final class VideoDetailShellViewController: UIViewController {
     }
 
     override var preferredStatusBarStyle: UIStatusBarStyle {
-        .lightContent
+        isLandscape || isPortraitFullscreen ? .lightContent : .default
     }
 
     override var prefersHomeIndicatorAutoHidden: Bool {
@@ -195,7 +196,7 @@ final class VideoDetailShellViewController: UIViewController {
 
     override func viewDidLoad() {
         super.viewDidLoad()
-        view.backgroundColor = .black
+        view.backgroundColor = .systemGroupedBackground
 
         playerContainer.backgroundColor = .black
         updateCollapsedDimmingColor()
@@ -396,6 +397,8 @@ final class VideoDetailShellViewController: UIViewController {
         pendingRotationCompletionPreparation = preparation
         pendingRotationCompletionRecovery = recovery
         pendingRotationCompletionRecoveryGeneration = generation
+        rotationCompletionRecoveryNotBefore = CACurrentMediaTime()
+            + PlaybackDetailRotationTiming.recoverySettleDelay
         let displayLink = CADisplayLink(
             target: self,
             selector: #selector(runPendingRotationCompletionRecovery(_:))
@@ -422,6 +425,11 @@ final class VideoDetailShellViewController: UIViewController {
             cancelPendingRotationCompletionRecovery()
             return
         }
+        if let notBefore = rotationCompletionRecoveryNotBefore,
+           CACurrentMediaTime() < notBefore {
+            return
+        }
+        rotationCompletionRecoveryNotBefore = nil
         if let preparation = pendingRotationCompletionPreparation {
             pendingRotationCompletionPreparation = nil
             preparation()
@@ -438,6 +446,7 @@ final class VideoDetailShellViewController: UIViewController {
         pendingRotationCompletionPreparation = nil
         pendingRotationCompletionRecovery = nil
         pendingRotationCompletionRecoveryGeneration = nil
+        rotationCompletionRecoveryNotBefore = nil
     }
 
     // MARK: - Layout
@@ -461,6 +470,7 @@ final class VideoDetailShellViewController: UIViewController {
         let landscape = bounds.width > bounds.height
 
         let usesFullscreenLayout = landscape || isPortraitFullscreen
+        view.backgroundColor = usesFullscreenLayout ? .black : .systemGroupedBackground
         let expanded = expandedPlayerHeight(bounds: bounds.size)
         let shellLayout = PlaybackDetailShellLayout(
             bounds: bounds,
@@ -570,7 +580,11 @@ final class VideoDetailShellViewController: UIViewController {
         guard isPortraitFullscreen != active else { return }
         isPortraitFullscreen = active
         setSurfaceLandscape(active) // 复用全屏 chrome 样式（隐藏导航栏等）
-        UIView.animate(withDuration: 0.28, delay: 0, options: [.curveEaseInOut]) {
+        UIView.animate(
+            withDuration: PlaybackDetailRotationTiming.portraitFullscreenDuration,
+            delay: 0,
+            options: [.curveEaseInOut]
+        ) {
             self.applyLayout()
             self.setNeedsStatusBarAppearanceUpdate()
             self.setNeedsUpdateOfHomeIndicatorAutoHidden()

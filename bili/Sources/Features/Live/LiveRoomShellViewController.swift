@@ -21,6 +21,7 @@ final class LiveRoomShellViewController: UIViewController {
     private var pendingRotationPreparation: (() -> Void)?
     private var pendingRotationRecovery: (() -> Void)?
     private var pendingRotationGeneration: Int?
+    private var rotationRecoveryNotBefore: TimeInterval?
     private var rotationGeneration = 0
     private var rotationProbeGeneration = 0
     private var isSystemRotationTransitioning = false
@@ -97,7 +98,7 @@ final class LiveRoomShellViewController: UIViewController {
     }
 
     override var preferredStatusBarStyle: UIStatusBarStyle {
-        .lightContent
+        isLandscape ? .lightContent : .default
     }
 
     override var prefersHomeIndicatorAutoHidden: Bool {
@@ -106,7 +107,7 @@ final class LiveRoomShellViewController: UIViewController {
 
     override func viewDidLoad() {
         super.viewDidLoad()
-        view.backgroundColor = .black
+        view.backgroundColor = .systemGroupedBackground
         playerContainer.backgroundColor = .black
 
         contentHost.view.backgroundColor = .clear
@@ -220,6 +221,7 @@ final class LiveRoomShellViewController: UIViewController {
     private func applyLayout(forBoundsSize size: CGSize? = nil) {
         let bounds = CGRect(origin: .zero, size: size ?? view.bounds.size)
         let landscape = bounds.width > bounds.height
+        view.backgroundColor = landscape ? .black : .systemGroupedBackground
         let playerHeight = PlaybackDetailShellLayout.standardPlayerHeight(for: bounds.width)
         let layout = PlaybackDetailShellLayout(
             bounds: bounds,
@@ -364,6 +366,8 @@ final class LiveRoomShellViewController: UIViewController {
         pendingRotationPreparation = preparation
         pendingRotationRecovery = recovery
         pendingRotationGeneration = generation
+        rotationRecoveryNotBefore = CACurrentMediaTime()
+            + PlaybackDetailRotationTiming.recoverySettleDelay
         let displayLink = CADisplayLink(
             target: self,
             selector: #selector(runPendingRotationRecovery(_:))
@@ -390,6 +394,11 @@ final class LiveRoomShellViewController: UIViewController {
             cancelPendingRotationRecovery()
             return
         }
+        if let notBefore = rotationRecoveryNotBefore,
+           CACurrentMediaTime() < notBefore {
+            return
+        }
+        rotationRecoveryNotBefore = nil
         if let preparation = pendingRotationPreparation {
             pendingRotationPreparation = nil
             preparation()
@@ -406,6 +415,7 @@ final class LiveRoomShellViewController: UIViewController {
         pendingRotationPreparation = nil
         pendingRotationRecovery = nil
         pendingRotationGeneration = nil
+        rotationRecoveryNotBefore = nil
     }
 
     private func restoreSystemBackGestures() {

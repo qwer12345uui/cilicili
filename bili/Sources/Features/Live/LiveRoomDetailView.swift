@@ -12,7 +12,7 @@ struct LiveRoomDetailView: View {
             background: VideoDetailTheme.background,
             navigationBarVisibility: .hidden,
             hidesBackButton: true,
-            statusBarStyle: .lightContent,
+            statusBarStyle: .default,
             performanceContext: .live(seedRoom),
             lifecycleActions: pageLifecycleActions
         ) {

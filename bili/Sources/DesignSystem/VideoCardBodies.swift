@@ -91,7 +91,6 @@ struct VideoCardBorderedCompactBody: View, Equatable {
     @Environment(\.unifiedVideoCoverBorderExperimentEnabled) private var unifiedVideoCoverBorderExperimentEnabled
     let display: VideoCardDisplayModel
     let coverSize: CGSize
-    var showsShadow = true
     var usesGenericAuthorIcon = false
     var leadingMetadata: LeadingMetadata = .viewCount
     var showsRecommendReason = true
@@ -101,7 +100,6 @@ struct VideoCardBorderedCompactBody: View, Equatable {
     static func == (lhs: Self, rhs: Self) -> Bool {
         lhs.display == rhs.display
             && lhs.coverSize == rhs.coverSize
-            && lhs.showsShadow == rhs.showsShadow
             && lhs.usesGenericAuthorIcon == rhs.usesGenericAuthorIcon
             && lhs.leadingMetadata == rhs.leadingMetadata
             && lhs.showsRecommendReason == rhs.showsRecommendReason
@@ -125,7 +123,7 @@ struct VideoCardBorderedCompactBody: View, Equatable {
         .padding(10)
         .frame(maxWidth: .infinity, alignment: .topLeading)
         .frame(height: max(coverSize.height + 20, 108), alignment: .topLeading)
-        .compactVideoResultSurface(cornerRadius: 18, showsShadow: showsShadow)
+        .compactVideoResultSurface(cornerRadius: 18)
         .contentShape(Rectangle())
         .accessibilityElement(children: .combine)
         .accessibilityLabel(display.title)
@@ -242,8 +240,8 @@ struct VideoCardBorderedCompactBody: View, Equatable {
 }
 
 extension View {
-    func compactVideoResultSurface(cornerRadius: CGFloat = 18, showsShadow: Bool = true) -> some View {
-        modifier(CompactVideoResultSurfaceModifier(cornerRadius: cornerRadius, showsShadow: showsShadow))
+    func compactVideoResultSurface(cornerRadius: CGFloat = 18) -> some View {
+        modifier(CompactVideoResultSurfaceModifier(cornerRadius: cornerRadius))
     }
 
     func videoCardBorderedSurface(cornerRadius: CGFloat = 18, showsShadow: Bool = true) -> some View {
@@ -256,27 +254,18 @@ extension View {
 }
 
 private struct CompactVideoResultSurfaceModifier: ViewModifier {
-    @Environment(\.colorScheme) private var colorScheme
     let cornerRadius: CGFloat
-    let showsShadow: Bool
 
     func body(content: Content) -> some View {
         let shape = RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
 
         content
             .background {
-                shape.fill(.ultraThinMaterial)
+                shape.fill(Color(.secondarySystemGroupedBackground))
             }
             .overlay {
-                shape.strokeBorder(borderColor, lineWidth: 1)
+                shape.strokeBorder(Color(.separator).opacity(0.16), lineWidth: 0.5)
             }
-            .mediaShadow(.regular, opacityScale: showsShadow ? 1 : 0)
-    }
-
-    private var borderColor: Color {
-        colorScheme == .dark
-            ? Color.white.opacity(0.18)
-            : Color.black.opacity(0.12)
     }
 }
 

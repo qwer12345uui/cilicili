@@ -27,7 +27,7 @@ struct HomeFeedScreenBody: View {
             )
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(Color(.systemBackground))
+        .background(runtimeSettings.homeFeedLayout.homeFeedBackground)
         .homeFeedScreenLifecycle(
             viewModel: viewModel,
             runtimeSettings: runtimeSettings,

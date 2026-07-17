@@ -32,6 +32,7 @@ struct VideoDetailView: View {
             hidesRootTabBar: hidesRootTabBar,
             navigationBarVisibility: .hidden,
             hidesBackButton: true,
+            statusBarStyle: .default,
             performanceContext: .video(seedVideo),
             lifecycleActions: pageLifecycleActions
         ) {

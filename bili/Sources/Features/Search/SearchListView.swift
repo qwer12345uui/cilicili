@@ -31,7 +31,7 @@ struct SearchListView: View {
         }
         .scrollDismissesKeyboard(.immediately)
         .scrollBounceBehavior(.always, axes: .vertical)
-        .background(Color(.systemBackground))
+        .background(Color(.systemGroupedBackground))
         .ignoresSafeArea(.container, edges: .top)
         .nativeTopScrollEdgeEffect(hidesRootNavigationTitle: false)
         .refreshable {
@@ -149,7 +149,7 @@ private struct SearchDiscoveryChip: View {
             }
             .padding(.horizontal, 12)
             .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
-            .background(Color(.secondarySystemBackground))
+            .background(Color(.secondarySystemGroupedBackground))
             .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
             .overlay {
                 RoundedRectangle(cornerRadius: 14, style: .continuous)

@@ -1,4 +1,10 @@
 import CoreGraphics
+import Foundation
+
+enum PlaybackDetailRotationTiming {
+    static let recoverySettleDelay: TimeInterval = 0.10
+    static let portraitFullscreenDuration: TimeInterval = 0.42
+}
 
 /// UIKit 播放详情页共享的基础几何。
 ///
