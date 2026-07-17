@@ -74,8 +74,6 @@ extension VideoDetailViewModel {
     }
 
     private func shouldSkipWarmCacheForTargetQuality(_ data: PlayURLData) -> Bool {
-        guard let preferredQuality = targetPlaybackPreferredQuality else { return false }
-        let variants = playVariants(from: data)
-        return !variants.contains { $0.satisfiesPreferredQuality(preferredQuality) }
+        shouldRefetchForPreferredQuality(data)
     }
 }

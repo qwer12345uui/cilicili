@@ -115,6 +115,30 @@ final class ResourceLoadingServicesTests: XCTestCase {
         )
     }
 
+    func testUnavailablePreferredQualityDoesNotInvalidatePlayablePreload() throws {
+        let data = try playablePlayURLData(quality: 80)
+
+        XCTAssertFalse(data.shouldRefetchForPreferredQuality(116))
+    }
+
+    func testAdvertisedPreferredQualityInvalidatesIncompletePlayablePreload() throws {
+        let json = """
+        {
+            "quality": 80,
+            "accept_quality": [116, 80],
+            "accept_description": ["1080P 60帧", "1080P"],
+            "durl": [
+                {
+                    "url": "https://example.com/video-80.mp4"
+                }
+            ]
+        }
+        """
+        let data = try JSONDecoder().decode(PlayURLData.self, from: Data(json.utf8))
+
+        XCTAssertTrue(data.shouldRefetchForPreferredQuality(116))
+    }
+
     func testPlayVariantsExposeAdvertisedLockedQualities() throws {
         let json = """
         {
