@@ -30,10 +30,11 @@ extension VideoDetailViewModel {
     }
 
     private func needsSupplementalTargetQuality(_ variants: [PlayVariant]) -> Bool {
-        guard let preferredQuality = targetPlaybackPreferredQuality else { return false }
         let playableVariants = variants.filter(\.isPlayable)
-        guard !playableVariants.isEmpty else { return false }
-        return !playableVariants.contains { $0.satisfiesPreferredQuality(preferredQuality) }
+        guard !playableVariants.isEmpty,
+              let currentPlayURLData
+        else { return false }
+        return shouldRefetchForPreferredQuality(currentPlayURLData)
     }
 
     private func playVariantsNeedSupplementalFrameRateUpgrade(_ variants: [PlayVariant]) -> Bool {

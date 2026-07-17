@@ -2975,7 +2975,7 @@ nonisolated final class BiliAPIClient {
         let configuredQuality = preferredQuality ?? storedPreferredQuality
         let requestedQuality = startupRequestedQuality(configuredQuality: configuredQuality)
         let honorsConfiguredQuality = configuredQuality != nil && configuredQuality == requestedQuality
-        let allowsUsableFallback = false
+        let allowsUsableFallback = true
         var bestStartupData: PlayURLData?
         if let racedStartupData = try await fetchRacedStartupPlayURL(
             bvid: bvid,
@@ -2986,7 +2986,10 @@ nonisolated final class BiliAPIClient {
         ) {
             if !honorsConfiguredQuality
                 || racedStartupData.hasPlayableQuality(requestedQuality)
-                || (allowsUsableFallback && racedStartupData.hasPlayableStreamPayload) {
+                || (allowsUsableFallback && Self.canUseUnavailablePreferredStartupFallback(
+                    racedStartupData,
+                    requestedQuality: requestedQuality
+                )) {
                 return racedStartupData
             }
             bestStartupData = preferredStartupCandidate(bestStartupData, racedStartupData)
@@ -3088,7 +3091,12 @@ nonisolated final class BiliAPIClient {
                 }
 
                 if attempt.stage == "startupRaceTimeout" {
-                    if let bestStartupData, allowsUsableFallback {
+                    if let bestStartupData,
+                       allowsUsableFallback,
+                       Self.canUseUnavailablePreferredStartupFallback(
+                        bestStartupData,
+                        requestedQuality: requestedQuality
+                       ) {
                         logPlayURLStage(
                             "startupRaceGraceFallback",
                             bvid: bvid,
@@ -3122,11 +3130,11 @@ nonisolated final class BiliAPIClient {
                         group.cancelAll()
                         return data
                     }
-                    let canAcceptUnavailablePreferredFallback =
-                        allowsUsableFallback
-                        &&
-                        data.hasPlayableStreamPayload
-                        && !data.shouldRefetchForPreferredQuality(requestedQuality)
+                    let canAcceptUnavailablePreferredFallback = allowsUsableFallback
+                        && Self.canUseUnavailablePreferredStartupFallback(
+                            data,
+                            requestedQuality: requestedQuality
+                        )
                     if canAcceptUnavailablePreferredFallback {
                         logPlayURLStage(
                             "startupRaceUnavailablePreferredFallback.\(attempt.stage)",
@@ -3145,18 +3153,6 @@ nonisolated final class BiliAPIClient {
                         requestedQuality: requestedQuality,
                         data: data
                     )
-                    if allowsUsableFallback,
-                       data.hasPlayableQuality(requestedQuality) {
-                        logPlayURLStage(
-                            "startupRaceUsableFallback.\(attempt.stage)",
-                            bvid: bvid,
-                            cid: cid,
-                            start: raceStart,
-                            data: data
-                        )
-                        group.cancelAll()
-                        return data
-                    }
                     continue
                 }
 
@@ -3230,6 +3226,14 @@ nonisolated final class BiliAPIClient {
     private nonisolated func shouldAcceptPlayURLData(_ data: PlayURLData, requestedQuality: Int) -> Bool {
         guard Self.requiresAutomaticCodecNegotiation(requestedQuality: requestedQuality) else { return true }
         return data.hasMediaPayloadQuality(requestedQuality)
+    }
+
+    nonisolated static func canUseUnavailablePreferredStartupFallback(
+        _ data: PlayURLData,
+        requestedQuality: Int
+    ) -> Bool {
+        data.hasPlayableStreamPayload
+            && !data.shouldRefetchForPreferredQuality(requestedQuality)
     }
 
     private nonisolated func preferredPlayURLCandidate(
