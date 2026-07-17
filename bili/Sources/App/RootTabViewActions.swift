@@ -206,7 +206,6 @@ extension RootTabView {
         trimRecentPlaybackPreloads(now: now)
 
         Task {
-            dependencies.refreshPlaybackCDNProbeIfNeeded()
             let playbackAdaptationProfile = PlayerPerformanceStore.shared.playbackAdaptationProfile(
                 for: video.bvid,
                 isEnabled: dependencies.libraryStore.isPlaybackAutoOptimizationEnabled
