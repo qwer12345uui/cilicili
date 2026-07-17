@@ -14,6 +14,8 @@ struct VideoDetailCoreTaskState {
     var startupPlayURLTask: Task<PlayURLData, Error>?
     var startupPlayURLTaskKey: String?
     var startupPlayURLGeneration = 0
+    var cloudHistoryResumeTask: Task<VideoHistoryProgress?, Never>?
+    var cloudHistoryResumeTaskAid: Int?
 }
 
 extension VideoDetailViewModel {
@@ -80,5 +82,15 @@ extension VideoDetailViewModel {
     var startupPlayURLGeneration: Int {
         get { coreTaskState.startupPlayURLGeneration }
         set { coreTaskState.startupPlayURLGeneration = newValue }
+    }
+
+    var cloudHistoryResumeTask: Task<VideoHistoryProgress?, Never>? {
+        get { coreTaskState.cloudHistoryResumeTask }
+        set { coreTaskState.cloudHistoryResumeTask = newValue }
+    }
+
+    var cloudHistoryResumeTaskAid: Int? {
+        get { coreTaskState.cloudHistoryResumeTaskAid }
+        set { coreTaskState.cloudHistoryResumeTaskAid = newValue }
     }
 }

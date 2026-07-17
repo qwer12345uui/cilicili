@@ -22,6 +22,7 @@ extension VideoDetailViewModel {
             recordDetailLoadedIfNeeded(source: "network")
             scheduleRelatedLoadIfNeeded()
         }
+        beginCloudHistoryResumeFetchIfNeeded()
         schedulePlayURLLoadIfNeeded()
         scheduleUploaderAndInteractionLoadIfNeeded()
         if clearsCurrentDetailTask {

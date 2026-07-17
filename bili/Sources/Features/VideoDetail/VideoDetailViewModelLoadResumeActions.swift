@@ -3,6 +3,7 @@ import Foundation
 extension VideoDetailViewModel {
     func resumeLoadedDetailIfNeeded() async {
         guard !isPlaybackInvalidatedForNavigation else { return }
+        beginCloudHistoryResumeFetchIfNeeded()
         scheduleDanmakuLoadIfNeeded()
         scheduleRelatedLoadIfNeeded()
         scheduleUploaderAndInteractionLoadIfNeeded()
@@ -31,12 +32,14 @@ extension VideoDetailViewModel {
     }
 
     func schedulePlaybackStartupSideLoads() {
+        beginCloudHistoryResumeFetchIfNeeded()
         schedulePlayURLLoadIfNeeded()
         scheduleUploaderAndInteractionLoadIfNeeded()
         scheduleFullDetailLoadIfNeeded(priority: .utility, waitsForFirstFrame: true)
     }
 
     func startPlaybackAfterFastStartActivation() async {
+        beginCloudHistoryResumeFetchIfNeeded()
         await prioritizeCurrentPlaybackForStartup()
         scheduleUploaderAndInteractionLoadIfNeeded()
         scheduleFullDetailLoadIfNeeded(priority: .utility, waitsForFirstFrame: true)

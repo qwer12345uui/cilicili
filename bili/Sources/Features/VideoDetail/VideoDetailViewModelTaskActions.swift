@@ -91,5 +91,8 @@ extension VideoDetailViewModel {
     func cancelBackgroundTasks() {
         backgroundTasks.values.forEach { $0.cancel() }
         backgroundTasks.removeAll()
+        cloudHistoryResumeTask?.cancel()
+        cloudHistoryResumeTask = nil
+        cloudHistoryResumeTaskAid = nil
     }
 }

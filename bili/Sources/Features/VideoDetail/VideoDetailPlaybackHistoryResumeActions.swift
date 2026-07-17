@@ -68,24 +68,53 @@ extension VideoDetailViewModel {
 
     private func prepareCloudHistoryResumeIfNeeded(currentCID: Int) async {
         guard !didResolveCloudHistoryResume else { return }
-        didResolveCloudHistoryResume = true
         guard !libraryStore.incognitoModeEnabled,
               let aid = detail.aid
         else { return }
-        do {
-            let history = try await api.fetchVideoHistoryProgress(aid: aid)
-            let targetCID = matchingHistoryCID(history.lastPlayCid) ?? currentCID
-            if let resumeTime = history.resumeTime(
-                duration: historyResumeDurationHint,
-                minimumProgress: playbackHistoryResumeMinimumProgress
-            ) {
-                setPendingPlaybackHistoryResumeTime(resumeTime, cid: targetCID)
-            }
-            if targetCID != currentCID {
-                selectedCID = targetCID
-            }
-        } catch {
-            return
+        let bvid = detail.bvid
+        beginCloudHistoryResumeFetchIfNeeded()
+        didResolveCloudHistoryResume = true
+        guard let task = cloudHistoryResumeTask,
+              cloudHistoryResumeTaskAid == aid
+        else { return }
+        let history = await task.value
+        if cloudHistoryResumeTaskAid == aid {
+            cloudHistoryResumeTask = nil
+            cloudHistoryResumeTaskAid = nil
+        }
+        guard let history,
+              !Task.isCancelled,
+              !isPlaybackInvalidatedForNavigation,
+              detail.bvid == bvid,
+              selectedCID == currentCID
+        else { return }
+
+        let targetCID = matchingHistoryCID(history.lastPlayCid) ?? currentCID
+        if let resumeTime = history.resumeTime(
+            duration: historyResumeDurationHint,
+            minimumProgress: playbackHistoryResumeMinimumProgress
+        ) {
+            setPendingPlaybackHistoryResumeTime(resumeTime, cid: targetCID)
+        }
+        if targetCID != currentCID {
+            selectedCID = targetCID
+        }
+    }
+
+    func beginCloudHistoryResumeFetchIfNeeded() {
+        guard !didResolveCloudHistoryResume,
+              pendingPlaybackHistoryResumeTime == nil,
+              !libraryStore.incognitoModeEnabled,
+              let aid = detail.aid,
+              aid > 0
+        else { return }
+        guard cloudHistoryResumeTask == nil || cloudHistoryResumeTaskAid != aid else { return }
+
+        cloudHistoryResumeTask?.cancel()
+        cloudHistoryResumeTaskAid = aid
+        let api = api
+        cloudHistoryResumeTask = Task(priority: .utility) {
+            try? await api.fetchVideoHistoryProgress(aid: aid)
         }
     }
 

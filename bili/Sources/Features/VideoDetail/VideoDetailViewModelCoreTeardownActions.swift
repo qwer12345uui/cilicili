@@ -22,6 +22,9 @@ extension VideoDetailViewModel {
         state.startupPlayURLTask = nil
         state.startupPlayURLTaskKey = nil
         state.startupPlayURLGeneration += 1
+        state.cloudHistoryResumeTask?.cancel()
+        state.cloudHistoryResumeTask = nil
+        state.cloudHistoryResumeTaskAid = nil
     }
 
     nonisolated static func tearDownRenderStoreSync(_ state: inout VideoDetailRenderStoreSyncState) {

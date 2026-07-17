@@ -5,7 +5,9 @@ extension VideoDetailViewModel {
     private static var startupPackageWarmupPlayerCreationWait: TimeInterval { 0.08 }
     private static var cachedPlayURLStartupPackageWarmupPlayerCreationWait: TimeInterval { 0.16 }
     private static var slowPlayURLStartupPackageWarmupPlayerCreationWait: TimeInterval { 0.24 }
-    private static var historyResumeWarmupPlayerCreationWait: TimeInterval { 0.34 }
+    private static var historyResumeWarmupPlayerCreationWait: TimeInterval {
+        PlaybackEnvironment.current.shouldPreferConservativePlayback ? 0.18 : 0.12
+    }
     private static var slowPlayURLWarmupThresholdMilliseconds: Int { 350 }
 
     func schedulePostPlayURLApplicationWork(
