@@ -3915,6 +3915,7 @@ actor RemoteImageCache {
 
     func refreshNetworkSessionForPathChange() {
         applyAdaptiveBudgetIfNeeded()
+        RemoteImageCDNHealthMemory.shared.reset()
         inFlight.values.forEach { $0.cancel() }
         inFlight.removeAll()
         inFlightOrder.removeAll()
@@ -3925,10 +3926,12 @@ actor RemoteImageCache {
     }
 
     func image(for url: URL, scale: CGFloat = 1, targetPixelSize: Int? = nil) -> UIImage? {
-        let key = cacheKey(for: url, scale: scale, targetPixelSize: targetPixelSize)
-        if let image = cache.object(forKey: key.nsKey) {
-            hits += 1
-            return image
+        for candidateURL in imageCandidateURLs(for: url) {
+            let key = cacheKey(for: candidateURL, scale: scale, targetPixelSize: targetPixelSize)
+            if let image = cache.object(forKey: key.nsKey) {
+                hits += 1
+                return image
+            }
         }
         misses += 1
         return nil
@@ -3942,8 +3945,10 @@ actor RemoteImageCache {
     }
 
     func clearFailure(for url: URL, scale: CGFloat = 1, targetPixelSize: Int? = nil) {
-        let key = cacheKey(for: url, scale: scale, targetPixelSize: targetPixelSize)
-        failedLoads[key] = nil
+        for candidateURL in imageCandidateURLs(for: url) {
+            let key = cacheKey(for: candidateURL, scale: scale, targetPixelSize: targetPixelSize)
+            failedLoads[key] = nil
+        }
     }
 
     func statistics() -> RemoteImageCacheStatistics {
@@ -4030,14 +4035,41 @@ actor RemoteImageCache {
         priority: RemoteImageLoadPriority = .visible
     ) async -> UIImage? {
         applyAdaptiveBudgetIfNeeded()
-        let key = cacheKey(for: url, scale: scale, targetPixelSize: targetPixelSize)
-        if cachePolicy == .standard,
-           let cached = cachedImage(for: url, scale: scale, targetPixelSize: targetPixelSize) {
-            hits += 1
-            return cached
+        let candidateURLs = imageCandidateURLs(for: url)
+        if cachePolicy == .standard {
+            for candidateURL in candidateURLs {
+                if let cached = cachedImage(for: candidateURL, scale: scale, targetPixelSize: targetPixelSize) {
+                    hits += 1
+                    return cached
+                }
+            }
         }
         await RemoteImageLoadSuppressionGate.shared.waitUntilAllowed()
         guard !Task.isCancelled else { return nil }
+
+        for candidateURL in candidateURLs {
+            guard !Task.isCancelled else { return nil }
+            if let image = await loadSingle(
+                url: candidateURL,
+                scale: scale,
+                targetPixelSize: targetPixelSize,
+                cachePolicy: cachePolicy,
+                priority: priority
+            ) {
+                return image
+            }
+        }
+        return nil
+    }
+
+    private func loadSingle(
+        url: URL,
+        scale: CGFloat,
+        targetPixelSize: Int?,
+        cachePolicy: RemoteImageCachePolicy,
+        priority: RemoteImageLoadPriority
+    ) async -> UIImage? {
+        let key = cacheKey(for: url, scale: scale, targetPixelSize: targetPixelSize)
         if cachePolicy == .standard,
            let cached = cachedImage(for: url, scale: scale, targetPixelSize: targetPixelSize) {
             hits += 1
@@ -4087,30 +4119,13 @@ actor RemoteImageCache {
     private func prefetchOne(_ source: RemoteImageSource, scale: CGFloat, targetPixelSize: Int?) async {
         guard !Task.isCancelled else { return }
         for url in source.urls {
-            await RemoteImageLoadSuppressionGate.shared.waitUntilAllowed()
-            guard !Task.isCancelled else { return }
-            let key = cacheKey(for: url, scale: scale, targetPixelSize: targetPixelSize)
-            guard cachedImage(for: url, scale: scale, targetPixelSize: targetPixelSize) == nil else { return }
-            guard !isTemporarilyFailed(key) else { continue }
-            if let task = inFlight[key] {
-                touchDiskRequest(key)
-                let image = await task.value
-                finish(key: key, image: image)
-                if image != nil { return }
-                continue
-            }
-
-            let task = makeLoadTask(
+            let image = await load(
                 url: url,
                 scale: scale,
                 targetPixelSize: targetPixelSize,
                 cachePolicy: .standard,
                 priority: .prefetch
             )
-            registerInFlightTask(key)
-            inFlight[key] = task
-            let image = await task.value
-            finish(key: key, image: image)
             if image != nil { return }
         }
     }
@@ -4125,6 +4140,9 @@ actor RemoteImageCache {
         let session = session
         let effectiveTargetPixelSize = effectiveTargetPixelSize(targetPixelSize, scale: scale)
         let request = Self.imageRequest(url: url, cachePolicy: cachePolicy)
+        let usesCDNFailover = RemoteImageCDNFailoverExperiment.isEnabled()
+            && RemoteImageCDNFailoverPolicy.isEligible(url)
+        let retryPolicy: BiliNetworkRetryPolicy = usesCDNFailover ? .imageFailover : .image
         if cachePolicy == .standard {
             recordDiskRequest(key: cacheKey(for: url, scale: scale, targetPixelSize: targetPixelSize), request: request)
         }
@@ -4133,18 +4151,35 @@ actor RemoteImageCache {
                 let (data, response) = try await BiliNetworkRetry.data(
                     session: session,
                     request: request,
-                    policy: .image
+                    policy: retryPolicy
                 )
                 if let response = response as? HTTPURLResponse,
                    !(200..<300).contains(response.statusCode) {
+                    if RemoteImageCDNFailoverPolicy.shouldDemote(statusCode: response.statusCode) {
+                        RemoteImageCDNHealthMemory.shared.recordTransientFailure(
+                            for: url,
+                            experimentEnabled: usesCDNFailover
+                        )
+                    }
                     return nil
                 }
-                guard !Task.isCancelled,
+                guard !Task.isCancelled else { return nil }
+                RemoteImageCDNHealthMemory.shared.recordSuccess(
+                    for: url,
+                    experimentEnabled: usesCDNFailover
+                )
+                guard
                       let decoded = UIImage.downsampledImage(data: data, scale: scale, targetPixelSize: effectiveTargetPixelSize)
                 else { return nil }
                 guard !decoded.hasAlphaChannel else { return decoded }
                 return decoded.preparingForDisplay() ?? decoded
             } catch {
+                if RemoteImageCDNFailoverPolicy.shouldDemote(error: error) {
+                    RemoteImageCDNHealthMemory.shared.recordTransientFailure(
+                        for: url,
+                        experimentEnabled: usesCDNFailover
+                    )
+                }
                 return nil
             }
         }
@@ -4173,6 +4208,13 @@ actor RemoteImageCache {
     ) -> UIImage? {
         let key = cacheKey(for: url, scale: scale, targetPixelSize: targetPixelSize)
         return cache.object(forKey: key.nsKey)
+    }
+
+    private func imageCandidateURLs(for url: URL) -> [URL] {
+        RemoteImageCDNHealthMemory.shared.orderedCandidates(
+            for: [url],
+            experimentEnabled: RemoteImageCDNFailoverExperiment.isEnabled()
+        )
     }
 
     private func isTemporarilyFailed(_ key: ImageCacheKey) -> Bool {

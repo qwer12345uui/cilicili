@@ -89,6 +89,19 @@ final class PlayerFormalPlaybackConfigurationTests: XCTestCase {
     }
 
     @MainActor
+    func testLibraryStorePersistsRemoteImageCDNFailoverExperiment() {
+        let defaults = makeUserDefaults()
+        let store = LibraryStore(userDefaults: defaults)
+
+        XCTAssertFalse(store.remoteImageCDNFailoverExperimentEnabled)
+        store.setRemoteImageCDNFailoverExperimentEnabled(true)
+
+        XCTAssertTrue(
+            LibraryStore(userDefaults: defaults).remoteImageCDNFailoverExperimentEnabled
+        )
+    }
+
+    @MainActor
     func testPlaybackSessionTracksActivePlayerIdentityAndDetaches() {
         let player = PlayerStateViewModel(
             videoURL: nil,

@@ -74,6 +74,13 @@ struct MineDisplaySettingsSection: View {
                 Label("快速滚动图片负载抑制实验", systemImage: "photo.stack")
             }
 
+            Toggle(isOn: Binding(
+                get: { libraryStore.remoteImageCDNFailoverExperimentEnabled },
+                set: { libraryStore.setRemoteImageCDNFailoverExperimentEnabled($0) }
+            )) {
+                Label("图片 CDN 自动切换实验", systemImage: "arrow.triangle.branch")
+            }
+
             VStack(alignment: .leading, spacing: 10) {
                 HStack {
                     Label("封面角标暗色底", systemImage: "circle.lefthalf.filled")

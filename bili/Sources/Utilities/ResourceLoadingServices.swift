@@ -515,6 +515,14 @@ nonisolated struct BiliNetworkRetryPolicy: Sendable {
         jitterNanoseconds: 50_000_000
     )
 
+    static let imageFailover = BiliNetworkRetryPolicy(
+        label: "imageFailover",
+        attempts: 1,
+        baseDelayNanoseconds: 0,
+        maxDelayNanoseconds: 0,
+        jitterNanoseconds: 0
+    )
+
     static let playbackProbe = BiliNetworkRetryPolicy(
         label: "playbackProbe",
         attempts: 2,
