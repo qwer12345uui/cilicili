@@ -7,6 +7,7 @@ private struct HomeFeedCardLifecycleModifier: ViewModifier {
     func body(content: Content) -> some View {
         content
             .onAppear(perform: lifecycleActions.handleAppear)
+            .onDisappear(perform: lifecycleActions.handleDisappear)
             .homeLoadMoreTask(if: lifecycleActions.shouldAttachLoadMoreTask, id: cell.id) {
                 await lifecycleActions.loadMoreIfNeeded()
             }

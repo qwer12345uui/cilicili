@@ -14,6 +14,7 @@ struct HomeFeedScreenContentActionsBuilder {
             onVideoTap: openVideo,
             onVideoPress: beginPressedPreload,
             onCardAppear: recordExposure,
+            onCardDisappear: recordCardDisappearance,
             onLoadMore: loadMoreIfNeeded,
             onRefreshFromLastSeenMarker: refreshFromLastSeenMarker
         )
@@ -40,6 +41,15 @@ struct HomeFeedScreenContentActionsBuilder {
 
     private func recordExposure(_ video: VideoItem, index: Int) {
         viewModel.recordRecommendExposure(video, index: index)
+        actionStore.preload.recordVisibleCard(
+            video,
+            index: index,
+            context: preloadContext
+        )
+    }
+
+    private func recordCardDisappearance(_ video: VideoItem) {
+        actionStore.preload.recordCardDisappearance(video)
     }
 
     private func loadMoreIfNeeded(_ video: VideoItem) async {
