@@ -2975,21 +2975,17 @@ nonisolated final class BiliAPIClient {
         let configuredQuality = preferredQuality ?? storedPreferredQuality
         let requestedQuality = startupRequestedQuality(configuredQuality: configuredQuality)
         let honorsConfiguredQuality = configuredQuality != nil && configuredQuality == requestedQuality
-        let allowsUsableFallback = true
         var bestStartupData: PlayURLData?
-        if let racedStartupData = try await fetchRacedStartupPlayURL(
+        if let racedStartupResult = try await fetchRacedStartupPlayURL(
             bvid: bvid,
             cid: cid,
             page: page,
-            requestedQuality: requestedQuality,
-            allowsUsableFallback: allowsUsableFallback
+            requestedQuality: requestedQuality
         ) {
+            let racedStartupData = racedStartupResult.data
             if !honorsConfiguredQuality
                 || racedStartupData.hasPlayableQuality(requestedQuality)
-                || (allowsUsableFallback && Self.canUseUnavailablePreferredStartupFallback(
-                    racedStartupData,
-                    requestedQuality: requestedQuality
-                )) {
+                || racedStartupResult.isVerifiedUnavailablePreferredFallback {
                 return racedStartupData
             }
             bestStartupData = preferredStartupCandidate(bestStartupData, racedStartupData)
@@ -3035,21 +3031,25 @@ nonisolated final class BiliAPIClient {
         bvid: String,
         cid: Int,
         page: Int?,
-        requestedQuality: Int,
-        allowsUsableFallback: Bool
-    ) async throws -> PlayURLData? {
+        requestedQuality: Int
+    ) async throws -> StartupPlayURLRaceResult? {
         let raceStart = CACurrentMediaTime()
         let shouldRaceWBI = await shouldAttemptStartupWBI()
         let playbackEnvironment = PlaybackEnvironment.current
         let startupGrace = playbackEnvironment.preferredPlayURLStartupGrace
-        var bestStartupData: PlayURLData?
+        var bestStartupResult: StartupPlayURLRaceResult?
         var lastError: Error?
 
-        return await withTaskGroup(of: StartupPlayURLAttempt.self, returning: PlayURLData?.self) { group in
+        return await withTaskGroup(of: StartupPlayURLAttempt.self, returning: StartupPlayURLRaceResult?.self) { group in
             if startupGrace > 0 {
                 group.addTask(priority: .userInitiated) {
                     try? await Task.sleep(nanoseconds: startupGrace)
-                    return StartupPlayURLAttempt(stage: "startupRaceTimeout", data: nil, error: nil)
+                    return StartupPlayURLAttempt(
+                        stage: "startupRaceTimeout",
+                        data: nil,
+                        error: nil,
+                        isAuthoritativePlayURLSource: false
+                    )
                 }
             }
 
@@ -3061,9 +3061,19 @@ nonisolated final class BiliAPIClient {
                         page: page,
                         preferredQuality: requestedQuality
                     )
-                    return StartupPlayURLAttempt(stage: "startupWebpage", data: data, error: nil)
+                    return StartupPlayURLAttempt(
+                        stage: "startupWebpage",
+                        data: data,
+                        error: nil,
+                        isAuthoritativePlayURLSource: false
+                    )
                 } catch {
-                    return StartupPlayURLAttempt(stage: "startupWebpage", data: nil, error: error)
+                    return StartupPlayURLAttempt(
+                        stage: "startupWebpage",
+                        data: nil,
+                        error: error,
+                        isAuthoritativePlayURLSource: false
+                    )
                 }
             }
 
@@ -3077,9 +3087,19 @@ nonisolated final class BiliAPIClient {
                             keys: keys,
                             preferredQuality: requestedQuality
                         )
-                        return StartupPlayURLAttempt(stage: "startupWBI", data: data, error: nil)
+                        return StartupPlayURLAttempt(
+                            stage: "startupWBI",
+                            data: data,
+                            error: nil,
+                            isAuthoritativePlayURLSource: true
+                        )
                     } catch {
-                        return StartupPlayURLAttempt(stage: "startupWBI", data: nil, error: error)
+                        return StartupPlayURLAttempt(
+                            stage: "startupWBI",
+                            data: nil,
+                            error: error,
+                            isAuthoritativePlayURLSource: true
+                        )
                     }
                 }
             }
@@ -3091,34 +3111,25 @@ nonisolated final class BiliAPIClient {
                 }
 
                 if attempt.stage == "startupRaceTimeout" {
-                    if let bestStartupData,
-                       allowsUsableFallback,
-                       Self.canUseUnavailablePreferredStartupFallback(
-                        bestStartupData,
-                        requestedQuality: requestedQuality
-                       ) {
-                        logPlayURLStage(
-                            "startupRaceGraceFallback",
-                            bvid: bvid,
-                            cid: cid,
-                            start: raceStart,
-                            data: bestStartupData
-                        )
-                        group.cancelAll()
-                        return bestStartupData
-                    } else {
-                        logPlayURLStage(
-                            "startupRaceGraceExpired",
-                            bvid: bvid,
-                            cid: cid,
-                            start: raceStart
-                        )
-                        continue
-                    }
+                    logPlayURLStage(
+                        "startupRaceGraceExpired",
+                        bvid: bvid,
+                        cid: cid,
+                        start: raceStart
+                    )
+                    continue
                 }
 
                 if let data = attempt.data {
-                    bestStartupData = preferredStartupCandidate(bestStartupData, data)
+                    let result = StartupPlayURLRaceResult(
+                        data: data,
+                        isVerifiedUnavailablePreferredFallback: Self.canUseUnavailablePreferredStartupFallback(
+                            data,
+                            requestedQuality: requestedQuality,
+                            isAuthoritativeSource: attempt.isAuthoritativePlayURLSource
+                        )
+                    )
+                    bestStartupResult = preferredStartupRaceCandidate(bestStartupResult, result)
                     if data.hasPlayableQuality(requestedQuality) {
                         logPlayURLStage(
                             "startupRaceWinner.\(attempt.stage)",
@@ -3128,14 +3139,9 @@ nonisolated final class BiliAPIClient {
                             data: data
                         )
                         group.cancelAll()
-                        return data
+                        return result
                     }
-                    let canAcceptUnavailablePreferredFallback = allowsUsableFallback
-                        && Self.canUseUnavailablePreferredStartupFallback(
-                            data,
-                            requestedQuality: requestedQuality
-                        )
-                    if canAcceptUnavailablePreferredFallback {
+                    if result.isVerifiedUnavailablePreferredFallback {
                         logPlayURLStage(
                             "startupRaceUnavailablePreferredFallback.\(attempt.stage)",
                             bvid: bvid,
@@ -3144,7 +3150,7 @@ nonisolated final class BiliAPIClient {
                             data: data
                         )
                         group.cancelAll()
-                        return data
+                        return result
                     }
                     logPreferredQualityMiss(
                         stage: attempt.stage,
@@ -3171,13 +3177,13 @@ nonisolated final class BiliAPIClient {
                 }
             }
 
-            if let bestStartupData {
+            if let bestStartupResult {
                 logPlayURLStage(
                     "startupRaceBestFallback",
                     bvid: bvid,
                     cid: cid,
                     start: raceStart,
-                    data: bestStartupData
+                    data: bestStartupResult.data
                 )
             } else if let lastError {
                 logPlayURLStage(
@@ -3188,7 +3194,7 @@ nonisolated final class BiliAPIClient {
                     error: lastError
                 )
             }
-            return bestStartupData
+            return bestStartupResult
         }
     }
 
@@ -3223,6 +3229,17 @@ nonisolated final class BiliAPIClient {
         return rhs.highestPlayableQuality > lhs.highestPlayableQuality ? rhs : lhs
     }
 
+    private func preferredStartupRaceCandidate(
+        _ lhs: StartupPlayURLRaceResult?,
+        _ rhs: StartupPlayURLRaceResult
+    ) -> StartupPlayURLRaceResult {
+        guard let lhs else { return rhs }
+        if rhs.data.highestPlayableQuality != lhs.data.highestPlayableQuality {
+            return rhs.data.highestPlayableQuality > lhs.data.highestPlayableQuality ? rhs : lhs
+        }
+        return rhs.isVerifiedUnavailablePreferredFallback ? rhs : lhs
+    }
+
     private nonisolated func shouldAcceptPlayURLData(_ data: PlayURLData, requestedQuality: Int) -> Bool {
         guard Self.requiresAutomaticCodecNegotiation(requestedQuality: requestedQuality) else { return true }
         return data.hasMediaPayloadQuality(requestedQuality)
@@ -3230,9 +3247,11 @@ nonisolated final class BiliAPIClient {
 
     nonisolated static func canUseUnavailablePreferredStartupFallback(
         _ data: PlayURLData,
-        requestedQuality: Int
+        requestedQuality: Int,
+        isAuthoritativeSource: Bool
     ) -> Bool {
-        data.hasPlayableStreamPayload
+        isAuthoritativeSource
+            && data.hasPlayableStreamPayload
             && !data.shouldRefetchForPreferredQuality(requestedQuality)
     }
 
@@ -5748,6 +5767,12 @@ private struct StartupPlayURLAttempt: Sendable {
     let stage: String
     let data: PlayURLData?
     let error: Error?
+    let isAuthoritativePlayURLSource: Bool
+}
+
+private struct StartupPlayURLRaceResult: Sendable {
+    let data: PlayURLData
+    let isVerifiedUnavailablePreferredFallback: Bool
 }
 
 private struct CachedPlayURLFailure {

@@ -115,10 +115,28 @@ final class ResourceLoadingServicesTests: XCTestCase {
         )
     }
 
-    func testUnavailablePreferredQualityUsesPlayableStartupFallback() throws {
+    func testAuthoritativeUnavailablePreferredQualityUsesPlayableStartupFallback() throws {
         let data = try playablePlayURLData(quality: 80)
 
-        XCTAssertTrue(BiliAPIClient.canUseUnavailablePreferredStartupFallback(data, requestedQuality: 116))
+        XCTAssertTrue(
+            BiliAPIClient.canUseUnavailablePreferredStartupFallback(
+                data,
+                requestedQuality: 116,
+                isAuthoritativeSource: true
+            )
+        )
+    }
+
+    func testWebPageUnavailablePreferredQualityDoesNotUseStartupFallback() throws {
+        let data = try playablePlayURLData(quality: 80)
+
+        XCTAssertFalse(
+            BiliAPIClient.canUseUnavailablePreferredStartupFallback(
+                data,
+                requestedQuality: 116,
+                isAuthoritativeSource: false
+            )
+        )
     }
 
     func testAdvertisedPreferredQualityDoesNotUseIncompleteStartupFallback() throws {
@@ -136,7 +154,13 @@ final class ResourceLoadingServicesTests: XCTestCase {
         """
         let data = try JSONDecoder().decode(PlayURLData.self, from: Data(json.utf8))
 
-        XCTAssertFalse(BiliAPIClient.canUseUnavailablePreferredStartupFallback(data, requestedQuality: 116))
+        XCTAssertFalse(
+            BiliAPIClient.canUseUnavailablePreferredStartupFallback(
+                data,
+                requestedQuality: 116,
+                isAuthoritativeSource: true
+            )
+        )
     }
 
     func testPlayVariantsExposeAdvertisedLockedQualities() throws {
