@@ -246,11 +246,11 @@ actor VideoPreloadCenter {
         let start = CACurrentMediaTime()
         if tasks[key] != nil {
             guard priority == .userInitiated, taskUserInitiatedFlags[key] != true else { return }
-            tasks[key]?.cancel()
-            tasks[key] = nil
-            taskUserInitiatedFlags[key] = nil
-            taskPreferredQualities[key] = nil
-            activeOrder.removeAll { $0 == key }
+            taskUserInitiatedFlags[key] = true
+            PlayerMetricsLog.logger.info(
+                "playInfoPreloadPromotePending bvid=\(bvid, privacy: .public) cid=\(cid, privacy: .public) preferred=\(effectivePreferredQuality ?? 0, privacy: .public)"
+            )
+            return
         }
         if let cachedData = cachedPlayURL(
             for: bvid,
