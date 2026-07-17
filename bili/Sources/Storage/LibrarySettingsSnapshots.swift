@@ -85,6 +85,42 @@ final class HomeRuntimeSettingsStore: ObservableObject {
     }
 }
 
+struct PullRefreshRuntimeSettingsSnapshot: Equatable {
+    var triggerDistance: Double = LibraryStore.defaultHomeRefreshTriggerDistance
+}
+
+@MainActor
+final class PullRefreshRuntimeSettingsStore: ObservableObject {
+    @Published private(set) var snapshot = PullRefreshRuntimeSettingsSnapshot()
+    private weak var libraryStore: LibraryStore?
+    private var cancellable: AnyCancellable?
+
+    var triggerDistance: Double { snapshot.triggerDistance }
+
+    func bind(_ libraryStore: LibraryStore) {
+        guard self.libraryStore !== libraryStore else {
+            refresh()
+            return
+        }
+        self.libraryStore = libraryStore
+        refresh()
+        cancellable = libraryStore.objectWillChange.sink { [weak self] _ in
+            DispatchQueue.main.async {
+                self?.refresh()
+            }
+        }
+    }
+
+    private func refresh() {
+        guard let libraryStore else { return }
+        let next = PullRefreshRuntimeSettingsSnapshot(
+            triggerDistance: libraryStore.homeRefreshTriggerDistance
+        )
+        guard next != snapshot else { return }
+        snapshot = next
+    }
+}
+
 struct PlayerRuntimeSettingsSnapshot: Equatable {
     var defaultPlaybackRate: Double = 1.0
     var incognitoModeEnabled = false

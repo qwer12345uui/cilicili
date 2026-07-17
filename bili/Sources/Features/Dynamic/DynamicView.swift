@@ -19,6 +19,7 @@ private struct DynamicContentRoot: View {
     let libraryStore: LibraryStore
     @ObservedObject var sessionStore: SessionStore
     @StateObject private var holder = DynamicViewModelHolder()
+    @StateObject private var pullRefreshSettings = PullRefreshRuntimeSettingsStore()
 
     var body: some View {
         Group {
@@ -26,7 +27,8 @@ private struct DynamicContentRoot: View {
                 DynamicFeedScreenContent(
                     api: api,
                     viewModel: viewModel,
-                    isLoggedIn: sessionStore.isLoggedIn
+                    isLoggedIn: sessionStore.isLoggedIn,
+                    pullRefreshTriggerDistance: CGFloat(pullRefreshSettings.triggerDistance)
                 )
             } else {
                 DynamicInitialFeedContent(isLoggedIn: sessionStore.isLoggedIn)
@@ -38,6 +40,9 @@ private struct DynamicContentRoot: View {
                         )
                     }
             }
+        }
+        .task {
+            pullRefreshSettings.bind(libraryStore)
         }
     }
 }

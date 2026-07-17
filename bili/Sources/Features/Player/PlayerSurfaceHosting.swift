@@ -15,6 +15,8 @@ protocol PlayerSurfaceHosting: AnyObject {
     func setVideoAspectRatio(_ aspectRatio: CGFloat)
     func setLandscape(_ landscape: Bool)
     func setBareSurfaceTransitionActive(_ active: Bool, retainsChromeTree: Bool)
+    func prewarmRotationChrome()
+    func cancelRotationChromePrewarm()
     func refreshLayoutImmediately()
 }
 

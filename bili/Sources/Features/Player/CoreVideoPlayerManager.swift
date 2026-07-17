@@ -90,6 +90,7 @@ class RenderingEngineVideoPlayerAdapter: VideoPlayerProtocol {
             httpHeaders: BiliHLSManifestBuilder.httpHeaders(referer: "https://www.bilibili.com"),
             title: videoURL.lastPathComponent,
             durationHint: nil,
+            isLiveStream: false,
             resumeTime: 0,
             dynamicRange: .sdr,
             cdnPreference: .automatic

@@ -45,7 +45,7 @@ private struct PlaybackDetailSystemChrome: ViewModifier {
     func body(content: Content) -> some View {
         content
             .statusBar(hidden: isHidden)
-            .persistentSystemOverlays(isHidden ? .hidden : .automatic)
+            .persistentSystemOverlays(isHidden ? .hidden : .visible)
             .background {
                 StatusBarStyleBridge(style: statusBarStyle, isHidden: isHidden)
                     .frame(width: 0, height: 0)

@@ -52,41 +52,46 @@ private struct NavigationAudioSuspension {
     let shouldResumePlayback: Bool
 }
 
+private struct PlayerNowPlayingMetadataFingerprint: Equatable {
+    let playerID: ObjectIdentifier
+    let title: String
+    let artworkURL: URL?
+    let durationSeconds: Int?
+    let playbackRatePercent: Int
+    let playbackState: MPNowPlayingPlaybackState
+    let isLiveStream: Bool
+}
+
 @MainActor
-private final class PlayerNowPlayingSession {
-    static let shared = PlayerNowPlayingSession()
+private final class PlayerRemoteControlSession {
+    static let shared = PlayerRemoteControlSession()
 
     private var currentPlayerID: ObjectIdentifier?
+    private var remoteCommandTargets: [Any] = []
     private var currentArtworkURL: URL?
     private var currentArtwork: MPMediaItemArtwork?
     private var artworkTask: Task<Void, Never>?
-    private var remoteCommandTargets: [Any] = []
+    private var lastMetadataFingerprint: PlayerNowPlayingMetadataFingerprint?
 
     private init() {}
 
-    func update(for player: PlayerStateViewModel) {
+    func activate(
+        for player: PlayerStateViewModel,
+        forceNowPlayingTimeUpdate: Bool = false
+    ) {
         guard ActivePlaybackCoordinator.shared.isActive(player) else { return }
         configureRemoteCommandsIfNeeded()
         UIApplication.shared.beginReceivingRemoteControlEvents()
-        currentPlayerID = ObjectIdentifier(player)
-        updateArtworkIfNeeded(for: player)
+        let playerID = ObjectIdentifier(player)
+        if currentPlayerID != playerID {
+            currentPlayerID = playerID
+            resetDetailedMetadataCache()
+        }
 
-        var info: [String: Any] = [
-            MPMediaItemPropertyTitle: player.title,
-            MPNowPlayingInfoPropertyElapsedPlaybackTime: player.currentTime,
-            MPNowPlayingInfoPropertyPlaybackRate: player.isPlaying ? player.playbackRate.rawValue : 0,
-            MPNowPlayingInfoPropertyDefaultPlaybackRate: player.playbackRate.rawValue,
-            MPNowPlayingInfoPropertyMediaType: MPNowPlayingInfoMediaType.video.rawValue
-        ]
-        if let duration = player.displayDuration, duration > 0 {
-            info[MPMediaItemPropertyPlaybackDuration] = duration
-        }
-        if let currentArtwork, currentArtworkURL == player.artworkURL {
-            info[MPMediaItemPropertyArtwork] = currentArtwork
-        }
-        let center = MPNowPlayingInfoCenter.default()
-        center.nowPlayingInfo = info
-        center.playbackState = player.nowPlayingPlaybackState
+        publishNowPlayingMetadata(
+            for: player,
+            force: forceNowPlayingTimeUpdate
+        )
     }
 
     func clearIfCurrent(_ player: PlayerStateViewModel) {
@@ -96,16 +101,62 @@ private final class PlayerNowPlayingSession {
     func clearIfCurrentPlayerID(_ playerID: ObjectIdentifier) {
         guard currentPlayerID == playerID else { return }
         currentPlayerID = nil
-        currentArtworkURL = nil
-        currentArtwork = nil
-        artworkTask?.cancel()
-        artworkTask = nil
+        resetDetailedMetadataCache()
         MPNowPlayingInfoCenter.default().nowPlayingInfo = nil
         MPNowPlayingInfoCenter.default().playbackState = .stopped
     }
 
+    private func publishNowPlayingMetadata(
+        for player: PlayerStateViewModel,
+        force: Bool = false
+    ) {
+        let playerID = ObjectIdentifier(player)
+        guard currentPlayerID == playerID else { return }
+
+        let duration = player.displayDuration.flatMap { $0 > 0 ? $0 : nil }
+        let playbackState = player.nowPlayingPlaybackState
+        let fingerprint = PlayerNowPlayingMetadataFingerprint(
+            playerID: playerID,
+            title: player.title,
+            artworkURL: player.artworkURL,
+            durationSeconds: duration.map { Int($0.rounded()) },
+            playbackRatePercent: Int((player.playbackRate.rawValue * 100).rounded()),
+            playbackState: playbackState,
+            isLiveStream: player.isNowPlayingLiveStream
+        )
+
+        updateArtworkIfNeeded(for: player)
+        guard force || fingerprint != lastMetadataFingerprint else { return }
+        lastMetadataFingerprint = fingerprint
+
+        let effectiveRate = playbackState == .playing ? max(player.playbackRate.rawValue, 0) : 0
+        var info: [String: Any] = [
+            MPMediaItemPropertyTitle: player.title.isEmpty ? "CiliCili" : player.title,
+            MPMediaItemPropertyArtist: "CiliCili",
+            MPNowPlayingInfoPropertyPlaybackRate: effectiveRate,
+            MPNowPlayingInfoPropertyDefaultPlaybackRate: max(player.playbackRate.rawValue, 0),
+            MPNowPlayingInfoPropertyMediaType: MPNowPlayingInfoMediaType.audio.rawValue
+        ]
+        if player.isNowPlayingLiveStream {
+            info[MPNowPlayingInfoPropertyIsLiveStream] = true
+        } else if let duration {
+            info[MPMediaItemPropertyPlaybackDuration] = duration
+            info[MPNowPlayingInfoPropertyElapsedPlaybackTime] = min(
+                max(player.currentTime, 0),
+                duration
+            )
+        }
+        if let currentArtwork {
+            info[MPMediaItemPropertyArtwork] = currentArtwork
+        }
+
+        MPNowPlayingInfoCenter.default().nowPlayingInfo = info
+        MPNowPlayingInfoCenter.default().playbackState = playbackState
+    }
+
     private func updateArtworkIfNeeded(for player: PlayerStateViewModel) {
         guard let artworkURL = player.artworkURL else {
+            guard currentArtworkURL != nil || currentArtwork != nil else { return }
             currentArtworkURL = nil
             currentArtwork = nil
             artworkTask?.cancel()
@@ -118,24 +169,30 @@ private final class PlayerNowPlayingSession {
         currentArtwork = nil
         artworkTask?.cancel()
         let playerID = ObjectIdentifier(player)
-        artworkTask = Task { @MainActor [weak self] in
+        artworkTask = Task { @MainActor [weak self, weak player] in
             let image = await RemoteImageCache.shared.load(
                 url: artworkURL,
                 scale: 1,
                 targetPixelSize: 720
             )
             guard let self,
+                  let player,
                   !Task.isCancelled,
                   self.currentPlayerID == playerID,
                   self.currentArtworkURL == artworkURL,
                   let image
             else { return }
             self.currentArtwork = MPMediaItemArtwork(boundsSize: image.size) { _ in image }
-            if let player = ActivePlaybackCoordinator.shared.currentActivePlayer(),
-               ObjectIdentifier(player) == playerID {
-                self.update(for: player)
-            }
+            self.publishNowPlayingMetadata(for: player, force: true)
         }
+    }
+
+    private func resetDetailedMetadataCache() {
+        currentArtworkURL = nil
+        currentArtwork = nil
+        artworkTask?.cancel()
+        artworkTask = nil
+        lastMetadataFingerprint = nil
     }
 
     private func configureRemoteCommandsIfNeeded() {
@@ -333,6 +390,8 @@ final class PlayerStateViewModel: NSObject, ObservableObject {
     private var surfaceMigrationTask: Task<Void, Never>?
     private var isSurfaceMigrating = false
     private var currentPlaybackSurfaceReadyGeneration: Int?
+    private var isNativePictureInPictureActive = false
+    private var shouldPausePlaybackAfterPictureInPictureStops = false
     private var pictureInPictureStartRetryTask: Task<Void, Never>?
     private var pictureInPictureInlineRecoveryTask: Task<Void, Never>?
     private var pictureInPictureStartRetryGeneration = 0
@@ -404,6 +463,7 @@ final class PlayerStateViewModel: NSObject, ObservableObject {
         title: String,
         referer: String,
         durationHint: TimeInterval? = nil,
+        isLiveStream: Bool = false,
         resumeTime: TimeInterval = 0,
         startupResumePolicy: PlayerStartupResumePolicy = .deferred,
         dynamicRange: BiliVideoDynamicRange = .sdr,
@@ -428,6 +488,7 @@ final class PlayerStateViewModel: NSObject, ObservableObject {
             httpHeaders: httpHeaders ?? BiliHLSManifestBuilder.httpHeaders(referer: referer),
             title: title,
             durationHint: durationHint,
+            isLiveStream: isLiveStream,
             resumeTime: resumeTime,
             dynamicRange: dynamicRange,
             cdnPreference: cdnPreference
@@ -452,7 +513,7 @@ final class PlayerStateViewModel: NSObject, ObservableObject {
         isTerminated = true
         let nowPlayingPlayerID = ObjectIdentifier(self)
         Task { @MainActor in
-            PlayerNowPlayingSession.shared.clearIfCurrentPlayerID(nowPlayingPlayerID)
+            PlayerRemoteControlSession.shared.clearIfCurrentPlayerID(nowPlayingPlayerID)
         }
         engineCallbackGeneration &+= 1
         mediaPreparationTask?.cancel()
@@ -521,6 +582,10 @@ final class PlayerStateViewModel: NSObject, ObservableObject {
 
     var displayDuration: TimeInterval? {
         duration ?? durationHint
+    }
+
+    fileprivate var isNowPlayingLiveStream: Bool {
+        streamSource.isLiveStream
     }
 
     fileprivate var nowPlayingPlaybackState: MPNowPlayingPlaybackState {
@@ -718,8 +783,10 @@ final class PlayerStateViewModel: NSObject, ObservableObject {
         surfaceView = view
         view.setNativePlaybackControllerEnabled(usesNativePlaybackControls)
         if usesNativePlaybackControls {
-            nativePlaybackController = view.nativePlayerViewController
-            engine.attachNativePlaybackController(view.nativePlayerViewController)
+            let controller = view.nativePlayerViewController
+            nativePlaybackController = controller
+            controller.delegate = self
+            engine.attachNativePlaybackController(controller)
             applyPictureInPicturePreferenceToNativePlaybackController()
         } else {
             if let nativePlaybackController {
@@ -747,7 +814,12 @@ final class PlayerStateViewModel: NSObject, ObservableObject {
 
     func attachNativePlaybackController(_ controller: AVPlayerViewController) {
         guard !isTerminated else { return }
+        if nativePlaybackController !== controller {
+            nativePlaybackController?.delegate = nil
+            isNativePictureInPictureActive = false
+        }
         nativePlaybackController = controller
+        controller.delegate = self
         engine.attachNativePlaybackController(controller)
         applyPictureInPicturePreferenceToNativePlaybackController()
         configurePictureInPictureIfNeeded()
@@ -761,7 +833,10 @@ final class PlayerStateViewModel: NSObject, ObservableObject {
             engine.detachNativePlaybackController(controller)
         }
         if nativePlaybackController === controller {
+            controller.delegate = nil
             nativePlaybackController = nil
+            isNativePictureInPictureActive = false
+            syncPictureInPictureState()
         }
     }
 
@@ -875,7 +950,9 @@ final class PlayerStateViewModel: NSObject, ObservableObject {
         }
         view.setNativePlaybackControllerEnabled(false)
         if nativePlaybackController === view.nativePlayerViewController {
+            nativePlaybackController?.delegate = nil
             nativePlaybackController = nil
+            isNativePictureInPictureActive = false
         }
         surfaceView = nil
     }
@@ -1496,7 +1573,7 @@ final class PlayerStateViewModel: NSObject, ObservableObject {
         wantsAutoplay = true
         errorMessage = nil
         lastFailureReason = nil
-        syncNowPlayingInfo()
+        syncRemotePlaybackControls()
         guard streamSource.videoURL != nil else {
             recordPlaybackFailure(
                 message: PlayerEngineError.missingVideoURL.localizedDescription,
@@ -1593,7 +1670,7 @@ final class PlayerStateViewModel: NSObject, ObservableObject {
         isBuffering = false
         playbackPhase = .paused
         invalidatePictureInPicturePlaybackState()
-        syncNowPlayingInfo()
+        syncRemotePlaybackControls()
         rescheduleTimeObserverIfNeeded()
     }
 
@@ -1615,7 +1692,7 @@ final class PlayerStateViewModel: NSObject, ObservableObject {
         isBuffering = false
         playbackPhase = .paused
         invalidatePictureInPicturePlaybackState()
-        syncNowPlayingInfo()
+        syncRemotePlaybackControls()
         rescheduleTimeObserverIfNeeded()
     }
 
@@ -1758,7 +1835,7 @@ final class PlayerStateViewModel: NSObject, ObservableObject {
         currentTime = 0
         playbackClock.reset()
         playbackPhase = .idle
-        PlayerNowPlayingSession.shared.clearIfCurrent(self)
+        PlayerRemoteControlSession.shared.clearIfCurrent(self)
         recoveryAttemptCount = 0
         lastBufferingPressureNotificationCount = 0
         forcedPlaybackTimeGuard = nil
@@ -2169,7 +2246,7 @@ final class PlayerStateViewModel: NSObject, ObservableObject {
         speedBoostRecoveryTask = nil
         playbackRate = rate
         engine.setPlaybackRate(rate.rawValue)
-        syncNowPlayingInfo()
+        syncRemotePlaybackControls()
         rescheduleTimeObserverIfNeeded()
         invalidatePictureInPicturePlaybackState()
     }
@@ -2348,6 +2425,53 @@ final class PlayerStateViewModel: NSObject, ObservableObject {
         }
         engine.stopPictureInPictureIfNeeded()
         syncPictureInPictureState()
+    }
+
+    private var isAppInBackground: Bool {
+        UIApplication.shared.applicationState == .background
+    }
+
+    private func handlePictureInPictureWillStop() {
+        shouldPausePlaybackAfterPictureInPictureStops = isAppInBackground
+        guard shouldPausePlaybackAfterPictureInPictureStops else { return }
+
+        // A user dismissed PiP while the app is still backgrounded. Do not let the
+        // normal inline-recovery path turn that explicit dismissal into audio-only playback.
+        pictureInPictureInlineRecoveryTask?.cancel()
+        pictureInPictureInlineRecoveryTask = nil
+        cancelTransientSystemOverlayPlaybackPreservation()
+        pause()
+    }
+
+    private func handlePictureInPictureDidStop(isNativeController: Bool) {
+        if isNativeController {
+            isNativePictureInPictureActive = false
+        }
+
+        let shouldPause = shouldPausePlaybackAfterPictureInPictureStops || isAppInBackground
+        shouldPausePlaybackAfterPictureInPictureStops = false
+        syncPictureInPictureState()
+
+        guard !shouldPause else {
+            pictureInPictureInlineRecoveryTask?.cancel()
+            pictureInPictureInlineRecoveryTask = nil
+            cancelTransientSystemOverlayPlaybackPreservation()
+            pause()
+            return
+        }
+        schedulePictureInPictureInlineRecovery()
+    }
+
+    private func restoreUserInterfaceAfterPictureInPictureStopIfNeeded() async -> Bool {
+        if shouldPausePlaybackAfterPictureInPictureStops || isAppInBackground {
+            shouldPausePlaybackAfterPictureInPictureStops = true
+            pictureInPictureInlineRecoveryTask?.cancel()
+            pictureInPictureInlineRecoveryTask = nil
+            cancelTransientSystemOverlayPlaybackPreservation()
+            pause()
+            return false
+        }
+        return await restoreUserInterfaceForPictureInPictureStop?() ?? true
     }
 
     func restoreInlinePlaybackFromPictureInPictureIfNeeded() async -> Bool {
@@ -3217,10 +3341,10 @@ final class PlayerStateViewModel: NSObject, ObservableObject {
         if force || (currentTime <= 0 && normalizedTime > 0) || abs(currentTime - normalizedTime) >= 0.2 {
             currentTime = normalizedTime
             playbackClock.update(time: normalizedTime, duration: displayDuration, force: force)
-            syncNowPlayingInfo()
+            syncRemotePlaybackControls(forceNowPlayingTimeUpdate: force)
         } else if force {
             playbackClock.update(time: normalizedTime, duration: displayDuration, force: true)
-            syncNowPlayingInfo()
+            syncRemotePlaybackControls(forceNowPlayingTimeUpdate: true)
         }
         if force {
             installForcedPlaybackTimeGuard(for: normalizedTime)
@@ -3444,7 +3568,7 @@ final class PlayerStateViewModel: NSObject, ObservableObject {
         }
         duration = newDuration
         playbackClock.update(time: currentTime, duration: displayDuration, force: true)
-        syncNowPlayingInfo()
+        syncRemotePlaybackControls()
     }
 
     private func recordPlaybackFailure(message: String, reason: HLSBridgeFailureReason?) {
@@ -3452,8 +3576,11 @@ final class PlayerStateViewModel: NSObject, ObservableObject {
         lastFailureReason = reason
     }
 
-    private func syncNowPlayingInfo() {
-        PlayerNowPlayingSession.shared.update(for: self)
+    private func syncRemotePlaybackControls(forceNowPlayingTimeUpdate: Bool = false) {
+        PlayerRemoteControlSession.shared.activate(
+            for: self,
+            forceNowPlayingTimeUpdate: forceNowPlayingTimeUpdate
+        )
     }
 
     private func handleEnginePlaybackState(_ state: PlayerEnginePlaybackState) {
@@ -3606,7 +3733,7 @@ final class PlayerStateViewModel: NSObject, ObservableObject {
             onPlaybackFailure?(errorMessage)
             wantsAutoplay = false
         }
-        syncNowPlayingInfo()
+        syncRemotePlaybackControls()
         rescheduleTimeObserverIfNeeded()
     }
 
@@ -3640,7 +3767,7 @@ final class PlayerStateViewModel: NSObject, ObservableObject {
                 playbackPhase = .paused
             }
             invalidatePictureInPicturePlaybackState()
-            syncNowPlayingInfo()
+            syncRemotePlaybackControls()
         }
     }
 
@@ -4351,7 +4478,8 @@ final class PlayerStateViewModel: NSObject, ObservableObject {
     }
 
     private func syncPictureInPictureState() {
-        isPictureInPictureActive = pictureInPictureController?.isPictureInPictureActive == true
+        isPictureInPictureActive = isNativePictureInPictureActive
+            || pictureInPictureController?.isPictureInPictureActive == true
             || engine.isPictureInPictureActive
     }
 
@@ -4463,11 +4591,17 @@ extension PlayerStateViewModel: AVPictureInPictureControllerDelegate {
         }
     }
 
+    nonisolated func pictureInPictureControllerWillStopPictureInPicture(_ pictureInPictureController: AVPictureInPictureController) {
+        Task { @MainActor [weak self] in
+            guard let self, !self.isTerminated else { return }
+            self.handlePictureInPictureWillStop()
+        }
+    }
+
     nonisolated func pictureInPictureControllerDidStopPictureInPicture(_ pictureInPictureController: AVPictureInPictureController) {
         Task { @MainActor [weak self] in
             guard let self, !self.isTerminated else { return }
-            self.isPictureInPictureActive = false
-            self.schedulePictureInPictureInlineRecovery()
+            self.handlePictureInPictureDidStop(isNativeController: false)
         }
     }
 
@@ -4480,8 +4614,7 @@ extension PlayerStateViewModel: AVPictureInPictureControllerDelegate {
                 completionHandler(false)
                 return
             }
-            self.isPictureInPictureActive = false
-            let didRestore = await self.restoreUserInterfaceForPictureInPictureStop?() ?? true
+            let didRestore = await self.restoreUserInterfaceAfterPictureInPictureStopIfNeeded()
             completionHandler(didRestore)
         }
     }
@@ -4490,6 +4623,82 @@ extension PlayerStateViewModel: AVPictureInPictureControllerDelegate {
         Task { @MainActor [weak self] in
             guard let self, !self.isTerminated else { return }
             self.isPictureInPictureActive = false
+            self.errorMessage = "画中画启动失败：\(error.localizedDescription)"
+        }
+    }
+}
+
+extension PlayerStateViewModel: AVPlayerViewControllerDelegate {
+    nonisolated func playerViewControllerWillStartPictureInPicture(_ playerViewController: AVPlayerViewController) {
+        Task { @MainActor [weak self] in
+            guard let self,
+                  !self.isTerminated,
+                  self.nativePlaybackController === playerViewController
+            else { return }
+            self.isNativePictureInPictureActive = true
+            self.syncPictureInPictureState()
+        }
+    }
+
+    nonisolated func playerViewControllerDidStartPictureInPicture(_ playerViewController: AVPlayerViewController) {
+        Task { @MainActor [weak self] in
+            guard let self,
+                  !self.isTerminated,
+                  self.nativePlaybackController === playerViewController
+            else { return }
+            self.isNativePictureInPictureActive = true
+            self.syncPictureInPictureState()
+        }
+    }
+
+    nonisolated func playerViewControllerWillStopPictureInPicture(_ playerViewController: AVPlayerViewController) {
+        Task { @MainActor [weak self] in
+            guard let self,
+                  !self.isTerminated,
+                  self.nativePlaybackController === playerViewController
+            else { return }
+            self.handlePictureInPictureWillStop()
+        }
+    }
+
+    nonisolated func playerViewControllerDidStopPictureInPicture(_ playerViewController: AVPlayerViewController) {
+        Task { @MainActor [weak self] in
+            guard let self,
+                  !self.isTerminated,
+                  self.nativePlaybackController === playerViewController
+            else { return }
+            self.handlePictureInPictureDidStop(isNativeController: true)
+        }
+    }
+
+    nonisolated func playerViewController(
+        _ playerViewController: AVPlayerViewController,
+        restoreUserInterfaceForPictureInPictureStopWithCompletionHandler completionHandler: @escaping (Bool) -> Void
+    ) {
+        Task { @MainActor [weak self] in
+            guard let self,
+                  !self.isTerminated,
+                  self.nativePlaybackController === playerViewController
+            else {
+                completionHandler(false)
+                return
+            }
+            let didRestore = await self.restoreUserInterfaceAfterPictureInPictureStopIfNeeded()
+            completionHandler(didRestore)
+        }
+    }
+
+    nonisolated func playerViewController(
+        _ playerViewController: AVPlayerViewController,
+        failedToStartPictureInPictureWithError error: Error
+    ) {
+        Task { @MainActor [weak self] in
+            guard let self,
+                  !self.isTerminated,
+                  self.nativePlaybackController === playerViewController
+            else { return }
+            self.isNativePictureInPictureActive = false
+            self.syncPictureInPictureState()
             self.errorMessage = "画中画启动失败：\(error.localizedDescription)"
         }
     }

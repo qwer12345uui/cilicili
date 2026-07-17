@@ -1,20 +1,32 @@
 import SwiftUI
 
+private enum LivePullRefreshCoordinateSpace {
+    static let name = "live-feed-pull-refresh"
+}
+
 struct LiveFeedView: View {
     @ObservedObject var viewModel: LiveViewModel
+    let pullRefreshTriggerDistance: CGFloat
+    @State private var pullRefreshDistance: CGFloat = 0
+    @State private var pullRefreshActions = HomeFeedRefreshActions()
 
     var body: some View {
         ScrollView {
+            HomePullRefreshOffsetReader(
+                coordinateSpaceName: LivePullRefreshCoordinateSpace.name
+            )
+
             LiveFeedContent(viewModel: viewModel)
             .padding(.horizontal, 12)
             .padding(.top, 18)
             .padding(.bottom, 22)
         }
+        .coordinateSpace(name: LivePullRefreshCoordinateSpace.name)
         .nativeTopScrollEdgeEffect()
         .scrollBounceBehavior(.always, axes: .vertical)
         .background(Color(.systemBackground))
-        .refreshable {
-            await viewModel.refresh()
+        .onPreferenceChange(HomePullRefreshDistancePreferenceKey.self) { pullDistance in
+            handlePullRefreshDistanceChange(pullDistance)
         }
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
@@ -24,8 +36,27 @@ struct LiveFeedView: View {
         .task {
             await viewModel.loadInitial()
         }
+        .overlay(alignment: .top) {
+            HomeFeedPullRefreshOverlay(
+                pullDistance: pullRefreshDistance,
+                triggerDistance: pullRefreshTriggerDistance,
+                isRefreshing: viewModel.isRefreshing
+            )
+        }
         .overlay {
             LiveFeedErrorOverlay(viewModel: viewModel)
+        }
+    }
+
+    private func handlePullRefreshDistanceChange(_ pullDistance: CGFloat) {
+        pullRefreshDistance = pullDistance
+        pullRefreshActions.handleConfiguredPullRefresh(
+            pullDistance: pullDistance,
+            triggerDistance: pullRefreshTriggerDistance,
+            isRefreshing: viewModel.isRefreshing
+        ) {
+            await viewModel.refresh()
+            return viewModel.state == .loaded
         }
     }
 }

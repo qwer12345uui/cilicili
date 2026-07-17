@@ -17,6 +17,8 @@ final class PlayerSurfaceController {
     private var activePlayerID: ObjectIdentifier?
     private var latestLayout: PlayerSurfaceLayout?
     private var appliedLayout: PlayerSurfaceLayout?
+    private var rotationChromePrewarmCancellable: AnyCancellable?
+    private var rotationChromePrewarmedPlayerID: ObjectIdentifier?
 
     /// Surface 的播放器替换会回传给详情页，用来维持仅与布局有关的状态订阅。
     var onActivePlayerChange: ((PlayerStateViewModel?) -> Void)?
@@ -43,6 +45,8 @@ final class PlayerSurfaceController {
     }
 
     func releaseHost() -> (any PlayerSurfaceHosting)? {
+        cancelRotationChromePrewarm()
+        rotationChromePrewarmedPlayerID = nil
         unbindPlaybackSession()
         activePlayerID = nil
         latestLayout = nil
@@ -121,6 +125,11 @@ final class PlayerSurfaceController {
         host?.setBareSurfaceTransitionActive(active, retainsChromeTree: retainsChromeTree)
     }
 
+    func cancelRotationChromePrewarm() {
+        rotationChromePrewarmCancellable = nil
+        host?.cancelRotationChromePrewarm()
+    }
+
     func refreshLayoutImmediately() {
         host?.refreshLayoutImmediately()
     }
@@ -146,6 +155,7 @@ final class PlayerSurfaceController {
         if let host {
             host.setPlayerViewModel(playerViewModel)
             updateLayout(layout)
+            scheduleRotationChromePrewarm(for: playerViewModel)
             return
         }
 
@@ -159,6 +169,7 @@ final class PlayerSurfaceController {
         self.host = host
         appliedLayout = nil
         updateLayout(layout)
+        scheduleRotationChromePrewarm(for: playerViewModel)
         if isNewPlayer {
             playerViewModel.play()
         }
@@ -171,5 +182,25 @@ final class PlayerSurfaceController {
         activePlayerID = nextPlayerID
         onActivePlayerChange?(playerViewModel)
         return true
+    }
+
+    private func scheduleRotationChromePrewarm(for playerViewModel: PlayerStateViewModel) {
+        let playerID = ObjectIdentifier(playerViewModel)
+        guard rotationChromePrewarmedPlayerID != playerID else { return }
+        rotationChromePrewarmedPlayerID = playerID
+        rotationChromePrewarmCancellable = playerViewModel.$hasPresentedPlayback
+            .removeDuplicates()
+            .filter { $0 }
+            .prefix(1)
+            .receive(on: RunLoop.main)
+            .sink { [weak self, weak playerViewModel] _ in
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
+                    guard let self,
+                          let playerViewModel,
+                          self.activePlayerID == ObjectIdentifier(playerViewModel)
+                    else { return }
+                    self.host?.prewarmRotationChrome()
+                }
+            }
     }
 }

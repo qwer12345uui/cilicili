@@ -25,6 +25,7 @@ struct PlayerStreamSource: Equatable, Sendable {
     let httpHeaders: [String: String]
     let title: String
     let durationHint: TimeInterval?
+    let isLiveStream: Bool
     let resumeTime: TimeInterval
     let dynamicRange: BiliVideoDynamicRange
     let cdnPreference: PlaybackCDNPreference
@@ -48,6 +49,7 @@ struct PlayerStreamSource: Equatable, Sendable {
             httpHeaders: httpHeaders,
             title: title,
             durationHint: durationHint,
+            isLiveStream: isLiveStream,
             resumeTime: max(resumeTime, 0),
             dynamicRange: dynamicRange,
             cdnPreference: cdnPreference

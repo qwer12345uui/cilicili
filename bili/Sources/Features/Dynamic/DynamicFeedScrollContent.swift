@@ -1,13 +1,24 @@
 import SwiftUI
 
+private enum DynamicPullRefreshCoordinateSpace {
+    static let name = "dynamic-feed-pull-refresh"
+}
+
 struct DynamicFeedScrollContent: View {
     let api: BiliAPIClient
     @ObservedObject var viewModel: DynamicViewModel
     let isLoggedIn: Bool
     let contentWidth: CGFloat
+    let pullRefreshTriggerDistance: CGFloat
+    @State private var pullRefreshDistance: CGFloat = 0
+    @State private var pullRefreshActions = HomeFeedRefreshActions()
 
     var body: some View {
         ScrollView {
+            HomePullRefreshOffsetReader(
+                coordinateSpaceName: DynamicPullRefreshCoordinateSpace.name
+            )
+
             DynamicFeedBodyContent(
                 api: api,
                 viewModel: viewModel,
@@ -18,17 +29,39 @@ struct DynamicFeedScrollContent: View {
             .padding(.top, 28)
             .padding(.bottom, 18)
         }
+        .coordinateSpace(name: DynamicPullRefreshCoordinateSpace.name)
         .rootFloatingTabBarContentPadding()
         .nativeTopScrollEdgeEffect()
+        .scrollBounceBehavior(.always, axes: .vertical)
         .background(Color(.systemBackground))
-        .refreshable {
-            await viewModel.refresh()
+        .onPreferenceChange(HomePullRefreshDistancePreferenceKey.self) { pullDistance in
+            handlePullRefreshDistanceChange(pullDistance)
         }
         .task(id: isLoggedIn) {
             await viewModel.loadInitial()
         }
+        .overlay(alignment: .top) {
+            HomeFeedPullRefreshOverlay(
+                pullDistance: pullRefreshDistance,
+                triggerDistance: pullRefreshTriggerDistance,
+                isRefreshing: viewModel.isRefreshing
+            )
+        }
         .overlay {
             DynamicFeedErrorOverlay(viewModel: viewModel, isLoggedIn: isLoggedIn)
+        }
+    }
+
+    private func handlePullRefreshDistanceChange(_ pullDistance: CGFloat) {
+        pullRefreshDistance = pullDistance
+        guard isLoggedIn else { return }
+        pullRefreshActions.handleConfiguredPullRefresh(
+            pullDistance: pullDistance,
+            triggerDistance: pullRefreshTriggerDistance,
+            isRefreshing: viewModel.isRefreshing
+        ) {
+            await viewModel.refresh()
+            return viewModel.state == .loaded
         }
     }
 }

@@ -42,7 +42,6 @@ struct RootTabView: View {
                     }
                 }
             }
-            .id(rootTabConfigurationID)
             .tint(libraryStore.appTintColor)
             .tabViewBottomAccessory(isEnabled: showsSearchBottomAccessory) {
                 SearchTabBottomAccessory(store: searchBottomAccessoryStore)
@@ -130,10 +129,6 @@ struct RootTabView: View {
             return .onScrollDown
         }
         return runtimeSettings.minimizesTabBarOnScroll ? .onScrollDown : .never
-    }
-
-    private var rootTabConfigurationID: String {
-        visibleRootTabs.map(\.rawValue).joined(separator: "|")
     }
 
     private func cancelMediaWarmupsIfEnvironmentConstrained() {

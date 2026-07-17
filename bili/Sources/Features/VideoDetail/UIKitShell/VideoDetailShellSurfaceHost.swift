@@ -42,6 +42,9 @@ final class VideoDetailShellSurfaceHost: UIView {
     private let surfaceHostView: UIKitPlayerSurfaceHostView
     private let overlayHostingController: UIHostingController<PlayerOverlayHostRoot>
     private var cancellables = Set<AnyCancellable>()
+    private var rotationChromePrewarmGeneration = 0
+    private var isRotationChromePrewarming = false
+    private var rotationChromePrewarmOriginalLandscape: Bool?
 
     init(
         playerViewModel: PlayerStateViewModel,
@@ -134,6 +137,7 @@ final class VideoDetailShellSurfaceHost: UIView {
     /// 系统旋转期间退化成 bare surface，但始终保留弹幕层以避免重建和闪烁。
     /// 实验路径可保留不可见的控件树，避免旋转结束时集中重建 SwiftUI 叠层。
     func setBareSurfaceTransitionActive(_ active: Bool, retainsChromeTree: Bool = false) {
+        cancelRotationChromePrewarm()
         overlayState.setBareSurfaceTransitionActive(active)
         experimentState.setBareSurfaceTransitionActive(active)
         state.setBareSurfaceTransitionActive(active, retainsChromeTree: retainsChromeTree)
@@ -155,6 +159,58 @@ final class VideoDetailShellSurfaceHost: UIView {
         }
     }
 
+    func prewarmRotationChrome() {
+        guard !isRotationChromePrewarming,
+              !state.isBareSurfaceTransitionActive
+        else { return }
+        isRotationChromePrewarming = true
+        rotationChromePrewarmGeneration &+= 1
+        let generation = rotationChromePrewarmGeneration
+        let originalLandscape = state.isLandscape
+        rotationChromePrewarmOriginalLandscape = originalLandscape
+
+        UIView.performWithoutAnimation {
+            state.setBareSurfaceTransitionActive(true, retainsChromeTree: true)
+            state.isLandscape = !originalLandscape
+        }
+        DispatchQueue.main.async { [weak self] in
+            guard let self,
+                  self.isRotationChromePrewarming,
+                  self.rotationChromePrewarmGeneration == generation
+            else { return }
+            self.layoutRotationChromePrewarm()
+            UIView.performWithoutAnimation {
+                self.state.isLandscape = originalLandscape
+            }
+            DispatchQueue.main.async { [weak self] in
+                guard let self,
+                      self.isRotationChromePrewarming,
+                      self.rotationChromePrewarmGeneration == generation
+                else { return }
+                self.layoutRotationChromePrewarm()
+                UIView.performWithoutAnimation {
+                    self.state.setBareSurfaceTransitionActive(false, retainsChromeTree: true)
+                }
+                self.isRotationChromePrewarming = false
+                self.rotationChromePrewarmOriginalLandscape = nil
+            }
+        }
+    }
+
+    func cancelRotationChromePrewarm() {
+        guard isRotationChromePrewarming else { return }
+        rotationChromePrewarmGeneration &+= 1
+        isRotationChromePrewarming = false
+        let originalLandscape = rotationChromePrewarmOriginalLandscape
+        rotationChromePrewarmOriginalLandscape = nil
+        UIView.performWithoutAnimation {
+            if let originalLandscape {
+                state.isLandscape = originalLandscape
+            }
+            state.setBareSurfaceTransitionActive(false, retainsChromeTree: true)
+        }
+    }
+
     /// 清晰度切换等场景会重建 player 实例，需让 surface-only 根视图重建运行时状态。
     func setPlayerViewModel(_ playerViewModel: PlayerStateViewModel) {
         guard state.playerViewModel !== playerViewModel else { return }
@@ -169,6 +225,11 @@ final class VideoDetailShellSurfaceHost: UIView {
     func setVideoAspectRatio(_ aspectRatio: CGFloat) {
         guard aspectRatio > 0.1, abs(state.videoAspectRatio - aspectRatio) > 0.001 else { return }
         state.videoAspectRatio = aspectRatio
+    }
+
+    private func layoutRotationChromePrewarm() {
+        overlayHostingController.view.setNeedsLayout()
+        overlayHostingController.view.layoutIfNeeded()
     }
 
 }

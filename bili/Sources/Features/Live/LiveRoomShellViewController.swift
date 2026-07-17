@@ -98,7 +98,7 @@ final class LiveRoomShellViewController: UIViewController {
     }
 
     override var preferredStatusBarStyle: UIStatusBarStyle {
-        isLandscape ? .lightContent : .default
+        .lightContent
     }
 
     override var prefersHomeIndicatorAutoHidden: Bool {
@@ -107,7 +107,7 @@ final class LiveRoomShellViewController: UIViewController {
 
     override func viewDidLoad() {
         super.viewDidLoad()
-        view.backgroundColor = .systemGroupedBackground
+        view.backgroundColor = .black
         playerContainer.backgroundColor = .black
 
         contentHost.view.backgroundColor = .clear
@@ -140,6 +140,7 @@ final class LiveRoomShellViewController: UIViewController {
     override func viewDidAppear(_ animated: Bool) {
         super.viewDidAppear(animated)
         isViewActive = true
+        AppStatusBarCompatibility.applyPlaybackPresentation(isHidden: isLandscape)
         updateOrientationLock()
         restoreSystemBackGestures()
     }
@@ -147,7 +148,9 @@ final class LiveRoomShellViewController: UIViewController {
     override func viewWillDisappear(_ animated: Bool) {
         super.viewWillDisappear(animated)
         isViewActive = false
+        AppStatusBarCompatibility.restoreDefaultPresentation()
         cancelPendingRotationRecovery()
+        playerSurfaceController.cancelRotationChromePrewarm()
         rotationFrameProbe.cancel()
         AppOrientationLock.restorePortrait(in: view.window?.windowScene)
     }
@@ -156,6 +159,7 @@ final class LiveRoomShellViewController: UIViewController {
         super.viewDidDisappear(animated)
         isViewActive = false
         cancelPendingRotationRecovery()
+        playerSurfaceController.cancelRotationChromePrewarm()
         AppOrientationLock.restorePortrait(in: view.window?.windowScene)
     }
 
@@ -171,9 +175,11 @@ final class LiveRoomShellViewController: UIViewController {
     ) {
         super.viewWillTransition(to: size, with: coordinator)
         let toLandscape = size.width > size.height
+        AppStatusBarCompatibility.applyPlaybackPresentation(isHidden: toLandscape)
         rotationGeneration &+= 1
         let generation = rotationGeneration
         cancelPendingRotationRecovery()
+        playerSurfaceController.cancelRotationChromePrewarm()
         startRotationFrameProbe(
             toLandscape: toLandscape,
             coordinator: coordinator
@@ -189,6 +195,9 @@ final class LiveRoomShellViewController: UIViewController {
         contentHost.view.isUserInteractionEnabled = false
         isSystemRotationTransitioning = true
         setBareSurfaceTransitionActive(true)
+        // 提前切换隐藏的控件树，把首次布局成本移出系统结束帧。
+        playerSurfaceController.setLandscape(toLandscape)
+        rotationFrameProbe.mark("旋转开始：目标方向控件已预热")
 
         coordinator.animate(alongsideTransition: { [weak self] _ in
             guard let self else { return }
@@ -221,7 +230,7 @@ final class LiveRoomShellViewController: UIViewController {
     private func applyLayout(forBoundsSize size: CGSize? = nil) {
         let bounds = CGRect(origin: .zero, size: size ?? view.bounds.size)
         let landscape = bounds.width > bounds.height
-        view.backgroundColor = landscape ? .black : .systemGroupedBackground
+        view.backgroundColor = .black
         let playerHeight = PlaybackDetailShellLayout.standardPlayerHeight(for: bounds.width)
         let layout = PlaybackDetailShellLayout(
             bounds: bounds,

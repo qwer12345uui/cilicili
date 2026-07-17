@@ -142,6 +142,9 @@ final class LiveRoomSurfaceHost: UIView, PlayerSurfaceHosting {
     private let state: State
     private var videoGravity: AVLayerVideoGravity = .resizeAspect
     private let hostingController: UIHostingController<LiveRoomSurfaceRoot>
+    private var rotationChromePrewarmGeneration = 0
+    private var isRotationChromePrewarming = false
+    private var rotationChromePrewarmOriginalLandscape: Bool?
 
     init(
         playerViewModel: PlayerStateViewModel,
@@ -219,8 +222,61 @@ final class LiveRoomSurfaceHost: UIView, PlayerSurfaceHosting {
     }
 
     func setBareSurfaceTransitionActive(_ active: Bool, retainsChromeTree _: Bool) {
+        cancelRotationChromePrewarm()
         guard state.isBareSurfaceTransitionActive != active else { return }
         state.isBareSurfaceTransitionActive = active
+    }
+
+    func prewarmRotationChrome() {
+        guard !isRotationChromePrewarming,
+              !state.isBareSurfaceTransitionActive
+        else { return }
+        isRotationChromePrewarming = true
+        rotationChromePrewarmGeneration &+= 1
+        let generation = rotationChromePrewarmGeneration
+        let originalLandscape = state.usesLandscapeChrome
+        rotationChromePrewarmOriginalLandscape = originalLandscape
+
+        UIView.performWithoutAnimation {
+            state.isBareSurfaceTransitionActive = true
+            state.usesLandscapeChrome = !originalLandscape
+        }
+        DispatchQueue.main.async { [weak self] in
+            guard let self,
+                  self.isRotationChromePrewarming,
+                  self.rotationChromePrewarmGeneration == generation
+            else { return }
+            self.layoutRotationChromePrewarm()
+            UIView.performWithoutAnimation {
+                self.state.usesLandscapeChrome = originalLandscape
+            }
+            DispatchQueue.main.async { [weak self] in
+                guard let self,
+                      self.isRotationChromePrewarming,
+                      self.rotationChromePrewarmGeneration == generation
+                else { return }
+                self.layoutRotationChromePrewarm()
+                UIView.performWithoutAnimation {
+                    self.state.isBareSurfaceTransitionActive = false
+                }
+                self.isRotationChromePrewarming = false
+                self.rotationChromePrewarmOriginalLandscape = nil
+            }
+        }
+    }
+
+    func cancelRotationChromePrewarm() {
+        guard isRotationChromePrewarming else { return }
+        rotationChromePrewarmGeneration &+= 1
+        isRotationChromePrewarming = false
+        let originalLandscape = rotationChromePrewarmOriginalLandscape
+        rotationChromePrewarmOriginalLandscape = nil
+        UIView.performWithoutAnimation {
+            if let originalLandscape {
+                state.usesLandscapeChrome = originalLandscape
+            }
+            state.isBareSurfaceTransitionActive = false
+        }
     }
 
     func refreshLayoutImmediately() {
@@ -231,6 +287,11 @@ final class LiveRoomSurfaceHost: UIView, PlayerSurfaceHosting {
             hostingController.view.layoutIfNeeded()
             state.playerViewModel.refreshSurfaceLayout()
         }
+    }
+
+    private func layoutRotationChromePrewarm() {
+        hostingController.view.setNeedsLayout()
+        hostingController.view.layoutIfNeeded()
     }
 }
 

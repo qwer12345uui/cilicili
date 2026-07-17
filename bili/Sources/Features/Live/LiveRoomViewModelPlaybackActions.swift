@@ -15,6 +15,7 @@ extension LiveRoomViewModel {
             audioStream: nil,
             title: title,
             referer: "https://live.bilibili.com/\(roomID)",
+            isLiveStream: true,
             metricsID: "live-\(roomID)-\(currentCandidateIndex)",
             engine: DefaultPlayerRenderingEngine.make()
         )

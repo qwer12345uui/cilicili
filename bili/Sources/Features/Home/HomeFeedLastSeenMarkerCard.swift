@@ -120,55 +120,47 @@ struct HomeFeedLastSeenMarkerCard: View {
         return HStack(alignment: .top, spacing: 12) {
             borderedSingleColumnCover(size: coverSize)
 
-            VStack(alignment: .leading, spacing: 6) {
+            VStack(alignment: .leading, spacing: 8) {
                 StableVideoTitleText("上次看到这里", style: .compactCard, lineLimit: 2)
                     .frame(minHeight: 38, alignment: .topLeading)
 
                 Spacer(minLength: 0)
 
-                HStack(spacing: 5) {
-                    markerAvatar(size: 14, iconSize: 8)
+                HStack(spacing: 4) {
+                    Image(systemName: "arrow.clockwise")
+                        .font(.system(size: 11, weight: .semibold))
 
                     Text("点击刷新推荐")
                         .font(.caption2)
-                        .foregroundStyle(.secondary)
                         .lineLimit(1)
                 }
+                .foregroundStyle(.secondary)
             }
-            .padding(.vertical, 10)
-            .padding(.trailing, 10)
             .frame(maxWidth: .infinity, minHeight: max(coverSize.height - 20, 1), alignment: .topLeading)
         }
-        .frame(maxWidth: .infinity, minHeight: coverSize.height, alignment: .topLeading)
-        .videoCardBorderedSurface(cornerRadius: 18)
+        .padding(10)
+        .frame(maxWidth: .infinity, alignment: .topLeading)
+        .frame(height: max(coverSize.height + 20, 108), alignment: .topLeading)
+        .compactVideoResultSurface(cornerRadius: 18)
         .contentShape(Rectangle())
     }
 
     private func borderedSingleColumnCover(size: CGSize) -> some View {
-        let shape = RoundedRectangle(cornerRadius: 18, style: .continuous)
+        let shape = RoundedRectangle(cornerRadius: 12, style: .continuous)
 
-        return Color.clear
+        return Color(.tertiarySystemFill)
             .frame(width: size.width, height: size.height)
             .overlay {
-                ZStack {
-                    shape
-                        .fill(Color(.secondarySystemGroupedBackground).opacity(0.92))
+                VStack(spacing: 6) {
+                    Image(systemName: "arrow.clockwise")
+                        .font(.system(size: 20, weight: .semibold))
 
-                    shape
-                        .fill(Color(.tertiarySystemFill).opacity(0.55))
-
-                    VStack(spacing: 6) {
-                        Image(systemName: "arrow.clockwise")
-                            .font(.system(size: 20, weight: .semibold))
-
-                        Text("刷新")
-                            .font(.caption.weight(.semibold))
-                    }
-                    .foregroundStyle(appTintColor)
+                    Text("刷新")
+                        .font(.caption.weight(.semibold))
                 }
-                .biliPlayerClearGlass(interactive: true, in: shape)
+                .foregroundStyle(appTintColor)
             }
-            .videoCardBorderedCover(cornerRadius: 18)
+            .clipShape(shape)
     }
 
     private func cover(cornerRadius: CGFloat, aspectRatio: CGFloat = 16.0 / 9.0) -> some View {

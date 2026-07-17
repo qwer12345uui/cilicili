@@ -28,11 +28,11 @@ struct VideoDetailView: View {
     var body: some View {
         PlaybackDetailPageHost(
             hidesSystemChrome: .constant(false),
-            background: VideoDetailTheme.background,
+            background: .black,
             hidesRootTabBar: hidesRootTabBar,
             navigationBarVisibility: .hidden,
             hidesBackButton: true,
-            statusBarStyle: .default,
+            statusBarStyle: .lightContent,
             performanceContext: .video(seedVideo),
             lifecycleActions: pageLifecycleActions
         ) {

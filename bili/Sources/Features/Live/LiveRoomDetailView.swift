@@ -9,10 +9,10 @@ struct LiveRoomDetailView: View {
     var body: some View {
         PlaybackDetailPageHost(
             hidesSystemChrome: .constant(false),
-            background: VideoDetailTheme.background,
+            background: .black,
             navigationBarVisibility: .hidden,
             hidesBackButton: true,
-            statusBarStyle: .default,
+            statusBarStyle: .lightContent,
             performanceContext: .live(seedRoom),
             lifecycleActions: pageLifecycleActions
         ) {

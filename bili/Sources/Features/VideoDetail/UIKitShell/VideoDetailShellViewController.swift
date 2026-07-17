@@ -185,7 +185,7 @@ final class VideoDetailShellViewController: UIViewController {
     }
 
     override var preferredStatusBarStyle: UIStatusBarStyle {
-        isLandscape || isPortraitFullscreen ? .lightContent : .default
+        .lightContent
     }
 
     override var prefersHomeIndicatorAutoHidden: Bool {
@@ -196,7 +196,7 @@ final class VideoDetailShellViewController: UIViewController {
 
     override func viewDidLoad() {
         super.viewDidLoad()
-        view.backgroundColor = .systemGroupedBackground
+        view.backgroundColor = .black
 
         playerContainer.backgroundColor = .black
         updateCollapsedDimmingColor()
@@ -216,6 +216,9 @@ final class VideoDetailShellViewController: UIViewController {
     override func viewDidAppear(_ animated: Bool) {
         super.viewDidAppear(animated)
         isViewActive = true
+        AppStatusBarCompatibility.applyPlaybackPresentation(
+            isHidden: isLandscape || isPortraitFullscreen
+        )
         // window 此时已挂载，按视频类型设置朝向锁。
         updateOrientationLock()
         restoreSystemBackGestures()
@@ -238,7 +241,9 @@ final class VideoDetailShellViewController: UIViewController {
     override func viewWillDisappear(_ animated: Bool) {
         super.viewWillDisappear(animated)
         isViewActive = false
+        AppStatusBarCompatibility.restoreDefaultPresentation()
         cancelPendingRotationCompletionRecovery()
+        playerSurfaceController.cancelRotationChromePrewarm()
         rotationFrameProbe.cancel()
         // 离开页面恢复竖屏锁定，避免横屏解锁残留影响其它页面（首页/动态/直播/我的）。
         AppOrientationLock.restorePortrait(in: view.window?.windowScene)
@@ -248,6 +253,7 @@ final class VideoDetailShellViewController: UIViewController {
         super.viewDidDisappear(animated)
         isViewActive = false
         cancelPendingRotationCompletionRecovery()
+        playerSurfaceController.cancelRotationChromePrewarm()
         // 双保险：tab 切换等场景 viewWillDisappear 可能不触发，这里再兜一次。
         AppOrientationLock.restorePortrait(in: view.window?.windowScene)
     }
@@ -266,9 +272,13 @@ final class VideoDetailShellViewController: UIViewController {
     ) {
         super.viewWillTransition(to: size, with: coordinator)
         let toLandscape = size.width > size.height
+        AppStatusBarCompatibility.applyPlaybackPresentation(
+            isHidden: toLandscape || isPortraitFullscreen
+        )
         rotationCompletionRecoveryGeneration &+= 1
         let completionRecoveryGeneration = rotationCompletionRecoveryGeneration
         cancelPendingRotationCompletionRecovery()
+        playerSurfaceController.cancelRotationChromePrewarm()
         let performanceContext = PlaybackDetailPerformanceContext.video(viewModel.detail)
         PlaybackDetailPerformanceMonitor.shared.mark(
             .fullscreenTransitionStarted,
@@ -285,6 +295,9 @@ final class VideoDetailShellViewController: UIViewController {
         contentHost.view.isUserInteractionEnabled = !toLandscape
         isSystemRotationTransitioning = true
         setBareSurfaceTransitionActive(true)
+        // 目标方向的控件树在系统动画开始就准备好，避免首次旋转在结束帧冷启动。
+        setSurfaceLandscape(toLandscape || isPortraitFullscreen)
+        rotationFrameProbe.mark("旋转开始：目标方向控件已预热")
         // 转回竖屏时重置缩放高度为默认（最大），避免横屏前的缩放残留。
         if !toLandscape {
             currentPlayerHeight = nil
@@ -470,7 +483,7 @@ final class VideoDetailShellViewController: UIViewController {
         let landscape = bounds.width > bounds.height
 
         let usesFullscreenLayout = landscape || isPortraitFullscreen
-        view.backgroundColor = usesFullscreenLayout ? .black : .systemGroupedBackground
+        view.backgroundColor = .black
         let expanded = expandedPlayerHeight(bounds: bounds.size)
         let shellLayout = PlaybackDetailShellLayout(
             bounds: bounds,
@@ -579,6 +592,7 @@ final class VideoDetailShellViewController: UIViewController {
     private func setPortraitFullscreen(_ active: Bool) {
         guard isPortraitFullscreen != active else { return }
         isPortraitFullscreen = active
+        AppStatusBarCompatibility.applyPlaybackPresentation(isHidden: active)
         setSurfaceLandscape(active) // 复用全屏 chrome 样式（隐藏导航栏等）
         UIView.animate(
             withDuration: PlaybackDetailRotationTiming.portraitFullscreenDuration,

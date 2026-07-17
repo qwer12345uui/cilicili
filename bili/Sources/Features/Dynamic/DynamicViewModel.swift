@@ -14,6 +14,7 @@ final class DynamicViewModel: ObservableObject {
         }
     }
     @Published private(set) var isTopUploaderStripLoading = false
+    @Published private(set) var isRefreshing = false
     @Published var state: LoadingState = .idle
     @Published private(set) var itemsRevision = 0
     @Published private(set) var topUploaderStripRevision = 0
@@ -68,9 +69,15 @@ final class DynamicViewModel: ObservableObject {
     }
 
     func refresh() async {
-        guard lifecycleCoordinator.isLoggedIn else {
-            prepareLoggedOutState()
+        guard lifecycleCoordinator.isLoggedIn, !isRefreshing else {
+            if !lifecycleCoordinator.isLoggedIn {
+                prepareLoggedOutState()
+            }
             return
+        }
+        isRefreshing = true
+        defer {
+            isRefreshing = false
         }
         state = .loading
         refreshTopUploaderStrip()
