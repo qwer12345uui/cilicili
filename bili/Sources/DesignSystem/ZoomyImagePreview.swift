@@ -29,6 +29,20 @@ struct ZoomyImagePreviewItem: Identifiable, Equatable {
     var displayURL: URL? {
         viewerURL ?? fallbackURL ?? thumbnailURL
     }
+
+    var isAnimatedGIF: Bool {
+        mediaBadgeText?.caseInsensitiveCompare("GIF") == .orderedSame
+            || displayURL?.absoluteString.lowercased().contains(".gif") == true
+    }
+
+    var isLiveImage: Bool {
+        mediaBadgeText?.caseInsensitiveCompare("LIVE") == .orderedSame
+            || liveVideoURL != nil
+    }
+
+    var needsOriginalMedia: Bool {
+        isAnimatedGIF || isLiveImage
+    }
 }
 
 enum ZoomyImageContentMode {
@@ -120,7 +134,7 @@ struct ZoomyRemoteImage<Placeholder: View>: View {
     @State private var isViewerPresented = false
     @State private var isSourceContentHidden = false
     @State private var reportedImageIdentifier: ObjectIdentifier?
-    @State private var prewarmedViewerIdentity: String?
+    @State private var viewerLoadTask: Task<Void, Never>?
 
     init(
         url: URL?,
@@ -189,7 +203,7 @@ struct ZoomyRemoteImage<Placeholder: View>: View {
     var body: some View {
         Button {
             guard loader.image != nil || resolvedViewerItems.contains(where: { $0.displayURL != nil }) else { return }
-            prewarmViewerImage(delayNanoseconds: 0)
+            startViewerImageLoad()
             onViewerPresentationChange?(true)
             viewerGroup?.isPresented = true
             isSourceContentHidden = true
@@ -224,7 +238,13 @@ struct ZoomyRemoteImage<Placeholder: View>: View {
         .buttonStyle(.plain)
         .task(id: cacheIdentity) {
             registerWithViewerGroup()
-            await loader.load(url: url, fallbackURL: fallbackURL, scale: 1, targetPixelSize: targetPixelSize)
+            await loader.load(
+                url: url,
+                fallbackURL: fallbackURL,
+                scale: 1,
+                targetPixelSize: targetPixelSize,
+                displayCachePolicy: .transient
+            )
             reportLoadedImageIfNeeded()
         }
         .onAppear {
@@ -235,6 +255,8 @@ struct ZoomyRemoteImage<Placeholder: View>: View {
         }
         .onDisappear {
             loader.cancel()
+            viewerLoadTask?.cancel()
+            viewerLoadTask = nil
             unregisterFromViewerGroup()
             isSourceContentHidden = false
             viewerGroup?.isPresented = false
@@ -318,23 +340,20 @@ struct ZoomyRemoteImage<Placeholder: View>: View {
         reportedImageIdentifier = identifier
         viewerGroup?.setImage(image, for: resolvedViewerItemID)
         onImageLoaded?(image)
-        prewarmViewerImage(delayNanoseconds: 420_000_000)
     }
 
-    private func prewarmViewerImage(delayNanoseconds: UInt64) {
+    private func startViewerImageLoad() {
         guard let viewerURL = viewerURL ?? fallbackURL ?? url else { return }
-        let identity = "\(viewerURL.absoluteString)|\(viewerTargetPixelSize)"
-        guard prewarmedViewerIdentity != identity else { return }
-        prewarmedViewerIdentity = identity
-        Task(priority: .utility) {
-            if delayNanoseconds > 0 {
-                try? await Task.sleep(nanoseconds: delayNanoseconds)
-            }
-            guard !Task.isCancelled else { return }
-            await RemoteImageCache.shared.prefetch(
-                [RemoteImageSource(url: viewerURL)],
+        guard resolvedViewerItems.first(where: { $0.id == resolvedViewerItemID })?.needsOriginalMedia != true else {
+            return
+        }
+        viewerLoadTask?.cancel()
+        viewerLoadTask = Task(priority: .userInitiated) {
+            _ = await RemoteImageCache.shared.load(
+                url: viewerURL,
+                scale: 1,
                 targetPixelSize: viewerTargetPixelSize,
-                maximumConcurrentLoads: 1
+                priority: .visible
             )
         }
     }

@@ -21,9 +21,13 @@ struct AdaptiveVideoCoverImage: View {
                 .clipped()
         } else {
             GeometryReader { proxy in
-                remoteImage(fitting: proxy.size)
-                    .frame(width: proxy.size.width, height: proxy.size.height)
-                    .clipped()
+                if proxy.size.width > 1, proxy.size.height > 1 {
+                    remoteImage(fitting: proxy.size)
+                        .frame(width: proxy.size.width, height: proxy.size.height)
+                        .clipped()
+                } else {
+                    BiliMediaPlaceholder(style: .video, iconSize: 18)
+                }
             }
         }
     }

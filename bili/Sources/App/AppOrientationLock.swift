@@ -94,6 +94,7 @@ final class AppDelegate: NSObject, UIApplicationDelegate {
     }
 
     func applicationDidReceiveMemoryWarning(_ application: UIApplication) {
+        RemoteImageDisplayMemoryCache.shared.clear()
         Task {
             await RemoteImageCache.shared.clearMemoryCache(cancelInFlight: true)
             await PlayURLCache.shared.clearMemoryCache()

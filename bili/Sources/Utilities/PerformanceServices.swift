@@ -3366,6 +3366,29 @@ nonisolated enum RemoteImageCachePolicy: Hashable, Sendable {
     }
 }
 
+nonisolated enum RemoteImageLoadPriority: Sendable {
+    case visible
+    case prefetch
+
+    var taskPriority: TaskPriority {
+        switch self {
+        case .visible:
+            return .userInitiated
+        case .prefetch:
+            return .utility
+        }
+    }
+}
+
+nonisolated enum RemoteImageDisplayCachePolicy: Hashable, Sendable {
+    case retained
+    case transient
+
+    var retainsImage: Bool {
+        self == .retained
+    }
+}
+
 nonisolated enum RemoteImageQualityPreference: String, CaseIterable, Identifiable, Codable, Sendable {
     case automatic
     case dataSaver
@@ -3476,10 +3499,11 @@ enum RemoteImageLoadingPhase: Equatable {
 }
 
 @MainActor
-private final class RemoteImageDisplayMemoryCache {
+final class RemoteImageDisplayMemoryCache {
     static let shared = RemoteImageDisplayMemoryCache()
 
     private let cache = NSCache<NSString, UIImage>()
+    private var appliedBudget: (countLimit: Int, costLimit: Int)?
 
     private init() {
         cache.countLimit = 360
@@ -3487,11 +3511,36 @@ private final class RemoteImageDisplayMemoryCache {
     }
 
     func image(for identity: String) -> UIImage? {
-        cache.object(forKey: identity as NSString)
+        applyAdaptiveBudgetIfNeeded()
+        return cache.object(forKey: identity as NSString)
     }
 
     func store(_ image: UIImage, for identity: String) {
+        applyAdaptiveBudgetIfNeeded()
         cache.setObject(image, forKey: identity as NSString, cost: image.memoryCost)
+    }
+
+    func clear() {
+        cache.removeAllObjects()
+    }
+
+    private func applyAdaptiveBudgetIfNeeded() {
+        let environment = PlaybackEnvironment.current
+        let budget: (countLimit: Int, costLimit: Int)
+        if environment.isLowPowerModeEnabled || environment.isThermallyConstrained {
+            budget = (80, 12 * 1024 * 1024)
+        } else {
+            budget = (360, 64 * 1024 * 1024)
+        }
+        guard appliedBudget?.countLimit != budget.countLimit || appliedBudget?.costLimit != budget.costLimit else {
+            return
+        }
+        appliedBudget = budget
+        cache.countLimit = budget.countLimit
+        cache.totalCostLimit = budget.costLimit
+        if environment.isLowPowerModeEnabled || environment.isThermallyConstrained {
+            cache.removeAllObjects()
+        }
     }
 }
 
@@ -3501,6 +3550,7 @@ struct CachedRemoteImage<Content: View, Placeholder: View>: View {
     let scale: CGFloat
     let targetPixelSize: Int?
     let cachePolicy: RemoteImageCachePolicy
+    let displayCachePolicy: RemoteImageDisplayCachePolicy
     let animatesAppearance: Bool
     @ViewBuilder let content: (Image) -> Content
     @ViewBuilder let placeholder: (RemoteImageLoadingPhase, @escaping () -> Void) -> Placeholder
@@ -3515,6 +3565,7 @@ struct CachedRemoteImage<Content: View, Placeholder: View>: View {
         scale: CGFloat = 1,
         targetPixelSize: Int? = nil,
         cachePolicy: RemoteImageCachePolicy = .standard,
+        displayCachePolicy: RemoteImageDisplayCachePolicy = .retained,
         animatesAppearance: Bool = true,
         @ViewBuilder content: @escaping (Image) -> Content,
         @ViewBuilder placeholder: @escaping () -> Placeholder
@@ -3524,6 +3575,7 @@ struct CachedRemoteImage<Content: View, Placeholder: View>: View {
         self.scale = scale
         self.targetPixelSize = targetPixelSize
         self.cachePolicy = cachePolicy
+        self.displayCachePolicy = displayCachePolicy
         self.animatesAppearance = animatesAppearance
         self.content = content
         self.placeholder = { _, _ in placeholder() }
@@ -3535,6 +3587,7 @@ struct CachedRemoteImage<Content: View, Placeholder: View>: View {
         scale: CGFloat = 1,
         targetPixelSize: Int? = nil,
         cachePolicy: RemoteImageCachePolicy = .standard,
+        displayCachePolicy: RemoteImageDisplayCachePolicy = .retained,
         animatesAppearance: Bool = true,
         @ViewBuilder content: @escaping (Image) -> Content,
         @ViewBuilder phasePlaceholder: @escaping (RemoteImageLoadingPhase, @escaping () -> Void) -> Placeholder
@@ -3544,6 +3597,7 @@ struct CachedRemoteImage<Content: View, Placeholder: View>: View {
         self.scale = scale
         self.targetPixelSize = targetPixelSize
         self.cachePolicy = cachePolicy
+        self.displayCachePolicy = displayCachePolicy
         self.animatesAppearance = animatesAppearance
         self.content = content
         self.placeholder = phasePlaceholder
@@ -3569,6 +3623,7 @@ struct CachedRemoteImage<Content: View, Placeholder: View>: View {
                 scale: scale,
                 targetPixelSize: targetPixelSize,
                 cachePolicy: cachePolicy,
+                displayCachePolicy: displayCachePolicy,
                 clearsFailedMarkers: reloadToken > 0
             )
         }
@@ -3593,7 +3648,11 @@ struct CachedRemoteImage<Content: View, Placeholder: View>: View {
     }
 
     private var displayedImage: UIImage? {
-        loader.image ?? RemoteImageDisplayMemoryCache.shared.image(for: cacheIdentity)
+        if let image = loader.image {
+            return image
+        }
+        guard displayCachePolicy.retainsImage else { return nil }
+        return RemoteImageDisplayMemoryCache.shared.image(for: cacheIdentity)
     }
 
     private var displayedPhase: RemoteImageLoadingPhase {
@@ -3634,17 +3693,20 @@ struct CachedRemoteImage<Content: View, Placeholder: View>: View {
 struct AvatarRemoteImage<Placeholder: View>: View {
     let urlString: String?
     let pixelSize: Int
+    let displayCachePolicy: RemoteImageDisplayCachePolicy
     let animatesAppearance: Bool
     @ViewBuilder let placeholder: () -> Placeholder
 
     init(
         urlString: String?,
         pixelSize: Int,
+        displayCachePolicy: RemoteImageDisplayCachePolicy = .retained,
         animatesAppearance: Bool = false,
         @ViewBuilder placeholder: @escaping () -> Placeholder
     ) {
         self.urlString = urlString
         self.pixelSize = pixelSize
+        self.displayCachePolicy = displayCachePolicy
         self.animatesAppearance = animatesAppearance
         self.placeholder = placeholder
     }
@@ -3654,6 +3716,7 @@ struct AvatarRemoteImage<Placeholder: View>: View {
             url: thumbnailURL,
             fallbackURL: sourceURL,
             targetPixelSize: pixelSize,
+            displayCachePolicy: displayCachePolicy,
             animatesAppearance: animatesAppearance
         ) { image in
             image.resizable().scaledToFill()
@@ -3691,6 +3754,7 @@ final class CachedRemoteImageLoader: ObservableObject {
         scale: CGFloat,
         targetPixelSize: Int?,
         cachePolicy: RemoteImageCachePolicy = .standard,
+        displayCachePolicy: RemoteImageDisplayCachePolicy = .retained,
         clearsFailedMarkers: Bool = false
     ) async {
         let urls = uniqueRemoteImageURLs([url, fallbackURL])
@@ -3738,7 +3802,9 @@ final class CachedRemoteImageLoader: ObservableObject {
                     guard loadIdentity == identity else { return }
                     image = cachedImage
                     imageIdentity = identity
-                    RemoteImageDisplayMemoryCache.shared.store(cachedImage, for: identity)
+                    if displayCachePolicy.retainsImage {
+                        RemoteImageDisplayMemoryCache.shared.store(cachedImage, for: identity)
+                    }
                     phase = .loaded
                     task = nil
                     return
@@ -3746,7 +3812,7 @@ final class CachedRemoteImageLoader: ObservableObject {
             }
         }
 
-        task = Task(priority: .utility) { [weak self, identity, urls, cachePolicy] in
+        task = Task(priority: .userInitiated) { [weak self, identity, urls, cachePolicy, displayCachePolicy] in
             for candidateURL in urls {
                 guard !Task.isCancelled else { return }
                 let loadedImage = await RemoteImageCache.shared.load(
@@ -3761,7 +3827,9 @@ final class CachedRemoteImageLoader: ObservableObject {
                     guard self?.loadIdentity == identity else { return }
                     self?.image = loadedImage
                     self?.imageIdentity = identity
-                    RemoteImageDisplayMemoryCache.shared.store(loadedImage, for: identity)
+                    if displayCachePolicy.retainsImage {
+                        RemoteImageDisplayMemoryCache.shared.store(loadedImage, for: identity)
+                    }
                     self?.phase = .loaded
                     self?.task = nil
                 }
@@ -3956,7 +4024,8 @@ actor RemoteImageCache {
         url: URL,
         scale: CGFloat,
         targetPixelSize: Int? = nil,
-        cachePolicy: RemoteImageCachePolicy = .standard
+        cachePolicy: RemoteImageCachePolicy = .standard,
+        priority: RemoteImageLoadPriority = .visible
     ) async -> UIImage? {
         applyAdaptiveBudgetIfNeeded()
         let key = cacheKey(for: url, scale: scale, targetPixelSize: targetPixelSize)
@@ -3977,7 +4046,13 @@ actor RemoteImageCache {
             return image
         }
 
-        let task = makeLoadTask(url: url, scale: scale, targetPixelSize: targetPixelSize, cachePolicy: cachePolicy)
+        let task = makeLoadTask(
+            url: url,
+            scale: scale,
+            targetPixelSize: targetPixelSize,
+            cachePolicy: cachePolicy,
+            priority: priority
+        )
         registerInFlightTask(key)
         inFlight[key] = task
         let image = await task.value
@@ -4014,7 +4089,13 @@ actor RemoteImageCache {
                 continue
             }
 
-            let task = makeLoadTask(url: url, scale: scale, targetPixelSize: targetPixelSize, cachePolicy: .standard)
+            let task = makeLoadTask(
+                url: url,
+                scale: scale,
+                targetPixelSize: targetPixelSize,
+                cachePolicy: .standard,
+                priority: .prefetch
+            )
             registerInFlightTask(key)
             inFlight[key] = task
             let image = await task.value
@@ -4027,7 +4108,8 @@ actor RemoteImageCache {
         url: URL,
         scale: CGFloat,
         targetPixelSize: Int?,
-        cachePolicy: RemoteImageCachePolicy
+        cachePolicy: RemoteImageCachePolicy,
+        priority: RemoteImageLoadPriority
     ) -> Task<UIImage?, Never> {
         let session = session
         let effectiveTargetPixelSize = effectiveTargetPixelSize(targetPixelSize, scale: scale)
@@ -4035,7 +4117,7 @@ actor RemoteImageCache {
         if cachePolicy == .standard {
             recordDiskRequest(key: cacheKey(for: url, scale: scale, targetPixelSize: targetPixelSize), request: request)
         }
-        return Task(priority: .utility) { () -> UIImage? in
+        return Task(priority: priority.taskPriority) { () -> UIImage? in
             do {
                 let (data, response) = try await BiliNetworkRetry.data(
                     session: session,

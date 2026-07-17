@@ -1,11 +1,73 @@
 import SwiftUI
 
-enum DynamicImageCellDisplayMode {
+nonisolated enum DynamicImageCellDisplayMode {
     case single
     case longImage(cornerRadius: CGFloat)
     case square(cornerRadius: CGFloat)
     case hero(aspectRatio: CGFloat, cornerRadius: CGFloat)
     case fixedHeight(height: CGFloat, cornerRadius: CGFloat)
+}
+
+nonisolated struct DynamicImagePrefetchRequest: Hashable, Sendable {
+    let source: RemoteImageSource
+    let targetPixelSize: Int
+}
+
+nonisolated enum DynamicImageThumbnailSizing {
+    static func targetPixelSize(
+        usesExpandedImage: Bool,
+        usesCompactImages: Bool
+    ) -> Int {
+        switch (usesExpandedImage, usesCompactImages) {
+        case (true, false):
+            return 1280
+        case (true, true):
+            return 960
+        case (false, false):
+            return 420
+        case (false, true):
+            return 360
+        }
+    }
+
+    static func targetPixelSize(
+        for displayMode: DynamicImageCellDisplayMode,
+        usesCompactImages: Bool
+    ) -> Int {
+        let usesExpandedImage: Bool
+        switch displayMode {
+        case .single, .longImage, .hero:
+            usesExpandedImage = true
+        case .square, .fixedHeight:
+            usesExpandedImage = false
+        }
+        return targetPixelSize(
+            usesExpandedImage: usesExpandedImage,
+            usesCompactImages: usesCompactImages
+        )
+    }
+
+    static func prefetchRequest(
+        for image: DynamicImageItem,
+        imageCount: Int,
+        usesCompactImages: Bool
+    ) -> DynamicImagePrefetchRequest? {
+        guard let sourceURLString = image.normalizedURL,
+              let sourceURL = URL(string: sourceURLString)
+        else { return nil }
+
+        let targetPixelSize = targetPixelSize(
+            usesExpandedImage: imageCount == 1,
+            usesCompactImages: usesCompactImages
+        )
+        let thumbnailURL = URL(
+            string: sourceURLString.biliImageThumbnailURL(maxSide: targetPixelSize)
+        ) ?? sourceURL
+        return DynamicImagePrefetchRequest(
+            source: RemoteImageSource(url: thumbnailURL, fallbackURL: sourceURL),
+            targetPixelSize: targetPixelSize
+        )
+    }
 }
 
 extension DynamicImageCellDisplayMode {
@@ -62,12 +124,10 @@ extension DynamicImageCellDisplayMode {
     }
 
     func thumbnailMaxSide(usesCompactImages: Bool) -> Int {
-        switch self {
-        case .single, .longImage, .hero:
-            return usesCompactImages ? 960 : 1280
-        case .square, .fixedHeight:
-            return usesCompactImages ? 360 : 420
-        }
+        DynamicImageThumbnailSizing.targetPixelSize(
+            for: self,
+            usesCompactImages: usesCompactImages
+        )
     }
 }
 

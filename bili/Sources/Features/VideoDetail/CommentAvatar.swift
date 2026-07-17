@@ -6,7 +6,11 @@ struct CommentAvatar: View {
 
     var body: some View {
         let pixelSize = Int(size * 3)
-        AvatarRemoteImage(urlString: urlString, pixelSize: pixelSize) {
+        AvatarRemoteImage(
+            urlString: urlString,
+            pixelSize: pixelSize,
+            displayCachePolicy: .transient
+        ) {
             Image(systemName: "person.crop.circle.fill")
                 .font(.system(size: size * 0.9))
                 .foregroundStyle(.tertiary)

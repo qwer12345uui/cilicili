@@ -37,11 +37,23 @@ final class DynamicFeedResourcePrefetchCoordinator {
         let environment = PlaybackEnvironment.current
         let prefetchPlan = dynamicImagePrefetchPlan(for: items, environment: environment)
 
-        guard !prefetchPlan.avatarSources.isEmpty || !prefetchPlan.imageSources.isEmpty || !prefetchPlan.coverSources.isEmpty else { return }
+        guard !prefetchPlan.avatarSources.isEmpty
+            || !prefetchPlan.compactImageSources.isEmpty
+            || !prefetchPlan.expandedImageSources.isEmpty
+            || !prefetchPlan.coverSources.isEmpty
+        else { return }
         let avatarPrefetchSources = prefetchPlan.avatarSources
-        let imagePrefetchSources = prefetchPlan.imageSources
+        let compactImagePrefetchSources = prefetchPlan.compactImageSources
+        let expandedImagePrefetchSources = prefetchPlan.expandedImageSources
         let coverPrefetchSources = prefetchPlan.coverSources
-        let imageTargetPixelSize = environment.shouldPreferConservativePlayback ? 320 : 420
+        let compactImageTargetPixelSize = DynamicImageThumbnailSizing.targetPixelSize(
+            usesExpandedImage: false,
+            usesCompactImages: environment.shouldPreferConservativePlayback
+        )
+        let expandedImageTargetPixelSize = DynamicImageThumbnailSizing.targetPixelSize(
+            usesExpandedImage: true,
+            usesCompactImages: environment.shouldPreferConservativePlayback
+        )
         let coverTargetPixelSize = environment.shouldPreferConservativePlayback ? 360 : 480
         imagePrefetchTask = Task(priority: .utility) {
             if initialDelay > 0 {
@@ -53,9 +65,14 @@ final class DynamicFeedResourcePrefetchCoordinator {
                 targetPixelSize: 96,
                 maximumConcurrentLoads: 1
             )
-            async let images: Void = RemoteImageCache.shared.prefetch(
-                imagePrefetchSources,
-                targetPixelSize: imageTargetPixelSize,
+            async let expandedImages: Void = RemoteImageCache.shared.prefetch(
+                expandedImagePrefetchSources,
+                targetPixelSize: expandedImageTargetPixelSize,
+                maximumConcurrentLoads: 1
+            )
+            async let compactImages: Void = RemoteImageCache.shared.prefetch(
+                compactImagePrefetchSources,
+                targetPixelSize: compactImageTargetPixelSize,
                 maximumConcurrentLoads: environment.shouldPreferConservativePlayback ? 1 : 2
             )
             async let covers: Void = RemoteImageCache.shared.prefetch(
@@ -63,23 +80,30 @@ final class DynamicFeedResourcePrefetchCoordinator {
                 targetPixelSize: coverTargetPixelSize,
                 maximumConcurrentLoads: 1
             )
-            _ = await (avatars, images, covers)
+            _ = await (avatars, expandedImages, compactImages, covers)
         }
     }
 
     private func dynamicImagePrefetchPlan(
         for items: [DynamicFeedItem],
         environment: PlaybackEnvironment
-    ) -> (avatarSources: [RemoteImageSource], imageSources: [RemoteImageSource], coverSources: [RemoteImageSource]) {
+    ) -> (
+        avatarSources: [RemoteImageSource],
+        compactImageSources: [RemoteImageSource],
+        expandedImageSources: [RemoteImageSource],
+        coverSources: [RemoteImageSource]
+    ) {
         var avatarSources = [RemoteImageSource]()
-        var imageSources = [RemoteImageSource]()
+        var compactImageSources = [RemoteImageSource]()
+        var expandedImageSources = [RemoteImageSource]()
         var coverSources = [RemoteImageSource]()
         var seenURLs = Set<String>()
 
         let itemLimit = environment.shouldPreferConservativePlayback ? 5 : 8
-        let imageLimit = environment.shouldPreferConservativePlayback ? 2 : 3
-        let imageTargetPixelSize = environment.shouldPreferConservativePlayback ? 320 : 420
+        let imagesPerItemLimit = environment.shouldPreferConservativePlayback ? 2 : 3
+        let totalImageLimit = environment.shouldPreferConservativePlayback ? 4 : 6
         let coverTargetPixelSize = environment.shouldPreferConservativePlayback ? 360 : 480
+        var scheduledImageCount = 0
         for item in items.prefix(itemLimit) {
             if let source = item.author?.face?.normalizedBiliURL(),
                let avatarURL = URL(string: source.biliAvatarThumbnailURL(size: 96)),
@@ -87,12 +111,25 @@ final class DynamicFeedResourcePrefetchCoordinator {
                 avatarSources.append(RemoteImageSource(url: avatarURL, fallbackURL: URL(string: source)))
             }
 
-            for image in item.imageItems.prefix(imageLimit) {
-                guard let source = image.normalizedURL,
-                      let url = URL(string: source.biliImageThumbnailURL(maxSide: imageTargetPixelSize)),
-                      seenURLs.insert(source).inserted
+            for image in item.imageItems.prefix(imagesPerItemLimit) {
+                guard scheduledImageCount < totalImageLimit,
+                      let sourceURL = image.normalizedURL,
+                      seenURLs.insert(sourceURL).inserted,
+                      let request = DynamicImageThumbnailSizing.prefetchRequest(
+                        for: image,
+                        imageCount: item.imageItems.count,
+                        usesCompactImages: environment.shouldPreferConservativePlayback
+                      )
                 else { continue }
-                imageSources.append(RemoteImageSource(url: url, fallbackURL: URL(string: source)))
+                if request.targetPixelSize == DynamicImageThumbnailSizing.targetPixelSize(
+                    usesExpandedImage: true,
+                    usesCompactImages: environment.shouldPreferConservativePlayback
+                ) {
+                    expandedImageSources.append(request.source)
+                } else {
+                    compactImageSources.append(request.source)
+                }
+                scheduledImageCount += 1
             }
 
             if let video = item.archive?.asVideoItem(author: item.author),
@@ -109,7 +146,7 @@ final class DynamicFeedResourcePrefetchCoordinator {
             }
         }
 
-        return (avatarSources, imageSources, coverSources)
+        return (avatarSources, compactImageSources, expandedImageSources, coverSources)
     }
 
     private func schedulePlaybackPreload(for items: [DynamicFeedItem], initialDelay: TimeInterval) {

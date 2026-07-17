@@ -214,6 +214,7 @@ struct ZoomyFullScreenImageViewer: View {
                 item: item,
                 initialImage: initialImage(for: item),
                 targetPixelSize: targetPixelSize,
+                isSelected: item.id == selectedItemID,
                 isPresented: $isPresented,
                 onMediaUpdated: { itemID, snapshot in
                     if let image = snapshot.image {
@@ -229,6 +230,7 @@ struct ZoomyFullScreenImageViewer: View {
                 item: ZoomyImagePreviewItem(id: url.absoluteString, viewerURL: url),
                 initialImage: initialImage,
                 targetPixelSize: targetPixelSize,
+                isSelected: true,
                 isPresented: $isPresented,
                 onMediaUpdated: { _, snapshot in
                     selectedSnapshot = snapshot
@@ -281,6 +283,7 @@ struct ZoomyFullScreenImageViewer: View {
         let neighborIndices = [selectedIndex - 1, selectedIndex + 1]
         let sources = neighborIndices.compactMap { index -> RemoteImageSource? in
             guard items.indices.contains(index),
+                  !items[index].needsOriginalMedia,
                   let url = items[index].displayURL
             else { return nil }
             return RemoteImageSource(url: url)
@@ -358,6 +361,7 @@ private struct ZoomyViewerImagePage: View {
     let item: ZoomyImagePreviewItem
     let initialImage: UIImage?
     let targetPixelSize: Int
+    let isSelected: Bool
     @Binding var isPresented: Bool
     let onMediaUpdated: (String, ZoomyViewerMediaSnapshot) -> Void
     @StateObject private var loader: ZoomyViewerImageLoader
@@ -366,12 +370,14 @@ private struct ZoomyViewerImagePage: View {
         item: ZoomyImagePreviewItem,
         initialImage: UIImage?,
         targetPixelSize: Int,
+        isSelected: Bool,
         isPresented: Binding<Bool>,
         onMediaUpdated: @escaping (String, ZoomyViewerMediaSnapshot) -> Void
     ) {
         self.item = item
         self.initialImage = initialImage
         self.targetPixelSize = targetPixelSize
+        self.isSelected = isSelected
         _isPresented = isPresented
         self.onMediaUpdated = onMediaUpdated
         _loader = StateObject(wrappedValue: ZoomyViewerImageLoader(initialImage: initialImage))
@@ -397,12 +403,19 @@ private struct ZoomyViewerImagePage: View {
                     reportSnapshotIfNeeded()
                 }
             } else {
-                ProgressView()
-                    .tint(.white)
+                loadingIndicator
+            }
+
+            if loader.isLoadingFinalMedia, loader.snapshot?.image != nil {
+                loadingIndicator
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .task(id: item.displayURL?.absoluteString ?? item.id) {
+        .task(id: "\(item.displayURL?.absoluteString ?? item.id)|\(isSelected)") {
+            guard isSelected, isPresented else {
+                loader.cancelAndRelease()
+                return
+            }
             await loader.load(item: item, targetPixelSize: targetPixelSize)
         }
         .onAppear {
@@ -411,8 +424,13 @@ private struct ZoomyViewerImagePage: View {
         .onChange(of: loader.snapshotVersion) { _, _ in
             reportSnapshotIfNeeded()
         }
+        .onChange(of: isPresented) { _, isPresented in
+            if !isPresented {
+                loader.cancelAndRelease()
+            }
+        }
         .onDisappear {
-            loader.cancel()
+            loader.cancelAndRelease()
         }
     }
 
@@ -423,22 +441,48 @@ private struct ZoomyViewerImagePage: View {
         }
         onMediaUpdated(item.id, snapshot)
     }
+
+    private var loadingIndicator: some View {
+        GlassEffectContainer(spacing: 8) {
+            ProgressView()
+                .progressViewStyle(.circular)
+                .controlSize(.large)
+                .tint(.white)
+                .frame(width: 76, height: 76)
+                .videoCoverBadgeForeground(opacity: 0)
+                .videoCoverBadgeBackground(style: .clear, in: Circle())
+                .allowsHitTesting(false)
+                .accessibilityLabel("正在加载原图")
+        }
+    }
 }
 
 @MainActor
 private final class ZoomyViewerImageLoader: ObservableObject {
     @Published private(set) var snapshot: ZoomyViewerMediaSnapshot?
     @Published private(set) var snapshotVersion = 0
+    @Published private(set) var isLoadingFinalMedia = false
     private var task: Task<Void, Never>?
+    private let initialSnapshot: ZoomyViewerMediaSnapshot?
+    private var loadGeneration = 0
+    private var hasFinalMedia = false
 
     init(initialImage: UIImage?) {
-        snapshot = initialImage.map { ZoomyViewerMediaSnapshot(image: $0, isFinal: false) }
+        let initialSnapshot = initialImage.map { ZoomyViewerMediaSnapshot(image: $0, isFinal: false) }
+        self.initialSnapshot = initialSnapshot
+        snapshot = initialSnapshot
     }
 
     func load(item: ZoomyImagePreviewItem, targetPixelSize: Int) async {
-        task?.cancel()
+        cancel()
+        loadGeneration &+= 1
+        let generation = loadGeneration
         let url = item.displayURL
-        guard let url else { return }
+        guard let url else {
+            isLoadingFinalMedia = false
+            return
+        }
+        isLoadingFinalMedia = true
 
         task = Task(priority: .userInitiated) { [weak self] in
             let snapshot: ZoomyViewerMediaSnapshot?
@@ -463,6 +507,7 @@ private final class ZoomyViewerImageLoader: ObservableObject {
             guard !Task.isCancelled else { return }
             if let snapshot {
                 await MainActor.run {
+                    guard self?.loadGeneration == generation else { return }
                     self?.setSnapshot(snapshot)
                 }
                 return
@@ -473,8 +518,16 @@ private final class ZoomyViewerImageLoader: ObservableObject {
                 scale: 1,
                 targetPixelSize: targetPixelSize
             )
-            guard !Task.isCancelled, let fallbackImage else { return }
+            guard !Task.isCancelled else { return }
+            guard let fallbackImage else {
+                await MainActor.run {
+                    guard self?.loadGeneration == generation else { return }
+                    self?.isLoadingFinalMedia = false
+                }
+                return
+            }
             await MainActor.run {
+                guard self?.loadGeneration == generation else { return }
                 self?.setSnapshot(ZoomyViewerMediaSnapshot(image: fallbackImage, isFinal: true))
             }
         }
@@ -484,33 +537,31 @@ private final class ZoomyViewerImageLoader: ObservableObject {
     func cancel() {
         task?.cancel()
         task = nil
+        isLoadingFinalMedia = false
+    }
+
+    func cancelAndRelease() {
+        cancel()
+        loadGeneration &+= 1
+        guard hasFinalMedia else { return }
+        snapshot = initialSnapshot
+        snapshotVersion += 1
+        hasFinalMedia = false
+        isLoadingFinalMedia = false
     }
 
     private func setSnapshot(_ snapshot: ZoomyViewerMediaSnapshot) {
         self.snapshot = snapshot
         snapshotVersion += 1
-    }
-}
-
-private extension ZoomyImagePreviewItem {
-    var isAnimatedGIF: Bool {
-        mediaBadgeText?.caseInsensitiveCompare("GIF") == .orderedSame
-            || displayURL?.absoluteString.lowercased().contains(".gif") == true
-    }
-
-    var isLiveImage: Bool {
-        mediaBadgeText?.caseInsensitiveCompare("LIVE") == .orderedSame
-            || liveVideoURL != nil
-    }
-
-    var needsOriginalMedia: Bool {
-        isAnimatedGIF || isLiveImage
+        hasFinalMedia = snapshot.isFinal
+        if snapshot.isFinal {
+            isLoadingFinalMedia = false
+        }
     }
 }
 
 private struct ZoomyViewerMediaSnapshot {
     let image: UIImage?
-    let imageData: Data?
     let imageFileURL: URL?
     let liveVideoFileURL: URL?
     let livePhoto: PHLivePhoto?
@@ -520,7 +571,6 @@ private struct ZoomyViewerMediaSnapshot {
 
     init(
         image: UIImage?,
-        imageData: Data? = nil,
         imageFileURL: URL? = nil,
         liveVideoFileURL: URL? = nil,
         livePhoto: PHLivePhoto? = nil,
@@ -529,7 +579,6 @@ private struct ZoomyViewerMediaSnapshot {
         isFinal: Bool = true
     ) {
         self.image = image
-        self.imageData = imageData
         self.imageFileURL = imageFileURL
         self.liveVideoFileURL = liveVideoFileURL
         self.livePhoto = livePhoto
@@ -574,14 +623,6 @@ private enum ZoomyShareItemBuilder {
             if let fileURL = snapshot.imageFileURL {
                 return [fileURL]
             }
-            if let data = snapshot.imageData,
-               let fileURL = try? ZoomyViewerMediaLoader.writeTemporaryFile(
-                   data: data,
-                   originalURL: item.displayURL,
-                   fallbackExtension: "gif"
-               ) {
-                return [fileURL]
-            }
         }
 
         if let image = snapshot.image {
@@ -604,15 +645,7 @@ private enum ZoomyPhotoLibrarySaver {
         }
 
         if snapshot.isAnimatedGIF {
-            let fileURL = snapshot.imageFileURL
-                ?? snapshot.imageData.flatMap {
-                    try? ZoomyViewerMediaLoader.writeTemporaryFile(
-                        data: $0,
-                        originalURL: nil,
-                        fallbackExtension: "gif"
-                    )
-                }
-            if let fileURL,
+            if let fileURL = snapshot.imageFileURL,
                await saveImageFile(fileURL) {
                 return true
             }
@@ -671,7 +704,62 @@ private enum ZoomyPhotoLibrarySaver {
     }
 }
 
+struct ZoomyAnimatedImageDecodeBudget: Equatable {
+    let maximumFrameCount: Int
+    let maximumPixelSize: Int
+    let maximumDecodedPixels: Int
+
+    static func current(targetPixelSize: Int) -> Self {
+        let processInfo = ProcessInfo.processInfo
+        let isConstrained = processInfo.isLowPowerModeEnabled || isConstrained(processInfo.thermalState)
+        return make(targetPixelSize: targetPixelSize, isConstrained: isConstrained)
+    }
+
+    static func make(targetPixelSize: Int, isConstrained: Bool) -> Self {
+        let targetPixelSize = max(targetPixelSize, 1)
+        if isConstrained {
+            return Self(
+                maximumFrameCount: 14,
+                maximumPixelSize: min(targetPixelSize, 900),
+                maximumDecodedPixels: 9_000_000
+            )
+        }
+        return Self(
+            maximumFrameCount: 24,
+            maximumPixelSize: min(targetPixelSize, 1_280),
+            maximumDecodedPixels: 18_000_000
+        )
+    }
+
+    func sampledFrameIndices(frameCount: Int, maximumFrameCount: Int? = nil) -> [Int] {
+        guard frameCount > 0 else { return [] }
+        let selectedFrameCount = min(frameCount, max(maximumFrameCount ?? self.maximumFrameCount, 1))
+        guard selectedFrameCount > 1 else { return [0] }
+        guard selectedFrameCount < frameCount else { return Array(0..<frameCount) }
+
+        return (0..<selectedFrameCount).map { index in
+            index * (frameCount - 1) / (selectedFrameCount - 1)
+        }
+    }
+
+    private static func isConstrained(_ thermalState: ProcessInfo.ThermalState) -> Bool {
+        switch thermalState {
+        case .serious, .critical:
+            true
+        case .nominal, .fair:
+            false
+        @unknown default:
+            true
+        }
+    }
+}
+
 private enum ZoomyViewerMediaLoader {
+    private static let temporaryDirectoryName = "ZoomyMedia"
+    private static let maximumTemporaryFileAge: TimeInterval = 24 * 60 * 60
+    private static let maximumTemporaryFileCount = 48
+    private static let maximumTemporaryFileBytes = 160 * 1_024 * 1_024
+
     static func loadStaticImage(url: URL, targetPixelSize: Int) async -> ZoomyViewerMediaSnapshot? {
         if let cachedImage = await RemoteImageCache.shared.image(for: url, scale: 1, targetPixelSize: targetPixelSize) {
             return ZoomyViewerMediaSnapshot(image: cachedImage, isFinal: true)
@@ -688,21 +776,29 @@ private enum ZoomyViewerMediaLoader {
     }
 
     static func loadAnimatedGIF(url: URL, targetPixelSize: Int) async -> ZoomyViewerMediaSnapshot? {
+        var fileURL: URL?
         do {
-            let data = try await fetchData(from: url, acceptsVideo: false)
-            guard !Task.isCancelled else { return nil }
-            let image = animatedGIFImage(data: data, targetPixelSize: targetPixelSize)
-                ?? UIImage(data: data)
-            guard let image else { return nil }
-            let fileURL = try? writeTemporaryFile(data: data, originalURL: url, fallbackExtension: "gif")
+            let downloadedFileURL = try await downloadTemporaryFile(
+                from: url,
+                acceptsVideo: false,
+                fallbackExtension: "gif"
+            )
+            fileURL = downloadedFileURL
+            try Task.checkCancellation()
+            guard let image = animatedGIFImage(fileURL: downloadedFileURL, targetPixelSize: targetPixelSize) else {
+                throw URLError(.cannotDecodeContentData)
+            }
+            try Task.checkCancellation()
             return ZoomyViewerMediaSnapshot(
                 image: image,
-                imageData: data,
-                imageFileURL: fileURL,
+                imageFileURL: downloadedFileURL,
                 isAnimatedGIF: true,
                 isFinal: true
             )
         } catch {
+            if let fileURL {
+                removeTemporaryFile(fileURL)
+            }
             return nil
         }
     }
@@ -712,23 +808,36 @@ private enum ZoomyViewerMediaLoader {
         videoURL: URL,
         targetPixelSize: Int
     ) async -> ZoomyViewerMediaSnapshot? {
+        var imageFileURL: URL?
+        var videoFileURL: URL?
         do {
-            async let imageDataTask = fetchData(from: imageURL, acceptsVideo: false)
-            async let videoDataTask = fetchData(from: videoURL, acceptsVideo: true)
-            let (imageData, videoData) = try await (imageDataTask, videoDataTask)
-            guard !Task.isCancelled else { return nil }
-            let imageFileURL = try writeTemporaryFile(data: imageData, originalURL: imageURL, fallbackExtension: "jpg")
-            let videoFileURL = try writeTemporaryFile(data: videoData, originalURL: videoURL, fallbackExtension: "mov")
-            let image = downsampledImage(data: imageData, targetPixelSize: targetPixelSize)
-                ?? UIImage(data: imageData)
+            async let imageDownload = downloadTemporaryFile(
+                from: imageURL,
+                acceptsVideo: false,
+                fallbackExtension: "jpg"
+            )
+            async let videoDownload = downloadTemporaryFile(
+                from: videoURL,
+                acceptsVideo: true,
+                fallbackExtension: "mov"
+            )
+            imageFileURL = try await imageDownload
+            videoFileURL = try await videoDownload
+            try Task.checkCancellation()
+            guard let imageFileURL,
+                  let videoFileURL,
+                  let image = downsampledImage(fileURL: imageFileURL, targetPixelSize: targetPixelSize)
+            else {
+                throw URLError(.cannotDecodeContentData)
+            }
             let livePhoto = await requestLivePhoto(
                 imageFileURL: imageFileURL,
                 videoFileURL: videoFileURL,
                 placeholderImage: image
             )
+            try Task.checkCancellation()
             return ZoomyViewerMediaSnapshot(
                 image: image,
-                imageData: imageData,
                 imageFileURL: imageFileURL,
                 liveVideoFileURL: videoFileURL,
                 livePhoto: livePhoto,
@@ -736,25 +845,22 @@ private enum ZoomyViewerMediaLoader {
                 isFinal: true
             )
         } catch {
+            if let imageFileURL {
+                removeTemporaryFile(imageFileURL)
+            }
+            if let videoFileURL {
+                removeTemporaryFile(videoFileURL)
+            }
+            guard !Task.isCancelled else { return nil }
             return await loadStaticImage(url: imageURL, targetPixelSize: targetPixelSize)
         }
     }
 
-    static func writeTemporaryFile(
-        data: Data,
-        originalURL: URL?,
+    private static func downloadTemporaryFile(
+        from url: URL,
+        acceptsVideo: Bool,
         fallbackExtension: String
-    ) throws -> URL {
-        let directory = URL.temporaryDirectory.appending(path: "ZoomyMedia", directoryHint: .isDirectory)
-        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        let fileURL = directory.appending(
-            path: "\(UUID().uuidString).\(preferredFileExtension(for: originalURL, fallback: fallbackExtension))"
-        )
-        try data.write(to: fileURL, options: [.atomic])
-        return fileURL
-    }
-
-    private static func fetchData(from url: URL, acceptsVideo: Bool) async throws -> Data {
+    ) async throws -> URL {
         var request = URLRequest(url: url)
         var headers = BiliURLSessionFactory.imageHeaders()
         if acceptsVideo {
@@ -766,34 +872,62 @@ private enum ZoomyViewerMediaLoader {
 
         let session = BiliURLSessionFactory.makeImageSession()
         defer { session.finishTasksAndInvalidate() }
-        let (data, response) = try await session.data(for: request)
+        let (temporaryURL, response) = try await session.download(for: request)
         if let response = response as? HTTPURLResponse,
            !(200..<300).contains(response.statusCode) {
             throw URLError(.badServerResponse)
         }
-        return data
+        try Task.checkCancellation()
+        return try persistTemporaryFile(
+            at: temporaryURL,
+            originalURL: url,
+            fallbackExtension: fallbackExtension
+        )
     }
 
-    private static func animatedGIFImage(data: Data, targetPixelSize: Int) -> UIImage? {
-        guard let source = CGImageSourceCreateWithData(data as CFData, nil) else { return nil }
+    private static func animatedGIFImage(fileURL: URL, targetPixelSize: Int) -> UIImage? {
+        let sourceOptions: [CFString: Any] = [
+            kCGImageSourceShouldCache: false,
+            kCGImageSourceShouldCacheImmediately: false
+        ]
+        guard let source = CGImageSourceCreateWithURL(fileURL as CFURL, sourceOptions as CFDictionary) else { return nil }
         let frameCount = CGImageSourceGetCount(source)
-        guard frameCount > 1 else { return UIImage(data: data) }
+        guard frameCount > 1 else {
+            return downsampledImage(fileURL: fileURL, targetPixelSize: targetPixelSize)
+        }
 
         var frames: [UIImage] = []
         var duration: TimeInterval = 0
-        let maxPixelSize = max(targetPixelSize, 1)
+        let budget = ZoomyAnimatedImageDecodeBudget.current(targetPixelSize: targetPixelSize)
+        let selectedFrameIndices = Set(
+            budget.sampledFrameIndices(
+                frameCount: frameCount,
+                maximumFrameCount: maximumFrameCount(for: source, budget: budget)
+            )
+        )
+        let maxPixelSize = effectiveThumbnailPixelSize(source: source, budget: budget)
         let options: [CFString: Any] = [
             kCGImageSourceCreateThumbnailFromImageAlways: true,
             kCGImageSourceShouldCacheImmediately: true,
+            kCGImageSourceCreateThumbnailWithTransform: true,
             kCGImageSourceThumbnailMaxPixelSize: maxPixelSize
         ]
 
         for index in 0..<frameCount {
-            guard let cgImage = CGImageSourceCreateThumbnailAtIndex(source, index, options as CFDictionary) else { continue }
-            frames.append(UIImage(cgImage: cgImage, scale: 1, orientation: .up))
             duration += gifFrameDuration(source: source, index: index)
+            guard selectedFrameIndices.contains(index), !Task.isCancelled else { continue }
+            let frame: UIImage? = autoreleasepool {
+                guard let cgImage = CGImageSourceCreateThumbnailAtIndex(source, index, options as CFDictionary) else {
+                    return nil
+                }
+                return UIImage(cgImage: cgImage, scale: 1, orientation: .up)
+            }
+            if let frame {
+                frames.append(frame)
+            }
         }
 
+        guard !Task.isCancelled else { return nil }
         guard frames.count > 1 else { return frames.first }
         return UIImage.animatedImage(with: frames, duration: max(duration, Double(frames.count) * 0.08))
     }
@@ -807,15 +941,110 @@ private enum ZoomyViewerMediaLoader {
         return max(unclamped ?? clamped ?? 0.08, 0.02)
     }
 
-    private static func downsampledImage(data: Data, targetPixelSize: Int) -> UIImage? {
-        guard let source = CGImageSourceCreateWithData(data as CFData, nil) else { return nil }
+    private static func downsampledImage(fileURL: URL, targetPixelSize: Int) -> UIImage? {
+        let sourceOptions: [CFString: Any] = [
+            kCGImageSourceShouldCache: false,
+            kCGImageSourceShouldCacheImmediately: false
+        ]
+        guard let source = CGImageSourceCreateWithURL(fileURL as CFURL, sourceOptions as CFDictionary) else { return nil }
         let options: [CFString: Any] = [
             kCGImageSourceCreateThumbnailFromImageAlways: true,
             kCGImageSourceShouldCacheImmediately: true,
+            kCGImageSourceCreateThumbnailWithTransform: true,
             kCGImageSourceThumbnailMaxPixelSize: max(targetPixelSize, 1)
         ]
         guard let cgImage = CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary) else { return nil }
         return UIImage(cgImage: cgImage, scale: 1, orientation: .up)
+    }
+
+    private static func maximumFrameCount(
+        for source: CGImageSource,
+        budget: ZoomyAnimatedImageDecodeBudget
+    ) -> Int {
+        let pixelSize = pixelSize(for: source)
+        let maxDimension = max(pixelSize.width, pixelSize.height, 1)
+        let scale = min(1, Double(budget.maximumPixelSize) / maxDimension)
+        let pixelsPerFrame = max(Int((pixelSize.width * scale * pixelSize.height * scale).rounded(.up)), 1)
+        let pixelLimitedFrameCount = max(budget.maximumDecodedPixels / pixelsPerFrame, 1)
+        return max(1, min(budget.maximumFrameCount, pixelLimitedFrameCount))
+    }
+
+    private static func effectiveThumbnailPixelSize(
+        source: CGImageSource,
+        budget: ZoomyAnimatedImageDecodeBudget
+    ) -> Int {
+        let pixelSize = pixelSize(for: source)
+        return max(1, min(budget.maximumPixelSize, Int(max(pixelSize.width, pixelSize.height, 1))))
+    }
+
+    private static func pixelSize(for source: CGImageSource) -> (width: Double, height: Double) {
+        guard let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any] else {
+            return (1, 1)
+        }
+        let width = (properties[kCGImagePropertyPixelWidth] as? NSNumber)?.doubleValue ?? 1
+        let height = (properties[kCGImagePropertyPixelHeight] as? NSNumber)?.doubleValue ?? 1
+        return (max(width, 1), max(height, 1))
+    }
+
+    private static func persistTemporaryFile(
+        at sourceURL: URL,
+        originalURL: URL,
+        fallbackExtension: String
+    ) throws -> URL {
+        let directory = temporaryDirectory()
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        trimTemporaryFiles(in: directory)
+        let destinationURL = directory.appending(
+            path: "\(UUID().uuidString).\(preferredFileExtension(for: originalURL, fallback: fallbackExtension))"
+        )
+        try FileManager.default.moveItem(at: sourceURL, to: destinationURL)
+        return destinationURL
+    }
+
+    private static func temporaryDirectory() -> URL {
+        URL.temporaryDirectory.appending(path: temporaryDirectoryName, directoryHint: .isDirectory)
+    }
+
+    private static func removeTemporaryFile(_ fileURL: URL) {
+        try? FileManager.default.removeItem(at: fileURL)
+    }
+
+    private static func trimTemporaryFiles(in directory: URL) {
+        let resourceKeys: Set<URLResourceKey> = [
+            .contentModificationDateKey,
+            .fileSizeKey,
+            .isRegularFileKey
+        ]
+        guard let fileURLs = try? FileManager.default.contentsOfDirectory(
+            at: directory,
+            includingPropertiesForKeys: Array(resourceKeys)
+        ) else { return }
+
+        let expirationDate = Date().addingTimeInterval(-maximumTemporaryFileAge)
+        var entries = fileURLs.compactMap { fileURL -> (url: URL, bytes: Int, date: Date)? in
+            guard let values = try? fileURL.resourceValues(forKeys: resourceKeys),
+                  values.isRegularFile == true
+            else { return nil }
+            return (fileURL, values.fileSize ?? 0, values.contentModificationDate ?? .distantPast)
+        }
+
+        for entry in entries where entry.date < expirationDate {
+            removeTemporaryFile(entry.url)
+        }
+        entries.removeAll { $0.date < expirationDate }
+        entries.sort { $0.date > $1.date }
+
+        var remainingCount = entries.count
+        var remainingBytes = entries.reduce(0) { $0 + $1.bytes }
+        let protectedNewestFileCount = min(2, entries.count)
+        for entry in entries.reversed() {
+            guard remainingCount > protectedNewestFileCount,
+                  (remainingCount > maximumTemporaryFileCount || remainingBytes > maximumTemporaryFileBytes)
+            else { break }
+            removeTemporaryFile(entry.url)
+            remainingCount -= 1
+            remainingBytes -= entry.bytes
+        }
     }
 
     private static func requestLivePhoto(
