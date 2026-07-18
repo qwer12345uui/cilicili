@@ -21,7 +21,7 @@ extension VideoDetailViewModel {
             cid: cid,
             page: page,
             waitsForFirstFrame: true,
-            startDelay: 0.12
+            startDelay: libraryStore.videoStartupRequestSchedulingExperimentEnabled ? 0.28 : 0.12
         )
     }
 

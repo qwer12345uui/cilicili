@@ -106,6 +106,7 @@ final class LibraryStore: ObservableObject {
     @Published private(set) var cellularPreferredVideoQuality: Int?
     @Published private(set) var playbackAutoOptimizationMode: PlaybackAutoOptimizationMode
     @Published private(set) var playbackStreamSourcePreference: PlaybackStreamSourcePreference
+    @Published private(set) var videoStartupRequestSchedulingExperimentEnabled: Bool
     @Published private(set) var videoCodecPreference: VideoCodecPreference
     @Published private(set) var forceHardwareDecodeEnabled: Bool
     @Published private(set) var dolbyVisionRenderingPolicy: DolbyVisionRenderingPolicy
@@ -166,6 +167,7 @@ final class LibraryStore: ObservableObject {
     private static let cellularPreferredVideoQualityKey = "cc.bili.playback.cellularPreferredVideoQuality.v1"
     private static let playbackAutoOptimizationModeKey = "cc.bili.playback.autoOptimizationMode.v1"
     private static let playbackStreamSourcePreferenceKey = "cc.bili.playback.streamSourcePreference.v1"
+    private static let videoStartupRequestSchedulingExperimentEnabledKey = PlaybackStartupRequestSchedulingExperiment.storageKey
     private static let videoCodecPreferenceKey = VideoCodecPreference.storageKey
     private static let forceHardwareDecodeKey = PlaybackHardwareDecodePolicy.storageKey
     private static let dolbyVisionRenderingPolicyKey = DolbyVisionRenderingPolicy.storageKey
@@ -338,6 +340,9 @@ final class LibraryStore: ObservableObject {
         self.playbackStreamSourcePreference = PlaybackStreamSourcePreference(
             rawValue: userDefaults.string(forKey: Self.playbackStreamSourcePreferenceKey) ?? ""
         ) ?? Self.defaultPlaybackStreamSourcePreference
+        self.videoStartupRequestSchedulingExperimentEnabled = userDefaults.object(
+            forKey: Self.videoStartupRequestSchedulingExperimentEnabledKey
+        ) as? Bool ?? PlaybackStartupRequestSchedulingExperiment.defaultIsEnabled
         self.videoCodecPreference = VideoCodecPreference.stored(in: userDefaults)
         self.forceHardwareDecodeEnabled = PlaybackHardwareDecodePolicy.stored(in: userDefaults)
         self.dolbyVisionRenderingPolicy = DolbyVisionRenderingPolicy.stored(in: userDefaults)
@@ -588,6 +593,14 @@ final class LibraryStore: ObservableObject {
     func setPlaybackStreamSourcePreference(_ preference: PlaybackStreamSourcePreference) {
         playbackStreamSourcePreference = preference
         userDefaults.set(preference.rawValue, forKey: Self.playbackStreamSourcePreferenceKey)
+    }
+
+    func setVideoStartupRequestSchedulingExperimentEnabled(_ isEnabled: Bool) {
+        videoStartupRequestSchedulingExperimentEnabled = isEnabled
+        userDefaults.set(isEnabled, forKey: Self.videoStartupRequestSchedulingExperimentEnabledKey)
+        Task {
+            await StartupPlayURLRoutePerformanceStore.shared.reset()
+        }
     }
 
     func setVideoCodecPreference(_ preference: VideoCodecPreference) {

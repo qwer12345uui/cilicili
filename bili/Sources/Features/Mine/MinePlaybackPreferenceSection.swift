@@ -34,6 +34,7 @@ struct MinePlaybackPreferenceSection<ProbeSummary: View>: View {
             advancedPlaybackSettingsToggle
             if showsAdvancedPlaybackSettings {
                 playbackStreamSourcePicker
+                videoStartupRequestSchedulingExperimentToggle
                 playbackCDNPicker
                 prefersBackupAudioURLToggle
                 playbackCustomCDNHostEditor
@@ -199,6 +200,15 @@ struct MinePlaybackPreferenceSection<ProbeSummary: View>: View {
             Label("播放取流来源", systemImage: "antenna.radiowaves.left.and.right")
         }
         .pickerStyle(.navigationLink)
+    }
+
+    private var videoStartupRequestSchedulingExperimentToggle: some View {
+        Toggle(isOn: Binding(
+            get: { libraryStore.videoStartupRequestSchedulingExperimentEnabled },
+            set: { libraryStore.setVideoStartupRequestSchedulingExperimentEnabled($0) }
+        )) {
+            Label("视频首帧请求调度实验", systemImage: "bolt.horizontal.circle")
+        }
     }
 
     private var playbackCDNPicker: some View {

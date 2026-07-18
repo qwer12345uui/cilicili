@@ -51,6 +51,16 @@ extension VideoDetailViewModel {
               let preferredQuality = targetPlaybackPreferredQuality
         else { return data }
 
+        if libraryStore.videoStartupRequestSchedulingExperimentEnabled {
+            PlayerMetricsLog.record(
+                .qualitySupplement,
+                metricsID: detail.bvid,
+                title: detail.title,
+                message: "initialTargetDeferred preferred=\(preferredQuality)"
+            )
+            return data
+        }
+
         do {
             let supplemented = try await fetchPlayURLWithTimeout(
                 timeout: initialTargetQualitySupplementTimeoutNanoseconds

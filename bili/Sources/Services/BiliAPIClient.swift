@@ -162,6 +162,7 @@ nonisolated final class BiliAPIClient {
         let preferredVideoQuality: Int?
         let cellularPreferredVideoQuality: Int?
         let playbackStreamSourcePreference: PlaybackStreamSourcePreference
+        let videoStartupRequestSchedulingExperimentEnabled: Bool
         let homeRecommendFeedSourcePreference: HomeRecommendFeedSourcePreference
         let guestModeEnabled: Bool
 
@@ -203,6 +204,7 @@ nonisolated final class BiliAPIClient {
             preferredVideoQuality: libraryStore.preferredVideoQuality,
             cellularPreferredVideoQuality: libraryStore.cellularPreferredVideoQuality,
             playbackStreamSourcePreference: libraryStore.playbackStreamSourcePreference,
+            videoStartupRequestSchedulingExperimentEnabled: libraryStore.videoStartupRequestSchedulingExperimentEnabled,
             homeRecommendFeedSourcePreference: libraryStore.homeRecommendFeedSourcePreference,
             guestModeEnabled: libraryStore.guestModeEnabled
         )
@@ -2885,7 +2887,8 @@ nonisolated final class BiliAPIClient {
                 bvid: bvid,
                 cid: cid,
                 page: page,
-                preferredQuality: preferredQuality
+                preferredQuality: preferredQuality,
+                usesExperimentalScheduling: snapshot.videoStartupRequestSchedulingExperimentEnabled
             )
         }
     }
@@ -2969,7 +2972,8 @@ nonisolated final class BiliAPIClient {
         bvid: String,
         cid: Int,
         page: Int? = nil,
-        preferredQuality: Int? = nil
+        preferredQuality: Int? = nil,
+        usesExperimentalScheduling: Bool
     ) async throws -> PlayURLData {
         let storedPreferredQuality = await preferredVideoQuality()
         let configuredQuality = preferredQuality ?? storedPreferredQuality
@@ -2980,7 +2984,8 @@ nonisolated final class BiliAPIClient {
             bvid: bvid,
             cid: cid,
             page: page,
-            requestedQuality: requestedQuality
+            requestedQuality: requestedQuality,
+            usesExperimentalScheduling: usesExperimentalScheduling
         ) {
             let racedStartupData = racedStartupResult.data
             if !honorsConfiguredQuality
@@ -3031,74 +3036,113 @@ nonisolated final class BiliAPIClient {
         bvid: String,
         cid: Int,
         page: Int?,
-        requestedQuality: Int
+        requestedQuality: Int,
+        usesExperimentalScheduling: Bool
     ) async throws -> StartupPlayURLRaceResult? {
         let raceStart = CACurrentMediaTime()
         let shouldRaceWBI = await shouldAttemptStartupWBI()
         let playbackEnvironment = PlaybackEnvironment.current
         let startupGrace = playbackEnvironment.preferredPlayURLStartupGrace
+        let schedulingDecision = usesExperimentalScheduling
+            ? await StartupPlayURLRoutePerformanceStore.shared.decision(
+                networkClass: playbackEnvironment.networkClass,
+                wbiAvailable: shouldRaceWBI
+            )
+            : .race
+        if usesExperimentalScheduling {
+            let schedulerMessage = shouldRaceWBI
+                ? schedulingDecision.diagnosticMessage
+                : "startupScheduler=experiment mode=webpageOnly wbi=suppressed"
+            await MainActor.run {
+                PlayerMetricsLog.record(
+                    .network,
+                    metricsID: bvid,
+                    message: schedulerMessage
+                )
+            }
+        }
         var bestStartupResult: StartupPlayURLRaceResult?
         var lastError: Error?
 
         return await withTaskGroup(of: StartupPlayURLAttempt.self, returning: StartupPlayURLRaceResult?.self) { group in
-            if startupGrace > 0 {
+            if schedulingDecision.usesStaggeredFallback,
+               let primaryRoute = schedulingDecision.primaryRoute,
+               let fallbackRoute = schedulingDecision.fallbackRoute {
                 group.addTask(priority: .userInitiated) {
-                    try? await Task.sleep(nanoseconds: startupGrace)
-                    return StartupPlayURLAttempt(
-                        stage: "startupRaceTimeout",
-                        data: nil,
-                        error: nil,
-                        isAuthoritativePlayURLSource: false
-                    )
-                }
-            }
-
-            group.addTask(priority: .userInitiated) { [self] in
-                do {
-                    let data = try await fetchWebPagePlayURL(
+                    await self.startupPlayURLAttempt(
+                        route: primaryRoute,
                         bvid: bvid,
                         cid: cid,
                         page: page,
-                        preferredQuality: requestedQuality
-                    )
-                    return StartupPlayURLAttempt(
-                        stage: "startupWebpage",
-                        data: data,
-                        error: nil,
-                        isAuthoritativePlayURLSource: false
-                    )
-                } catch {
-                    return StartupPlayURLAttempt(
-                        stage: "startupWebpage",
-                        data: nil,
-                        error: error,
-                        isAuthoritativePlayURLSource: false
+                        requestedQuality: requestedQuality
                     )
                 }
-            }
-
-            if shouldRaceWBI {
-                group.addTask(priority: .userInitiated) { [self] in
+                group.addTask(priority: .utility) {
                     do {
-                        let keys = try await fetchWBIKeys(priority: .userInitiated)
-                        let data = try await fetchWBIStartupPlayURL(
-                            bvid: bvid,
-                            cid: cid,
-                            keys: keys,
-                            preferredQuality: requestedQuality
-                        )
-                        return StartupPlayURLAttempt(
-                            stage: "startupWBI",
-                            data: data,
-                            error: nil,
-                            isAuthoritativePlayURLSource: true
+                        try await Task.sleep(
+                            nanoseconds: PlaybackStartupRequestSchedulingExperiment.staggeredFallbackDelayNanoseconds
                         )
                     } catch {
                         return StartupPlayURLAttempt(
-                            stage: "startupWBI",
+                            stage: "startupFallbackCancelled",
+                            route: nil,
+                            elapsedMilliseconds: nil,
                             data: nil,
-                            error: error,
-                            isAuthoritativePlayURLSource: true
+                            error: nil,
+                            isAuthoritativePlayURLSource: false
+                        )
+                    }
+                    guard !Task.isCancelled else {
+                        return StartupPlayURLAttempt(
+                            stage: "startupFallbackCancelled",
+                            route: nil,
+                            elapsedMilliseconds: nil,
+                            data: nil,
+                            error: nil,
+                            isAuthoritativePlayURLSource: false
+                        )
+                    }
+                    return await self.startupPlayURLAttempt(
+                        route: fallbackRoute,
+                        bvid: bvid,
+                        cid: cid,
+                        page: page,
+                        requestedQuality: requestedQuality
+                    )
+                }
+            } else {
+                if startupGrace > 0 {
+                    group.addTask(priority: .userInitiated) {
+                        try? await Task.sleep(nanoseconds: startupGrace)
+                        return StartupPlayURLAttempt(
+                            stage: "startupRaceTimeout",
+                            route: nil,
+                            elapsedMilliseconds: nil,
+                            data: nil,
+                            error: nil,
+                            isAuthoritativePlayURLSource: false
+                        )
+                    }
+                }
+
+                group.addTask(priority: .userInitiated) {
+                    await self.startupPlayURLAttempt(
+                        route: .webpage,
+                        bvid: bvid,
+                        cid: cid,
+                        page: page,
+                        requestedQuality: requestedQuality
+                    )
+                }
+
+                if shouldRaceWBI {
+                    group.addTask(priority: .userInitiated) {
+                        await self.startupPlayURLAttempt(
+                            route: .wbi,
+                            bvid: bvid,
+                            cid: cid,
+                            page: page,
+                            requestedQuality: requestedQuality
                         )
                     }
                 }
@@ -3119,6 +3163,9 @@ nonisolated final class BiliAPIClient {
                     )
                     continue
                 }
+                if attempt.stage == "startupFallbackCancelled" {
+                    continue
+                }
 
                 if let data = attempt.data {
                     let result = StartupPlayURLRaceResult(
@@ -3129,8 +3176,16 @@ nonisolated final class BiliAPIClient {
                             isAuthoritativeSource: attempt.isAuthoritativePlayURLSource
                         )
                     )
+                    let acceptsRequestedQuality = data.hasPlayableQuality(requestedQuality)
+                        || result.isVerifiedUnavailablePreferredFallback
+                    await recordStartupRouteAttempt(
+                        attempt,
+                        accepted: acceptsRequestedQuality,
+                        networkClass: playbackEnvironment.networkClass,
+                        isExperimentEnabled: usesExperimentalScheduling
+                    )
                     bestStartupResult = preferredStartupRaceCandidate(bestStartupResult, result)
-                    if data.hasPlayableQuality(requestedQuality) {
+                    if acceptsRequestedQuality, data.hasPlayableQuality(requestedQuality) {
                         logPlayURLStage(
                             "startupRaceWinner.\(attempt.stage)",
                             bvid: bvid,
@@ -3163,6 +3218,15 @@ nonisolated final class BiliAPIClient {
                 }
 
                 if let error = attempt.error {
+                    if !(error is CancellationError),
+                       (error as? URLError)?.code != .cancelled {
+                        await recordStartupRouteAttempt(
+                            attempt,
+                            accepted: false,
+                            networkClass: playbackEnvironment.networkClass,
+                            isExperimentEnabled: usesExperimentalScheduling
+                        )
+                    }
                     lastError = error
                     logPlayURLStage(
                         "\(attempt.stage)Fallback",
@@ -3196,6 +3260,73 @@ nonisolated final class BiliAPIClient {
             }
             return bestStartupResult
         }
+    }
+
+    private func startupPlayURLAttempt(
+        route: StartupPlayURLRoute,
+        bvid: String,
+        cid: Int,
+        page: Int?,
+        requestedQuality: Int
+    ) async -> StartupPlayURLAttempt {
+        let start = CACurrentMediaTime()
+        let stage = route == .wbi ? "startupWBI" : "startupWebpage"
+        let isAuthoritativePlayURLSource = route == .wbi
+        do {
+            let data: PlayURLData
+            switch route {
+            case .webpage:
+                data = try await fetchWebPagePlayURL(
+                    bvid: bvid,
+                    cid: cid,
+                    page: page,
+                    preferredQuality: requestedQuality
+                )
+            case .wbi:
+                let keys = try await fetchWBIKeys(priority: .userInitiated)
+                data = try await fetchWBIStartupPlayURL(
+                    bvid: bvid,
+                    cid: cid,
+                    keys: keys,
+                    preferredQuality: requestedQuality
+                )
+            }
+            return StartupPlayURLAttempt(
+                stage: stage,
+                route: route,
+                elapsedMilliseconds: max(Int(PlayerMetricsLog.elapsedMilliseconds(since: start).rounded()), 1),
+                data: data,
+                error: nil,
+                isAuthoritativePlayURLSource: isAuthoritativePlayURLSource
+            )
+        } catch {
+            return StartupPlayURLAttempt(
+                stage: stage,
+                route: route,
+                elapsedMilliseconds: max(Int(PlayerMetricsLog.elapsedMilliseconds(since: start).rounded()), 1),
+                data: nil,
+                error: error,
+                isAuthoritativePlayURLSource: isAuthoritativePlayURLSource
+            )
+        }
+    }
+
+    private func recordStartupRouteAttempt(
+        _ attempt: StartupPlayURLAttempt,
+        accepted: Bool,
+        networkClass: PlaybackEnvironment.NetworkClass,
+        isExperimentEnabled: Bool
+    ) async {
+        guard isExperimentEnabled,
+              let route = attempt.route,
+              let elapsedMilliseconds = attempt.elapsedMilliseconds
+        else { return }
+        await StartupPlayURLRoutePerformanceStore.shared.record(
+            route: route,
+            networkClass: networkClass,
+            elapsedMilliseconds: elapsedMilliseconds,
+            accepted: accepted
+        )
     }
 
     private func cancelPlayURLStage(
@@ -5765,6 +5896,8 @@ nonisolated private struct CommentPaginationRequest: Encodable {
 
 private struct StartupPlayURLAttempt: Sendable {
     let stage: String
+    let route: StartupPlayURLRoute?
+    let elapsedMilliseconds: Int?
     let data: PlayURLData?
     let error: Error?
     let isAuthoritativePlayURLSource: Bool

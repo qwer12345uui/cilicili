@@ -102,6 +102,19 @@ final class PlayerFormalPlaybackConfigurationTests: XCTestCase {
     }
 
     @MainActor
+    func testLibraryStorePersistsVideoStartupRequestSchedulingExperiment() {
+        let defaults = makeUserDefaults()
+        let store = LibraryStore(userDefaults: defaults)
+
+        XCTAssertFalse(store.videoStartupRequestSchedulingExperimentEnabled)
+        store.setVideoStartupRequestSchedulingExperimentEnabled(true)
+
+        XCTAssertTrue(
+            LibraryStore(userDefaults: defaults).videoStartupRequestSchedulingExperimentEnabled
+        )
+    }
+
+    @MainActor
     func testPlaybackSessionTracksActivePlayerIdentityAndDetaches() {
         let player = PlayerStateViewModel(
             videoURL: nil,
