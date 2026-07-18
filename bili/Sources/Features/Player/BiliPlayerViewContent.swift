@@ -11,6 +11,7 @@ struct BiliPlayerViewContent: View {
         BiliPlayerSurfaceChrome(
             playbackSurface: AnyView(surfaceGestureLayer),
             state: surfaceChromeState,
+            speedBoostModel: context.speedBoostModel,
             seekPreviewModel: context.seekPreviewModel,
             playbackControls: AnyView(playbackControls)
         )
@@ -89,7 +90,6 @@ struct BiliPlayerViewContent: View {
             hasPresentedPlayback: context.surfaceState.hasPresentedPlayback,
             showsInlineLoadingProgress: renderState.showsInlineLoadingProgress,
             isUserSeeking: context.surfaceState.isUserSeeking,
-            isSpeedBoostActive: context.speedBoostModel.isActive,
             showsActivePlaybackControls: renderState.showsActivePlaybackControls,
             playbackControlsOpacity: context.playbackControlsVisibility.opacity,
             playbackControlsAllowsHitTesting: context.playbackControlsVisibility.acceptsHitTesting,

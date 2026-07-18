@@ -2142,8 +2142,11 @@ final class PlayerPerformanceStore: ObservableObject {
                 maxParts: 4
             )
         case .speedBoost:
-            session.speedBoostCount += 1
-            if event.message?.contains("interrupted=true") == true {
+            let message = event.message ?? ""
+            if message.hasPrefix("event=begin") || message.hasPrefix("begin ") {
+                session.speedBoostCount += 1
+            }
+            if message.contains("interrupted=true") {
                 session.speedBoostInterruptionCount += 1
             }
             session.speedBoostMessage = Self.appendDiagnosticMessage(

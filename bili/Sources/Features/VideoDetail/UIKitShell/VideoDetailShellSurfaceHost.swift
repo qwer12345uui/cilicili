@@ -485,6 +485,7 @@ private struct SurfaceOnlyPlayerOverlayRoot: View {
 
                         BiliPlayerSurfaceOverlayLayer(
                             state: chromeState,
+                            speedBoostModel: renderContext.speedBoostModel,
                             seekPreviewModel: renderContext.seekPreviewModel
                         )
                             .zIndex(2)
@@ -843,7 +844,6 @@ private struct SurfaceOnlyPlayerOverlayRoot: View {
             hasPresentedPlayback: context.surfaceState.hasPresentedPlayback,
             showsInlineLoadingProgress: renderState.showsInlineLoadingProgress,
             isUserSeeking: context.surfaceState.isUserSeeking,
-            isSpeedBoostActive: context.speedBoostModel.isActive,
             showsActivePlaybackControls: renderState.showsActivePlaybackControls,
             playbackControlsOpacity: playbackControlsVisibility.opacity,
             playbackControlsAllowsHitTesting: playbackControlsVisibility.acceptsHitTesting,

@@ -67,14 +67,19 @@ struct BiliPlayerLifecycleActionBuilder {
     }
 
     private func handleScenePhaseChange(_ phase: ScenePhase) {
-        guard !viewModel.isTerminated else { return }
+        guard !viewModel.isTerminated else {
+            speedBoostActions.end(reason: .terminated)
+            return
+        }
         if phase == .active {
             guard allowsPlaybackActivation else { return }
             handleActivePlaybackRecovery()
         } else if phase == .inactive {
+            speedBoostActions.end(reason: .systemInterrupted)
             guard allowsPlaybackActivation else { return }
             viewModel.preservePlaybackThroughTransientSystemOverlay()
         } else if phase == .background {
+            speedBoostActions.end(reason: .background)
             if allowsPlaybackActivation {
                 if isPictureInPictureEnabled {
                     viewModel.preservePlaybackThroughTransientSystemOverlay()
@@ -82,7 +87,6 @@ struct BiliPlayerLifecycleActionBuilder {
                     viewModel.pauseForAppBackground()
                 }
             }
-            speedBoostActions.end(reason: "background")
             Task {
                 await VideoPreloadCenter.shared.cancelAll()
             }
@@ -100,7 +104,7 @@ struct BiliPlayerLifecycleActionBuilder {
     }
 
     private func handleDisappear() {
-        speedBoostActions.end(reason: "disappear")
+        speedBoostActions.end(reason: viewModel.isTerminated ? .terminated : .disappear)
         progressReporter.stop()
         visibilityActions.cancelAutoHide()
         rotationTransitionSnapshotModel.release(immediate: true)

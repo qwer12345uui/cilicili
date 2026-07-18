@@ -16,7 +16,6 @@ struct BiliPlayerSurfaceChromeState {
     let hasPresentedPlayback: Bool
     let showsInlineLoadingProgress: Bool
     let isUserSeeking: Bool
-    let isSpeedBoostActive: Bool
     let showsActivePlaybackControls: Bool
     let playbackControlsOpacity: Double
     let playbackControlsAllowsHitTesting: Bool

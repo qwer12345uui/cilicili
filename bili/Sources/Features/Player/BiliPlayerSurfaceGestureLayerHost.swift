@@ -32,7 +32,7 @@ struct BiliPlayerSurfaceGestureLayerHost<Content: View>: View {
             onSingleTap: gestureActions.singleTap,
             onDoubleTap: gestureActions.doubleTap,
             onBeginSpeedBoost: gestureActions.beginSpeedBoost,
-            onEndSpeedBoost: gestureActions.endSpeedBoost,
+            onEndSpeedBoost: gestureActions.endSpeedBoost(reason:),
             onHorizontalSeekStart: { progress in
                 seekPreviewModel.beginScrub(
                     api: seekPreviewAPI,
@@ -61,6 +61,7 @@ struct BiliPlayerSurfaceGestureLayerHost<Content: View>: View {
         )
         .onDisappear {
             seekPreviewModel.endScrub()
+            speedBoostActions.end(reason: .disappear)
         }
     }
 

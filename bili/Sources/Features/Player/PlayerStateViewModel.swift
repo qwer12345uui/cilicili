@@ -592,8 +592,12 @@ final class PlayerStateViewModel: NSObject, ObservableObject {
         duration ?? durationHint
     }
 
-    fileprivate var isNowPlayingLiveStream: Bool {
+    var isLiveStream: Bool {
         streamSource.isLiveStream
+    }
+
+    fileprivate var isNowPlayingLiveStream: Bool {
+        isLiveStream
     }
 
     fileprivate var nowPlayingPlaybackState: MPNowPlayingPlaybackState {

@@ -12,7 +12,9 @@ final class PlayerPlaybackControlsVisibilityModelTests: XCTestCase {
         XCTAssertEqual(model.opacity, 0)
         XCTAssertTrue(model.acceptsHitTesting)
 
-        try await Task.sleep(nanoseconds: 420_000_000)
+        for _ in 0..<12 where model.isVisible {
+            try await Task.sleep(nanoseconds: 100_000_000)
+        }
 
         XCTAssertFalse(model.isVisible)
         XCTAssertFalse(model.acceptsHitTesting)

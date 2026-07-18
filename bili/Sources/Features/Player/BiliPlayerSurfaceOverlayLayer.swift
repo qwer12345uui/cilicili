@@ -2,6 +2,7 @@ import SwiftUI
 
 struct BiliPlayerSurfaceOverlayLayer: View {
     let state: BiliPlayerSurfaceChromeState
+    @ObservedObject var speedBoostModel: PlayerSpeedBoostModel
     @ObservedObject var seekPreviewModel: PlayerSeekPreviewModel
 
     var body: some View {
@@ -60,8 +61,11 @@ struct BiliPlayerSurfaceOverlayLayer: View {
                 .zIndex(6)
             }
 
-            if state.isSpeedBoostActive {
-                PlayerSpeedBoostIndicator()
+            if speedBoostModel.isIndicatorVisible {
+                PlayerSpeedBoostIndicator(
+                    phase: speedBoostModel.phase,
+                    displayedRate: speedBoostModel.displayedRate
+                )
                     .padding(.top, state.presentation == .embedded ? 10 : 16)
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
                     .transition(.opacity.combined(with: .scale(scale: 0.96)))

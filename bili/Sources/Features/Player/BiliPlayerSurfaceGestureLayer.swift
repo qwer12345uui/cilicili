@@ -7,8 +7,8 @@ struct BiliPlayerSurfaceGestureLayer<Content: View>: View {
     let canSeek: Bool
     let onSingleTap: () -> Void
     let onDoubleTap: () -> Void
-    let onBeginSpeedBoost: () -> Void
-    let onEndSpeedBoost: () -> Void
+    let onBeginSpeedBoost: () -> Bool
+    let onEndSpeedBoost: (PlayerSpeedBoostEndReason) -> Void
     let onHorizontalSeekStart: (Double) -> Void
     let onHorizontalSeekChanged: (Double) -> Void
     let onHorizontalSeekEnded: (Double) -> Void
@@ -22,6 +22,7 @@ struct BiliPlayerSurfaceGestureLayer<Content: View>: View {
     @State private var isHorizontalSeeking = false
     @State private var isHorizontalSeekCancelPending = false
     @State private var isSpeedBoostGestureActive = false
+    @State private var didAttemptSpeedBoost = false
 
     private let horizontalSeekActivationDistance: CGFloat = 8
     private let horizontalSeekDominanceRatio: CGFloat = 3
@@ -50,12 +51,17 @@ struct BiliPlayerSurfaceGestureLayer<Content: View>: View {
                     .onChanged { value in
                         guard !isHorizontalSeeking else { return }
                         guard case .second(true, _) = value else { return }
-                        isSpeedBoostGestureActive = true
-                        onBeginSpeedBoost()
+                        guard !didAttemptSpeedBoost else { return }
+                        didAttemptSpeedBoost = true
+                        isSpeedBoostGestureActive = onBeginSpeedBoost()
                     }
                     .onEnded { _ in
+                        let wasSpeedBoostActive = isSpeedBoostGestureActive
                         isSpeedBoostGestureActive = false
-                        onEndSpeedBoost()
+                        didAttemptSpeedBoost = false
+                        if wasSpeedBoostActive {
+                            onEndSpeedBoost(.gestureEnded)
+                        }
                     }
             )
             .simultaneousGesture(horizontalSeekGesture(size: proxy.size))
@@ -65,7 +71,7 @@ struct BiliPlayerSurfaceGestureLayer<Content: View>: View {
     private func horizontalSeekGesture(size: CGSize) -> some Gesture {
         DragGesture(minimumDistance: horizontalSeekActivationDistance, coordinateSpace: .local)
             .onChanged { value in
-                guard canSeek, !isSpeedBoostGestureActive else { return }
+                guard canSeek else { return }
                 updateHorizontalSeek(for: value, size: size)
             }
             .onEnded { value in
@@ -99,6 +105,10 @@ struct BiliPlayerSurfaceGestureLayer<Content: View>: View {
         if !isHorizontalSeeking {
             guard abs(dx) >= horizontalSeekActivationDistance else { return }
             guard abs(dx) > abs(dy) * horizontalSeekDominanceRatio else { return }
+            if isSpeedBoostGestureActive {
+                isSpeedBoostGestureActive = false
+                onEndSpeedBoost(.supersededBySeek)
+            }
             let startProgress = clock.progress
             isHorizontalSeeking = true
             horizontalSeekStartProgress = startProgress
@@ -106,7 +116,6 @@ struct BiliPlayerSurfaceGestureLayer<Content: View>: View {
             horizontalSeekLastTranslationWidth = dx
             isHorizontalSeekCancelPending = horizontalSeekShouldCancel(at: value.location, size: size)
             clock.updateSeekPreview(progress: startProgress, force: true)
-            onEndSpeedBoost()
             onHorizontalSeekStart(startProgress)
             onHorizontalSeekCancelPendingChanged(isHorizontalSeekCancelPending)
             return

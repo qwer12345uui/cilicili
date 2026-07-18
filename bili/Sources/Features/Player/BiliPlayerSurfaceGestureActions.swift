@@ -19,17 +19,12 @@ struct BiliPlayerSurfaceGestureActions {
         visibilityActions.toggle()
     }
 
-    func beginSpeedBoost() {
-        guard !viewModel.isTerminated else { return }
+    func beginSpeedBoost() -> Bool {
         speedBoostActions.beginIfNeeded()
     }
 
-    func endSpeedBoost() {
-        guard !viewModel.isTerminated else {
-            speedBoostActions.end(reason: "terminated")
-            return
-        }
-        speedBoostActions.end(reason: "gestureEnded")
+    func endSpeedBoost(reason: PlayerSpeedBoostEndReason) {
+        speedBoostActions.end(reason: reason)
     }
 
     func horizontalSeekStart(_ progress: Double) {

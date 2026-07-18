@@ -6,8 +6,8 @@ struct BiliPlayerSpeedBoostActions {
     let speedBoostModel: PlayerSpeedBoostModel
     let visibilityActions: BiliPlayerPlaybackControlsVisibilityActions
 
-    func beginIfNeeded() {
-        guard !viewModel.isTerminated else { return }
+    @discardableResult
+    func beginIfNeeded() -> Bool {
         speedBoostModel.beginIfNeeded(
             playerViewModel: viewModel,
             isSurfacePlaying: surfaceState.isPlaying
@@ -17,11 +17,7 @@ struct BiliPlayerSpeedBoostActions {
         }
     }
 
-    func end(reason: String) {
-        guard !viewModel.isTerminated else {
-            speedBoostModel.cancel()
-            return
-        }
+    func end(reason: PlayerSpeedBoostEndReason) {
         speedBoostModel.end(
             reason: reason,
             playerViewModel: viewModel
