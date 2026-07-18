@@ -7,6 +7,7 @@ struct PlayerNativeProgressSlider: View {
     let onScrubStart: (Double) -> Void
     let onScrubChanged: (Double) -> Void
     let onScrubEnded: (Double) -> Void
+    let onScrubCancelled: () -> Void
 
     @State private var scrubbingState = PlayerNativeProgressScrubbingState()
     private let scrubChangeReportDelta = 0.004
@@ -61,6 +62,9 @@ struct PlayerNativeProgressSlider: View {
         .disabled(!effectiveCanSeek)
         .onChange(of: effectiveCanSeek) { _, canSeek in
             if !canSeek {
+                if scrubbingState.isEditing {
+                    onScrubCancelled()
+                }
                 scrubbingState.reset()
             }
         }

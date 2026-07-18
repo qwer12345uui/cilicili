@@ -8,6 +8,7 @@ struct PlayerNativeProgressSection: View {
     let onScrubStart: (Double) -> Void
     let onScrubChanged: (Double) -> Void
     let onScrubEnded: (Double) -> Void
+    let onScrubCancelled: () -> Void
 
     var body: some View {
         PlayerNativeProgressSlider(
@@ -16,7 +17,8 @@ struct PlayerNativeProgressSection: View {
             sliderVisualScale: sliderVisualScale,
             onScrubStart: onScrubStart,
             onScrubChanged: onScrubChanged,
-            onScrubEnded: onScrubEnded
+            onScrubEnded: onScrubEnded,
+            onScrubCancelled: onScrubCancelled
         )
         .padding(.horizontal, metrics.sliderHorizontalPadding)
         .frame(maxWidth: .infinity)

@@ -26,6 +26,9 @@ struct BiliPlayerNativeControlsHost: View {
             viewModel: context.viewModel,
             configuration: context.configuration,
             visibilityActions: renderState.visibilityActions,
+            seekPreviewModel: context.seekPreviewModel,
+            seekPreviewAPI: context.seekPreviewAPI,
+            seekPreviewContext: context.seekPreviewContext,
             holdCurrentFrameForSeek: context.holdCurrentFrameForSeek,
             prepareUserSeekWarmup: context.prepareUserSeekWarmup,
             resetPreparedScrubProgress: context.resetPreparedScrubProgress

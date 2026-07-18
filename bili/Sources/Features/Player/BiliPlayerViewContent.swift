@@ -11,6 +11,7 @@ struct BiliPlayerViewContent: View {
         BiliPlayerSurfaceChrome(
             playbackSurface: AnyView(surfaceGestureLayer),
             state: surfaceChromeState,
+            seekPreviewModel: context.seekPreviewModel,
             playbackControls: AnyView(playbackControls)
         )
         .sheet(isPresented: $isMoreControlsPresented) {
@@ -28,6 +29,9 @@ struct BiliPlayerViewContent: View {
             visibilityActions: renderState.visibilityActions,
             speedBoostActions: renderState.speedBoostActions,
             viewModel: context.viewModel,
+            seekPreviewModel: context.seekPreviewModel,
+            seekPreviewAPI: context.seekPreviewAPI,
+            seekPreviewContext: context.seekPreviewContext,
             holdCurrentFrameForSeek: context.holdCurrentFrameForSeek,
             prepareUserSeekWarmup: context.prepareUserSeekWarmup,
             resetPreparedScrubProgress: context.resetPreparedScrubProgress
@@ -59,6 +63,9 @@ struct BiliPlayerViewContent: View {
             viewModel: context.viewModel,
             configuration: context.configuration,
             visibilityActions: renderState.visibilityActions,
+            seekPreviewModel: context.seekPreviewModel,
+            seekPreviewAPI: context.seekPreviewAPI,
+            seekPreviewContext: context.seekPreviewContext,
             holdCurrentFrameForSeek: context.holdCurrentFrameForSeek,
             prepareUserSeekWarmup: context.prepareUserSeekWarmup,
             resetPreparedScrubProgress: context.resetPreparedScrubProgress

@@ -4,6 +4,9 @@ struct BiliPlayerNativeControlsActionBuilder {
     let viewModel: PlayerStateViewModel
     let configuration: BiliPlayerViewConfiguration
     let visibilityActions: BiliPlayerPlaybackControlsVisibilityActions
+    let seekPreviewModel: PlayerSeekPreviewModel
+    let seekPreviewAPI: BiliAPIClient?
+    let seekPreviewContext: PlayerSeekPreviewContext?
     let holdCurrentFrameForSeek: () -> Void
     let prepareUserSeekWarmup: (Double, Bool) -> Void
     let resetPreparedScrubProgress: () -> Void
@@ -12,15 +15,24 @@ struct BiliPlayerNativeControlsActionBuilder {
         PlayerNativePlaybackControlsActions(
             onScrubStart: { progress in
                 guard !viewModel.isTerminated else { return }
+                seekPreviewModel.beginScrub(
+                    api: seekPreviewAPI,
+                    context: seekPreviewContext,
+                    source: .nativeProgress,
+                    progress: progress,
+                    duration: resolvedDuration
+                )
                 visibilityActions.markInteraction(keepsVisible: true)
                 prepareUserSeekWarmup(progress, true)
                 viewModel.beginUserScrubInteraction(source: .nativeProgress)
             },
             onScrubChanged: { progress in
                 guard !viewModel.isTerminated else { return }
+                seekPreviewModel.updateScrub(progress: progress, duration: resolvedDuration)
                 prepareUserSeekWarmup(progress, false)
             },
             onScrubEnded: { progress in
+                seekPreviewModel.endScrub()
                 guard !viewModel.isTerminated else {
                     resetPreparedScrubProgress()
                     return
@@ -30,6 +42,9 @@ struct BiliPlayerNativeControlsActionBuilder {
                 viewModel.seekAfterSliderCommit(to: progress)
                 resetPreparedScrubProgress()
                 visibilityActions.markInteraction()
+            },
+            onScrubCancelled: {
+                seekPreviewModel.endScrub()
             },
             onTogglePlayback: {
                 guard !viewModel.isTerminated else { return }
@@ -56,5 +71,9 @@ struct BiliPlayerNativeControlsActionBuilder {
                 }
             }
         )
+    }
+
+    private var resolvedDuration: TimeInterval {
+        viewModel.playbackClock.duration ?? viewModel.displayDuration ?? 0
     }
 }

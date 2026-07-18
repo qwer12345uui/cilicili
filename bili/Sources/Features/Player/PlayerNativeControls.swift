@@ -24,7 +24,8 @@ struct PlayerNativePlaybackControls: View {
                         sliderVisualScale: metrics.sliderVisualScale,
                         onScrubStart: actions.onScrubStart,
                         onScrubChanged: actions.onScrubChanged,
-                        onScrubEnded: actions.onScrubEnded
+                        onScrubEnded: actions.onScrubEnded,
+                        onScrubCancelled: actions.onScrubCancelled
                     )
                 }
 

@@ -5,6 +5,9 @@ struct BiliPlayerSurfaceGestureLayerHost<Content: View>: View {
     let visibilityActions: BiliPlayerPlaybackControlsVisibilityActions
     let speedBoostActions: BiliPlayerSpeedBoostActions
     let viewModel: PlayerStateViewModel
+    @ObservedObject var seekPreviewModel: PlayerSeekPreviewModel
+    let seekPreviewAPI: BiliAPIClient?
+    let seekPreviewContext: PlayerSeekPreviewContext?
     let holdCurrentFrameForSeek: () -> Void
     let prepareUserSeekWarmup: (Double, Bool) -> Void
     let resetPreparedScrubProgress: () -> Void
@@ -30,10 +33,38 @@ struct BiliPlayerSurfaceGestureLayerHost<Content: View>: View {
             onDoubleTap: gestureActions.doubleTap,
             onBeginSpeedBoost: gestureActions.beginSpeedBoost,
             onEndSpeedBoost: gestureActions.endSpeedBoost,
-            onHorizontalSeekStart: gestureActions.horizontalSeekStart,
-            onHorizontalSeekChanged: gestureActions.horizontalSeekChanged,
-            onHorizontalSeekEnded: gestureActions.horizontalSeekEnded,
-            onHorizontalSeekCancelled: gestureActions.horizontalSeekCancelled
+            onHorizontalSeekStart: { progress in
+                seekPreviewModel.beginScrub(
+                    api: seekPreviewAPI,
+                    context: seekPreviewContext,
+                    source: .surfaceGesture,
+                    progress: progress,
+                    duration: resolvedDuration
+                )
+                gestureActions.horizontalSeekStart(progress)
+            },
+            onHorizontalSeekChanged: { progress in
+                seekPreviewModel.updateScrub(progress: progress, duration: resolvedDuration)
+                gestureActions.horizontalSeekChanged(progress)
+            },
+            onHorizontalSeekEnded: { progress in
+                seekPreviewModel.endScrub()
+                gestureActions.horizontalSeekEnded(progress)
+            },
+            onHorizontalSeekCancelled: {
+                seekPreviewModel.endScrub()
+                gestureActions.horizontalSeekCancelled()
+            },
+            onHorizontalSeekCancelPendingChanged: { isPending in
+                seekPreviewModel.setCancellationPending(isPending)
+            }
         )
+        .onDisappear {
+            seekPreviewModel.endScrub()
+        }
+    }
+
+    private var resolvedDuration: TimeInterval {
+        viewModel.playbackClock.duration ?? viewModel.displayDuration ?? 0
     }
 }

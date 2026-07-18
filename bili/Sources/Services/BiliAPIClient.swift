@@ -1057,6 +1057,31 @@ nonisolated final class BiliAPIClient {
         return response.payload ?? []
     }
 
+    func fetchVideoShot(bvid: String, cid: Int) async throws -> VideoShotMetadata {
+        let normalizedBVID = bvid.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !normalizedBVID.isEmpty, cid > 0 else { throw BiliAPIError.missingPayload }
+        let response: BiliResponse<VideoShotMetadata> = try await get(
+            base: baseURL,
+            path: "/x/player/videoshot",
+            query: [
+                "bvid": normalizedBVID,
+                "cid": String(cid),
+                "index": "1"
+            ],
+            referer: "https://www.bilibili.com/video/\(normalizedBVID)",
+            userAgent: Self.webUserAgent,
+            responseCachePolicy: .long,
+            priority: .utility
+        )
+        guard response.code == 0 else {
+            throw BiliAPIError.api(code: response.code, message: response.displayMessage)
+        }
+        guard let metadata = response.payload, metadata.isUsable else {
+            throw BiliAPIError.missingPayload
+        }
+        return metadata
+    }
+
     func fetchDanmaku(cid: Int) async throws -> [DanmakuItem] {
         if let cached = await SubtitleDanmakuResourceCache.shared.danmaku(for: cid, segmentIndex: 0) {
             return cached

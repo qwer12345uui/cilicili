@@ -394,6 +394,7 @@ private struct SurfaceOnlyPlayerOverlayRoot: View {
     @StateObject private var rotationTransitionSnapshotModel = PlayerRotationTransitionSnapshotModel()
     @StateObject private var seekTransitionSnapshotModel = PlayerRotationTransitionSnapshotModel()
     @StateObject private var speedBoostModel = PlayerSpeedBoostModel()
+    @StateObject private var seekPreviewModel = PlayerSeekPreviewModel()
     @StateObject private var playbackProgressCoordinator = PlayerPlaybackProgressCoordinator()
     @StateObject private var progressReporter = PlayerPlaybackProgressReporter()
     @State private var lastPreparedScrubProgress = -1.0
@@ -447,6 +448,9 @@ private struct SurfaceOnlyPlayerOverlayRoot: View {
             viewModel: viewModel,
             configuration: renderContext.configuration,
             visibilityActions: visibilityActions,
+            seekPreviewModel: renderContext.seekPreviewModel,
+            seekPreviewAPI: renderContext.seekPreviewAPI,
+            seekPreviewContext: renderContext.seekPreviewContext,
             holdCurrentFrameForSeek: holdCurrentFrameForSeek,
             prepareUserSeekWarmup: prepareUserSeekWarmupIfNeeded,
             resetPreparedScrubProgress: { lastPreparedScrubProgress = -1 }
@@ -470,13 +474,19 @@ private struct SurfaceOnlyPlayerOverlayRoot: View {
                             visibilityActions: visibilityActions,
                             speedBoostActions: speedActions,
                             viewModel: viewModel,
+                            seekPreviewModel: renderContext.seekPreviewModel,
+                            seekPreviewAPI: renderContext.seekPreviewAPI,
+                            seekPreviewContext: renderContext.seekPreviewContext,
                             holdCurrentFrameForSeek: holdCurrentFrameForSeek,
                             prepareUserSeekWarmup: prepareUserSeekWarmupIfNeeded,
                             resetPreparedScrubProgress: { lastPreparedScrubProgress = -1 }
                         )
                         .zIndex(1)
 
-                        BiliPlayerSurfaceOverlayLayer(state: chromeState)
+                        BiliPlayerSurfaceOverlayLayer(
+                            state: chromeState,
+                            seekPreviewModel: renderContext.seekPreviewModel
+                        )
                             .zIndex(2)
 
                         BiliPlayerControlsOverlayLayer(
@@ -650,6 +660,7 @@ private struct SurfaceOnlyPlayerOverlayRoot: View {
             rotationTransitionSnapshotModel: rotationTransitionSnapshotModel,
             seekTransitionSnapshotModel: seekTransitionSnapshotModel,
             speedBoostModel: speedBoostModel,
+            seekPreviewModel: seekPreviewModel,
             playbackProgressCoordinator: playbackProgressCoordinator,
             progressReporter: progressReporter,
             historyVideo: overlaySnapshot.historyVideo,

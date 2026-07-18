@@ -3,6 +3,7 @@ import SwiftUI
 struct BiliPlayerSurfaceChrome: View {
     let playbackSurface: AnyView
     let state: BiliPlayerSurfaceChromeState
+    let seekPreviewModel: PlayerSeekPreviewModel
     let playbackControls: AnyView
 
     var body: some View {
@@ -13,7 +14,8 @@ struct BiliPlayerSurfaceChrome: View {
                 .zIndex(0)
 
             BiliPlayerSurfaceOverlayLayer(
-                state: state
+                state: state,
+                seekPreviewModel: seekPreviewModel
             )
 
             BiliPlayerControlsOverlayLayer(

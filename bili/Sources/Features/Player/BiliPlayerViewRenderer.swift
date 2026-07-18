@@ -9,6 +9,9 @@ struct BiliPlayerViewRenderContext {
     let seekTransitionSnapshotModel: PlayerRotationTransitionSnapshotModel
     let rotationFallbackCoverURL: URL?
     let speedBoostModel: PlayerSpeedBoostModel
+    let seekPreviewModel: PlayerSeekPreviewModel
+    let seekPreviewAPI: BiliAPIClient?
+    let seekPreviewContext: PlayerSeekPreviewContext?
     let configuration: BiliPlayerViewConfiguration
     let isPictureInPictureEnabled: Bool
     let holdCurrentFrameForSeek: () -> Void
