@@ -2844,7 +2844,8 @@ nonisolated final class BiliAPIClient {
         cid: Int,
         page: Int? = nil,
         preferredQuality: Int? = nil,
-        requestLease: StartupPlayURLRequestLease? = nil
+        requestLease: StartupPlayURLRequestLease? = nil,
+        requestSource: StartupPlayURLRequestSource = .preload
     ) async throws -> PlayURLData {
         let snapshot = await requestSnapshot()
         let configuredQuality = preferredQuality ?? snapshot.effectivePreferredVideoQuality
@@ -2890,7 +2891,8 @@ nonisolated final class BiliAPIClient {
                 page: page,
                 preferredQuality: preferredQuality,
                 usesExperimentalScheduling: snapshot.videoStartupRequestSchedulingExperimentEnabled,
-                requestLease: requestLease
+                requestLease: requestLease,
+                requestSource: requestSource
             )
         }
     }
@@ -2996,7 +2998,8 @@ nonisolated final class BiliAPIClient {
         page: Int? = nil,
         preferredQuality: Int? = nil,
         usesExperimentalScheduling: Bool,
-        requestLease: StartupPlayURLRequestLease?
+        requestLease: StartupPlayURLRequestLease?,
+        requestSource: StartupPlayURLRequestSource
     ) async throws -> PlayURLData {
         let storedPreferredQuality = await preferredVideoQuality()
         let configuredQuality = preferredQuality ?? storedPreferredQuality
@@ -3009,7 +3012,8 @@ nonisolated final class BiliAPIClient {
             page: page,
             requestedQuality: requestedQuality,
             usesExperimentalScheduling: usesExperimentalScheduling,
-            requestLease: requestLease
+            requestLease: requestLease,
+            requestSource: requestSource
         ) {
             let racedStartupData = racedStartupResult.data
             if !honorsConfiguredQuality
@@ -3062,10 +3066,12 @@ nonisolated final class BiliAPIClient {
         page: Int?,
         requestedQuality: Int,
         usesExperimentalScheduling: Bool,
-        requestLease: StartupPlayURLRequestLease?
+        requestLease: StartupPlayURLRequestLease?,
+        requestSource: StartupPlayURLRequestSource
     ) async throws -> StartupPlayURLRaceResult? {
         let raceStart = CACurrentMediaTime()
-        let shouldRaceWBI = await shouldAttemptStartupWBI()
+        let suppressionStatus = await startupWBISuppressionStatus()
+        let shouldRaceWBI = suppressionStatus == nil
         let playbackEnvironment = PlaybackEnvironment.current
         let startupGrace = playbackEnvironment.preferredPlayURLStartupGrace
         let schedulingDecision = usesExperimentalScheduling
@@ -3078,13 +3084,24 @@ nonisolated final class BiliAPIClient {
         if usesExperimentalScheduling {
             schedulerMessage = shouldRaceWBI
                 ? schedulingDecision.diagnosticMessage
-                : "startupScheduler=experiment mode=webpageOnly wbi=suppressed"
+                : startupWBISuppressionMessage(
+                    mode: "experiment",
+                    suppressionStatus: suppressionStatus
+                )
         } else {
             schedulerMessage = shouldRaceWBI
                 ? "startupScheduler=baseline mode=race"
-                : "startupScheduler=baseline mode=webpageOnly wbi=suppressed"
+                : startupWBISuppressionMessage(
+                    mode: "baseline",
+                    suppressionStatus: suppressionStatus
+                )
         }
-        await recordStartupSchedulerMessage(schedulerMessage, bvid: bvid)
+        if recordsStartupSchedulerFeedback(
+            requestSource: requestSource,
+            requestLease: requestLease
+        ) {
+            await recordStartupSchedulerMessage(schedulerMessage, bvid: bvid)
+        }
         var bestStartupResult: StartupPlayURLRaceResult?
         var lastError: Error?
         let fallbackTracker = schedulingDecision.usesStaggeredFallback
@@ -3208,7 +3225,10 @@ nonisolated final class BiliAPIClient {
                     )
                     let acceptsRequestedQuality = data.hasPlayableQuality(requestedQuality)
                         || result.isVerifiedUnavailablePreferredFallback
-                    if StartupPlayURLFeedbackEligibility.allows(requestLease) {
+                    if recordsStartupSchedulerFeedback(
+                        requestSource: requestSource,
+                        requestLease: requestLease
+                    ) {
                         await recordStartupRouteAttempt(
                             attempt,
                             accepted: acceptsRequestedQuality,
@@ -3216,12 +3236,18 @@ nonisolated final class BiliAPIClient {
                             isExperimentEnabled: usesExperimentalScheduling,
                             requestLease: requestLease
                         )
+                        if attempt.route == .wbi {
+                            await recordStartupWBISuccess(bvid: bvid)
+                        }
                     }
                     bestStartupResult = preferredStartupRaceCandidate(bestStartupResult, result)
                     if acceptsRequestedQuality, data.hasPlayableQuality(requestedQuality) {
                         group.cancelAll()
                         await group.waitForAll()
-                        if StartupPlayURLFeedbackEligibility.allows(requestLease) {
+                        if recordsStartupSchedulerFeedback(
+                            requestSource: requestSource,
+                            requestLease: requestLease
+                        ) {
                             let fallbackStatus = await startupFallbackStatus(
                                 tracker: fallbackTracker,
                                 route: schedulingDecision.fallbackRoute
@@ -3233,7 +3259,7 @@ nonisolated final class BiliAPIClient {
                                 bvid: bvid,
                                 fallbackStatus: fallbackStatus
                             )
-                        } else {
+                        } else if requestSource.recordsSchedulerFeedback {
                             await recordStartupSchedulerResult(
                                 attempt,
                                 result: "ignoredLate",
@@ -3253,7 +3279,10 @@ nonisolated final class BiliAPIClient {
                     if result.isVerifiedUnavailablePreferredFallback {
                         group.cancelAll()
                         await group.waitForAll()
-                        if StartupPlayURLFeedbackEligibility.allows(requestLease) {
+                        if recordsStartupSchedulerFeedback(
+                            requestSource: requestSource,
+                            requestLease: requestLease
+                        ) {
                             let fallbackStatus = await startupFallbackStatus(
                                 tracker: fallbackTracker,
                                 route: schedulingDecision.fallbackRoute
@@ -3265,7 +3294,7 @@ nonisolated final class BiliAPIClient {
                                 bvid: bvid,
                                 fallbackStatus: fallbackStatus
                             )
-                        } else {
+                        } else if requestSource.recordsSchedulerFeedback {
                             await recordStartupSchedulerResult(
                                 attempt,
                                 result: "ignoredLate",
@@ -3293,7 +3322,10 @@ nonisolated final class BiliAPIClient {
                 }
 
                 if let error = attempt.error {
-                    if StartupPlayURLFeedbackEligibility.allows(requestLease) {
+                    if recordsStartupSchedulerFeedback(
+                        requestSource: requestSource,
+                        requestLease: requestLease
+                    ) {
                         await recordStartupSchedulerResult(
                             attempt,
                             result: "failed",
@@ -3310,7 +3342,10 @@ nonisolated final class BiliAPIClient {
                                 requestLease: requestLease
                             )
                         }
-                    } else {
+                        if attempt.stage == "startupWBI" {
+                            await recordStartupWBIFailureIfNeeded(error, bvid: bvid)
+                        }
+                    } else if requestSource.recordsSchedulerFeedback {
                         await recordStartupSchedulerResult(
                             attempt,
                             result: "ignoredLate",
@@ -3326,10 +3361,6 @@ nonisolated final class BiliAPIClient {
                         start: raceStart,
                         error: error
                     )
-                    if attempt.stage == "startupWBI",
-                       StartupPlayURLFeedbackEligibility.allows(requestLease) {
-                        await suppressStartupWBI()
-                    }
                 }
             }
 
@@ -3421,6 +3452,75 @@ nonisolated final class BiliAPIClient {
             accepted: accepted,
             requestLease: requestLease
         )
+    }
+
+    private nonisolated func recordsStartupSchedulerFeedback(
+        requestSource: StartupPlayURLRequestSource,
+        requestLease: StartupPlayURLRequestLease?
+    ) -> Bool {
+        requestSource.recordsSchedulerFeedback
+            && StartupPlayURLFeedbackEligibility.allows(requestLease)
+    }
+
+    private nonisolated func startupWBISuppressionMessage(
+        mode: String,
+        suppressionStatus: StartupWBISuppressionStatus?
+    ) -> String {
+        guard let suppressionStatus else {
+            return "startupScheduler=\(mode) mode=webpageOnly wbi=suppressed source=foreground reason=unknown remaining=-"
+        }
+        return "startupScheduler=\(mode) mode=webpageOnly wbi=suppressed source=foreground reason=\(suppressionStatus.reason) remaining=\(suppressionStatus.remainingMilliseconds)ms"
+    }
+
+    private func recordStartupWBISuccess(bvid: String) async {
+        guard await state.recordStartupWBISuccess() else { return }
+        await recordStartupSchedulerMessage(
+            "startupWBIHealth source=foreground result=success action=reset",
+            bvid: bvid
+        )
+    }
+
+    private func recordStartupWBIFailureIfNeeded(_ error: Error, bvid: String) async {
+        guard let reason = startupWBIHealthFailureReason(for: error) else { return }
+        let update = await state.recordStartupWBIFailure(reason: reason)
+        switch update {
+        case .observed(let consecutiveFailures):
+            await recordStartupSchedulerMessage(
+                "startupWBIHealth source=foreground result=failure reason=\(reason) failures=\(consecutiveFailures)/\(PlaybackStartupRequestSchedulingExperiment.wbiFailureThreshold) action=observe",
+                bvid: bvid
+            )
+        case .suppressed(let status):
+            await recordStartupSchedulerMessage(
+                "startupWBIHealth source=foreground result=failure reason=\(status.reason) failures=\(PlaybackStartupRequestSchedulingExperiment.wbiFailureThreshold)/\(PlaybackStartupRequestSchedulingExperiment.wbiFailureThreshold) action=suppress remaining=\(status.remainingMilliseconds)ms",
+                bvid: bvid
+            )
+        }
+    }
+
+    private nonisolated func startupWBIHealthFailureReason(for error: Error) -> String? {
+        guard !(error is CancellationError),
+              (error as? URLError)?.code != .cancelled
+        else { return nil }
+        if let urlError = error as? URLError {
+            return "network.\(urlError.code.rawValue)"
+        }
+        guard let apiError = error as? BiliAPIError else { return "unknown" }
+        switch apiError {
+        case .emptyPlayURL, .unsupportedHardwarePlayback:
+            return nil
+        case .invalidURL:
+            return "invalidURL"
+        case .emptyData:
+            return "emptyData"
+        case .api(let code, _):
+            return "api.\(code)"
+        case .missingPayload:
+            return "missingPayload"
+        case .missingSESSDATA:
+            return "missingSESSDATA"
+        case .missingCSRF:
+            return "missingCSRF"
+        }
     }
 
     private func recordStartupSchedulerMessage(_ message: String, bvid: String) async {
@@ -3730,12 +3830,8 @@ nonisolated final class BiliAPIClient {
         throw lastError ?? BiliAPIError.emptyPlayURL
     }
 
-    private func shouldAttemptStartupWBI() async -> Bool {
-        await state.shouldAttemptStartupWBI()
-    }
-
-    private func suppressStartupWBI(duration: CFTimeInterval = 30) async {
-        await state.suppressStartupWBI(duration: duration)
+    private func startupWBISuppressionStatus() async -> StartupWBISuppressionStatus? {
+        await state.startupWBISuppressionStatus()
     }
 
     private enum PlayURLCodecPreference: String, CaseIterable {
@@ -6155,7 +6251,7 @@ private actor BiliAPIClientState {
     private var videoDetailTasks: [String: Task<VideoItem, Error>] = [:]
     private var uploaderProfileTasks: [Int: Task<UploaderProfile, Error>] = [:]
     private var appRecommendFeedIndex: Int?
-    private var startupWBISuppressedUntil: CFTimeInterval = 0
+    private let startupWBIHealth = StartupWBIHealthStore()
     private var playURLFailureCache: [String: CachedPlayURLFailure] = [:]
     private var playURLRequestTasks: [PendingPlayURLRequestKey: PendingPlayURLRequest] = [:]
     private var playURLStageTasks: [String: Task<PlayURLData, Error>] = [:]
@@ -6283,12 +6379,16 @@ private actor BiliAPIClientState {
         uploaderProfileTasks[mid] = nil
     }
 
-    func shouldAttemptStartupWBI() -> Bool {
-        CACurrentMediaTime() >= startupWBISuppressedUntil
+    func startupWBISuppressionStatus() async -> StartupWBISuppressionStatus? {
+        await startupWBIHealth.suppressionStatus()
     }
 
-    func suppressStartupWBI(duration: CFTimeInterval) {
-        startupWBISuppressedUntil = CACurrentMediaTime() + duration
+    func recordStartupWBISuccess() async -> Bool {
+        await startupWBIHealth.recordSuccess()
+    }
+
+    func recordStartupWBIFailure(reason: String) async -> StartupWBIHealthUpdate {
+        await startupWBIHealth.recordFailure(reason: reason)
     }
 
     func pendingPlayURLRequest(for key: PendingPlayURLRequestKey) -> PendingPlayURLRequest? {

@@ -165,4 +165,51 @@ final class PlaybackStartupRequestSchedulingTests: XCTestCase {
         XCTAssertFalse(StartupPlayURLFeedbackEligibility.allows(requestLease))
         XCTAssertFalse(decision.usesStaggeredFallback)
     }
+
+    func testPreloadRequestsDoNotRecordSchedulerFeedback() {
+        XCTAssertTrue(StartupPlayURLRequestSource.foreground.recordsSchedulerFeedback)
+        XCTAssertFalse(StartupPlayURLRequestSource.preload.recordsSchedulerFeedback)
+    }
+
+    func testWBIHealthRequiresTwoFailuresBeforeSuppression() async {
+        let health = StartupWBIHealthStore(
+            failureThreshold: 2,
+            failureWindow: 20,
+            suppressionDuration: 30
+        )
+
+        let first = await health.recordFailure(reason: "network.-1001", now: 100)
+        let statusAfterFirst = await health.suppressionStatus(now: 101)
+        let second = await health.recordFailure(reason: "network.-1001", now: 102)
+        let statusAfterSecond = await health.suppressionStatus(now: 103)
+
+        XCTAssertEqual(first, .observed(consecutiveFailures: 1))
+        XCTAssertNil(statusAfterFirst)
+        XCTAssertEqual(
+            second,
+            .suppressed(
+                StartupWBISuppressionStatus(
+                    reason: "network.-1001",
+                    remainingMilliseconds: 30_000
+                )
+            )
+        )
+        XCTAssertEqual(statusAfterSecond?.reason, "network.-1001")
+        XCTAssertEqual(statusAfterSecond?.remainingMilliseconds, 29_000)
+    }
+
+    func testWBIHealthSuccessResetsPendingFailureStreak() async {
+        let health = StartupWBIHealthStore(
+            failureThreshold: 2,
+            failureWindow: 20,
+            suppressionDuration: 30
+        )
+
+        _ = await health.recordFailure(reason: "api.-403", now: 100)
+        let didReset = await health.recordSuccess()
+        let nextFailure = await health.recordFailure(reason: "api.-403", now: 101)
+
+        XCTAssertTrue(didReset)
+        XCTAssertEqual(nextFailure, .observed(consecutiveFailures: 1))
+    }
 }

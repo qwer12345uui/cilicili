@@ -4,6 +4,9 @@ nonisolated enum PlaybackStartupRequestSchedulingExperiment {
     static let storageKey = "cc.bili.playback.startupRequestSchedulingExperimentEnabled.v1"
     static let defaultIsEnabled = false
     static let staggeredFallbackDelayNanoseconds: UInt64 = 180_000_000
+    static let wbiFailureThreshold = 2
+    static let wbiFailureWindow: TimeInterval = 20
+    static let wbiSuppressionDuration: TimeInterval = 30
 }
 
 nonisolated final class StartupPlayURLRequestLease: @unchecked Sendable {
@@ -26,6 +29,96 @@ nonisolated final class StartupPlayURLRequestLease: @unchecked Sendable {
 nonisolated enum StartupPlayURLFeedbackEligibility {
     static func allows(_ lease: StartupPlayURLRequestLease?) -> Bool {
         lease?.isActive ?? true
+    }
+}
+
+nonisolated enum StartupPlayURLRequestSource: String, Sendable {
+    case foreground
+    case preload
+
+    var recordsSchedulerFeedback: Bool {
+        self == .foreground
+    }
+}
+
+nonisolated struct StartupWBISuppressionStatus: Equatable, Sendable {
+    let reason: String
+    let remainingMilliseconds: Int
+}
+
+nonisolated enum StartupWBIHealthUpdate: Equatable, Sendable {
+    case observed(consecutiveFailures: Int)
+    case suppressed(StartupWBISuppressionStatus)
+}
+
+actor StartupWBIHealthStore {
+    private let failureThreshold: Int
+    private let failureWindow: TimeInterval
+    private let suppressionDuration: TimeInterval
+    private var consecutiveFailures = 0
+    private var lastFailureAt: TimeInterval?
+    private var suppressionUntil: TimeInterval?
+    private var suppressionReason: String?
+
+    init(
+        failureThreshold: Int = PlaybackStartupRequestSchedulingExperiment.wbiFailureThreshold,
+        failureWindow: TimeInterval = PlaybackStartupRequestSchedulingExperiment.wbiFailureWindow,
+        suppressionDuration: TimeInterval = PlaybackStartupRequestSchedulingExperiment.wbiSuppressionDuration
+    ) {
+        self.failureThreshold = max(failureThreshold, 1)
+        self.failureWindow = max(failureWindow, 0)
+        self.suppressionDuration = max(suppressionDuration, 1)
+    }
+
+    func suppressionStatus(now: TimeInterval = Date().timeIntervalSinceReferenceDate) -> StartupWBISuppressionStatus? {
+        guard let suppressionUntil,
+              now < suppressionUntil
+        else {
+            self.suppressionUntil = nil
+            suppressionReason = nil
+            return nil
+        }
+        return StartupWBISuppressionStatus(
+            reason: suppressionReason ?? "unknown",
+            remainingMilliseconds: max(Int(((suppressionUntil - now) * 1000).rounded()), 1)
+        )
+    }
+
+    @discardableResult
+    func recordSuccess() -> Bool {
+        let didReset = consecutiveFailures > 0
+        consecutiveFailures = 0
+        lastFailureAt = nil
+        return didReset
+    }
+
+    func recordFailure(
+        reason: String,
+        now: TimeInterval = Date().timeIntervalSinceReferenceDate
+    ) -> StartupWBIHealthUpdate {
+        if let status = suppressionStatus(now: now) {
+            return .suppressed(status)
+        }
+        if let lastFailureAt,
+           now - lastFailureAt > failureWindow {
+            consecutiveFailures = 0
+        }
+        consecutiveFailures += 1
+        lastFailureAt = now
+        guard consecutiveFailures >= failureThreshold else {
+            return .observed(consecutiveFailures: consecutiveFailures)
+        }
+
+        consecutiveFailures = 0
+        lastFailureAt = nil
+        suppressionUntil = now + suppressionDuration
+        suppressionReason = reason
+        return .suppressed(
+            StartupWBISuppressionStatus(
+                reason: reason,
+                remainingMilliseconds: Int((suppressionDuration * 1000).rounded())
+            )
+        )
     }
 }
 

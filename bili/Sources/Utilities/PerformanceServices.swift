@@ -293,7 +293,8 @@ actor VideoPreloadCenter {
                     bvid: bvid,
                     cid: cid,
                     page: page,
-                    preferredQuality: effectivePreferredQuality
+                    preferredQuality: effectivePreferredQuality,
+                    requestSource: .preload
                 )
                 guard !Task.isCancelled else {
                     self.finish(key)

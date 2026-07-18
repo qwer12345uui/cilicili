@@ -48,7 +48,8 @@ extension VideoDetailViewModel {
             cid: cid,
             page: page,
             preferredQuality: adaptiveStartupPreferredQuality,
-            requestLease: requestLease
+            requestLease: requestLease,
+            requestSource: .foreground
         )
     }
 
