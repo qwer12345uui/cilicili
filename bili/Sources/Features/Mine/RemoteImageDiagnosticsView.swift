@@ -1,10 +1,13 @@
+import Foundation
 import SwiftUI
+import UIKit
 
 struct RemoteImageDiagnosticsView: View {
     @ObservedObject var libraryStore: LibraryStore
     @State private var cacheStatistics: RemoteImageCacheStatistics?
     @State private var cdnStatistics: RemoteImageCDNDiagnosticsSnapshot?
     @State private var isLoading = false
+    @State private var didCopy = false
 
     var body: some View {
         Form {
@@ -14,6 +17,13 @@ struct RemoteImageDiagnosticsView: View {
             degradedNodeSection
 
             Section {
+                Button {
+                    copyDiagnostics()
+                } label: {
+                    Label(didCopy ? "已复制" : "复制测试数据", systemImage: didCopy ? "checkmark" : "doc.on.doc")
+                }
+                .disabled(cacheStatistics == nil || cdnStatistics == nil)
+
                 Button(role: .destructive) {
                     Task {
                         await resetDiagnostics()
@@ -152,5 +162,87 @@ struct RemoteImageDiagnosticsView: View {
         cacheStatistics = nil
         cdnStatistics = nil
         await reload()
+    }
+
+    @MainActor
+    private func copyDiagnostics() {
+        guard let cacheStatistics, let cdnStatistics else { return }
+        let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "-"
+        let build = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "-"
+        UIPasteboard.general.string = RemoteImageDiagnosticsTextFormatter.makeText(
+            cache: cacheStatistics,
+            cdn: cdnStatistics,
+            isCDNFailoverEnabled: libraryStore.remoteImageCDNFailoverExperimentEnabled,
+            version: version,
+            build: build,
+            generatedAt: Date.now.formatted(date: .numeric, time: .standard)
+        )
+        didCopy = true
+        Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 1_200_000_000)
+            didCopy = false
+        }
+    }
+}
+
+nonisolated enum RemoteImageDiagnosticsTextFormatter {
+    static func makeText(
+        cache: RemoteImageCacheStatistics,
+        cdn: RemoteImageCDNDiagnosticsSnapshot,
+        isCDNFailoverEnabled: Bool,
+        version: String,
+        build: String,
+        generatedAt: String
+    ) -> String {
+        var lines = [
+            "CiliCili 图片加载诊断",
+            "generated: \(generatedAt)",
+            "version: \(version) (\(build))",
+            "",
+            "图片缓存",
+            "  命中: \(cache.hits)",
+            "  未命中: \(cache.misses)",
+            "  命中率: \(percentage(numerator: cache.hits, denominator: cache.hits + cache.misses))",
+            "  内存条目: \(cache.memoryEntryCount)",
+            "  正在加载: \(cache.inFlightCount)",
+            "  磁盘占用: \(byteCount(cache.diskUsage)) / \(byteCount(cache.diskCapacity))",
+            "",
+            "B站图片 CDN",
+            "  自动切换实验: \(isCDNFailoverEnabled ? "已开启" : "未开启")",
+            "  加载任务: \(cdn.requestCount)",
+            "  成功响应: \(cdn.successCount)",
+            "  瞬时失败: \(cdn.transientFailureCount)",
+            "  自动切换: \(cdn.automaticSwitchCount)",
+            "",
+            "CDN 节点"
+        ]
+
+        cdn.hosts.forEach { host in
+            lines.append(
+                "  \(host.host): 请求 \(host.requestCount) · 成功 \(host.successCount) · 瞬时失败 \(host.transientFailureCount) · 失败率 \(percentage(numerator: host.transientFailureCount, denominator: host.requestCount))"
+            )
+        }
+
+        lines.append("")
+        lines.append("当前降级节点")
+        if cdn.degradedHosts.isEmpty {
+            lines.append("  无")
+        } else {
+            cdn.degradedHosts.forEach { host in
+                lines.append("  \(host.host): 剩余 \(Int(host.remainingTime.rounded(.up))) 秒")
+            }
+        }
+        lines.append("")
+        lines.append("隐私: 仅包含统计数字和 CDN 节点名，不包含图片链接、图片内容、账号或 Cookie。")
+        return lines.joined(separator: "\n")
+    }
+
+    private static func percentage(numerator: Int, denominator: Int) -> String {
+        guard denominator > 0 else { return "-" }
+        return "\(Int((Double(numerator) / Double(denominator) * 100).rounded()))%"
+    }
+
+    private static func byteCount(_ bytes: Int) -> String {
+        ByteCountFormatter.string(fromByteCount: Int64(bytes), countStyle: .file)
     }
 }

@@ -130,4 +130,57 @@ final class RemoteImageCDNFailoverTests: XCTestCase {
         memory.reset()
         XCTAssertTrue(memory.diagnostics(now: now).degradedHosts.isEmpty)
     }
+
+    func testDiagnosticsCopyTextIncludesAggregatesWithoutImageURLs() {
+        let cache = RemoteImageCacheStatistics(
+            memoryEntryCount: 12,
+            inFlightCount: 2,
+            memoryCostLimit: 64 * 1024 * 1024,
+            diskUsage: 2 * 1024 * 1024,
+            diskCapacity: 256 * 1024 * 1024,
+            hits: 80,
+            misses: 20,
+            stores: 16,
+            evictions: 3
+        )
+        let cdn = RemoteImageCDNDiagnosticsSnapshot(
+            requestCount: 100,
+            successCount: 98,
+            transientFailureCount: 2,
+            automaticSwitchCount: 1,
+            hosts: [
+                RemoteImageCDNHostDiagnostics(
+                    host: "i0.hdslb.com",
+                    requestCount: 50,
+                    successCount: 49,
+                    transientFailureCount: 1
+                ),
+                RemoteImageCDNHostDiagnostics(
+                    host: "i1.hdslb.com",
+                    requestCount: 50,
+                    successCount: 49,
+                    transientFailureCount: 1
+                )
+            ],
+            degradedHosts: [
+                RemoteImageCDNDegradedHost(host: "i1.hdslb.com", remainingTime: 42)
+            ]
+        )
+
+        let text = RemoteImageDiagnosticsTextFormatter.makeText(
+            cache: cache,
+            cdn: cdn,
+            isCDNFailoverEnabled: true,
+            version: "1.0.14",
+            build: "47",
+            generatedAt: "2026-07-18 12:00"
+        )
+
+        XCTAssertTrue(text.contains("version: 1.0.14 (47)"))
+        XCTAssertTrue(text.contains("命中率: 80%"))
+        XCTAssertTrue(text.contains("i0.hdslb.com: 请求 50 · 成功 49 · 瞬时失败 1 · 失败率 2%"))
+        XCTAssertTrue(text.contains("i1.hdslb.com: 剩余 42 秒"))
+        XCTAssertFalse(text.contains("https://"))
+        XCTAssertFalse(text.contains("example.jpg"))
+    }
 }
