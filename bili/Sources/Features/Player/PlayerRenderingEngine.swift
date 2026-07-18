@@ -701,6 +701,7 @@ struct PlayerPerformanceEvent: Identifiable, Equatable {
         case playRequested
         case firstFrame
         case startupBreakdown
+        case startupScheduler
         case buffering
         case failed
         case network
@@ -738,6 +739,7 @@ struct PlayerPerformanceEvent: Identifiable, Equatable {
             case .playRequested: return "播放请求"
             case .firstFrame: return "首帧"
             case .startupBreakdown: return "首帧分段"
+            case .startupScheduler: return "首帧调度"
             case .buffering: return "缓冲"
             case .failed: return "失败"
             case .network: return "网络"
@@ -984,6 +986,7 @@ private struct PlayerPerformancePersistedSession: Codable, Equatable, Sendable {
     var speedBoostInterruptionCount: Int
     var startupBreakdownMessage: String?
     var hlsStartupMessage: String?
+    var startupSchedulerMessage: String?
     var startupQuality: Int?
     var startupTargetQuality: Int?
     var startupDecisionMessage: String?
@@ -1039,6 +1042,7 @@ private struct PlayerPerformancePersistedSession: Codable, Equatable, Sendable {
         speedBoostInterruptionCount = session.speedBoostInterruptionCount
         startupBreakdownMessage = session.startupBreakdownMessage
         hlsStartupMessage = session.hlsStartupMessage
+        startupSchedulerMessage = session.startupSchedulerMessage
         startupQuality = session.startupQuality
         startupTargetQuality = session.startupTargetQuality
         startupDecisionMessage = session.startupDecisionMessage
@@ -1095,6 +1099,7 @@ private struct PlayerPerformancePersistedSession: Codable, Equatable, Sendable {
         session.speedBoostInterruptionCount = speedBoostInterruptionCount
         session.startupBreakdownMessage = startupBreakdownMessage
         session.hlsStartupMessage = hlsStartupMessage
+        session.startupSchedulerMessage = startupSchedulerMessage
         session.startupQuality = startupQuality
         session.startupTargetQuality = startupTargetQuality
         session.startupDecisionMessage = startupDecisionMessage
@@ -1255,6 +1260,7 @@ struct PlayerPerformanceSession: Identifiable, Equatable {
     var lastBufferMessage: String?
     var networkMessage: String?
     var hlsStartupMessage: String?
+    var startupSchedulerMessage: String?
     var accessLogMessage: String?
     var decodeLogMessage: String?
     var observedBitrateKilobitsPerSecond: Int?
@@ -1351,6 +1357,10 @@ enum PlayerPerformanceCopyTextFormatter {
         if let hlsStartupMessage = session.hlsStartupMessage {
             lines.append("hlsStartup:")
             lines.append("  \(hlsStartupMessage)")
+        }
+        if let startupSchedulerMessage = session.startupSchedulerMessage {
+            lines.append("startupScheduler:")
+            lines.append("  \(startupSchedulerMessage)")
         }
         if let manifestStageMessage = session.manifestStageMessage {
             lines.append("manifestStage:")
@@ -2007,6 +2017,12 @@ final class PlayerPerformanceStore: ObservableObject {
                     to: &session
                 )
             }
+        case .startupScheduler:
+            session.startupSchedulerMessage = Self.appendDiagnosticMessage(
+                session.startupSchedulerMessage,
+                event.message,
+                maxParts: 3
+            )
         case .buffering:
             session.bufferCount += 1
             session.lastBufferMessage = event.message ?? session.lastBufferMessage
@@ -2213,7 +2229,7 @@ final class PlayerPerformanceStore: ObservableObject {
 
     private static func shouldSchedulePerformanceCopyLog(after kind: PlayerPerformanceEvent.Kind) -> Bool {
         switch kind {
-        case .firstFrame, .startupBreakdown, .network, .manifestStage, .failed:
+        case .firstFrame, .startupBreakdown, .startupScheduler, .network, .manifestStage, .failed:
             return true
         default:
             return false
@@ -2238,6 +2254,7 @@ final class PlayerPerformanceStore: ObservableObject {
         parts.append(session.startupQuality.map { String($0) } ?? "-")
         parts.append(session.startupBreakdownMessage ?? "-")
         parts.append(session.hlsStartupMessage ?? "-")
+        parts.append(session.startupSchedulerMessage ?? "-")
         parts.append(session.manifestStageMessage ?? "-")
         parts.append(session.failureMessage ?? "-")
         return parts.joined(separator: "\n")
@@ -2408,6 +2425,7 @@ final class PlayerPerformanceStore: ObservableObject {
         session.lastBufferMessage = nil
         session.networkMessage = nil
         session.hlsStartupMessage = nil
+        session.startupSchedulerMessage = nil
         session.accessLogMessage = nil
         session.decodeLogMessage = nil
         session.observedBitrateKilobitsPerSecond = nil

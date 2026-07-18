@@ -3049,18 +3049,17 @@ nonisolated final class BiliAPIClient {
                 wbiAvailable: shouldRaceWBI
             )
             : .race
+        let schedulerMessage: String
         if usesExperimentalScheduling {
-            let schedulerMessage = shouldRaceWBI
+            schedulerMessage = shouldRaceWBI
                 ? schedulingDecision.diagnosticMessage
                 : "startupScheduler=experiment mode=webpageOnly wbi=suppressed"
-            await MainActor.run {
-                PlayerMetricsLog.record(
-                    .network,
-                    metricsID: bvid,
-                    message: schedulerMessage
-                )
-            }
+        } else {
+            schedulerMessage = shouldRaceWBI
+                ? "startupScheduler=baseline mode=race"
+                : "startupScheduler=baseline mode=webpageOnly wbi=suppressed"
         }
+        await recordStartupSchedulerMessage(schedulerMessage, bvid: bvid)
         var bestStartupResult: StartupPlayURLRaceResult?
         var lastError: Error?
 
@@ -3186,6 +3185,12 @@ nonisolated final class BiliAPIClient {
                     )
                     bestStartupResult = preferredStartupRaceCandidate(bestStartupResult, result)
                     if acceptsRequestedQuality, data.hasPlayableQuality(requestedQuality) {
+                        await recordStartupSchedulerResult(
+                            attempt,
+                            result: "winner",
+                            requestedQuality: requestedQuality,
+                            bvid: bvid
+                        )
                         logPlayURLStage(
                             "startupRaceWinner.\(attempt.stage)",
                             bvid: bvid,
@@ -3197,6 +3202,12 @@ nonisolated final class BiliAPIClient {
                         return result
                     }
                     if result.isVerifiedUnavailablePreferredFallback {
+                        await recordStartupSchedulerResult(
+                            attempt,
+                            result: "unavailablePreferred",
+                            requestedQuality: requestedQuality,
+                            bvid: bvid
+                        )
                         logPlayURLStage(
                             "startupRaceUnavailablePreferredFallback.\(attempt.stage)",
                             bvid: bvid,
@@ -3218,6 +3229,12 @@ nonisolated final class BiliAPIClient {
                 }
 
                 if let error = attempt.error {
+                    await recordStartupSchedulerResult(
+                        attempt,
+                        result: "failed",
+                        requestedQuality: requestedQuality,
+                        bvid: bvid
+                    )
                     if !(error is CancellationError),
                        (error as? URLError)?.code != .cancelled {
                         await recordStartupRouteAttempt(
@@ -3326,6 +3343,30 @@ nonisolated final class BiliAPIClient {
             networkClass: networkClass,
             elapsedMilliseconds: elapsedMilliseconds,
             accepted: accepted
+        )
+    }
+
+    private func recordStartupSchedulerMessage(_ message: String, bvid: String) async {
+        await MainActor.run {
+            PlayerMetricsLog.record(
+                .startupScheduler,
+                metricsID: bvid,
+                message: message
+            )
+        }
+    }
+
+    private func recordStartupSchedulerResult(
+        _ attempt: StartupPlayURLAttempt,
+        result: String,
+        requestedQuality: Int,
+        bvid: String
+    ) async {
+        guard let route = attempt.route else { return }
+        let elapsed = attempt.elapsedMilliseconds.map { "\($0)ms" } ?? "-"
+        await recordStartupSchedulerMessage(
+            "startupSchedulerResult result=\(result) route=\(route.rawValue) elapsed=\(elapsed) requestedQ=\(requestedQuality)",
+            bvid: bvid
         )
     }
 

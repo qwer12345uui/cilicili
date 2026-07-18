@@ -15,6 +15,7 @@ extension PlaybackNetworkDiagnosticsTextBuilder {
         }
         lines.append("启动包：\(PlaybackNetworkDiagnosticFormat.startupPackageTitle(for: session))")
         lines.append("首片预热：\(PlaybackNetworkDiagnosticFormat.startupRangeWarmTitle(for: session))")
+        appendOptional("首帧调度", session.startupSchedulerMessage, to: &lines)
         appendOptional("播放反馈", session.networkMessage, to: &lines)
         appendOptional("首帧分段", session.startupBreakdownMessage, to: &lines)
         appendOptional("HLS 启动请求", session.hlsStartupMessage, to: &lines)

@@ -48,6 +48,7 @@ struct PlayerPerformanceEventRow: View {
         case .playRequested: return "play.fill"
         case .firstFrame: return "bolt.fill"
         case .startupBreakdown: return "chart.bar.xaxis"
+        case .startupScheduler: return "arrow.triangle.branch"
         case .buffering: return "hourglass"
         case .network: return "network"
         case .accessLog: return "dot.radiowaves.left.and.right"

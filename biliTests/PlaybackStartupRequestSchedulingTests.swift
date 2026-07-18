@@ -103,4 +103,28 @@ final class PlaybackStartupRequestSchedulingTests: XCTestCase {
 
         XCTAssertFalse(decision.usesStaggeredFallback)
     }
+
+    func testSchedulerDiagnosticDescribesTheStaggeredRouteOrder() {
+        let decision = StartupPlayURLSchedulingDecision(
+            primaryRoute: .wbi,
+            fallbackRoute: .webpage
+        )
+
+        XCTAssertEqual(
+            decision.diagnosticMessage,
+            "startupScheduler=experiment mode=staggered primary=wbi fallback=webpage delay=180ms"
+        )
+    }
+
+    func testPerformanceCopyKeepsStartupSchedulerMessage() {
+        var session = PlayerPerformanceSession(id: "BVstartupScheduler")
+        session.startupSchedulerMessage = "startupScheduler=experiment mode=race learning"
+
+        let copy = PlayerPerformanceCopyTextFormatter.performanceCopyText(
+            metricsID: session.metricsID,
+            session: session
+        )
+
+        XCTAssertTrue(copy.contains("startupScheduler:\n  startupScheduler=experiment mode=race learning"))
+    }
 }
