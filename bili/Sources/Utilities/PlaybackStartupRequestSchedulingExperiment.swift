@@ -33,6 +33,30 @@ nonisolated struct StartupPlayURLSchedulingDecision: Equatable, Sendable {
     }
 }
 
+actor StartupPlayURLFallbackTracker {
+    enum Status: String, Equatable, Sendable {
+        case waiting
+        case started
+        case cancelledBeforeStart
+    }
+
+    private var status: Status = .waiting
+
+    func markStarted() {
+        guard status == .waiting else { return }
+        status = .started
+    }
+
+    func markCancelledBeforeStart() {
+        guard status == .waiting else { return }
+        status = .cancelledBeforeStart
+    }
+
+    func currentStatus() -> Status {
+        status
+    }
+}
+
 actor StartupPlayURLRoutePerformanceStore {
     static let shared = StartupPlayURLRoutePerformanceStore()
 

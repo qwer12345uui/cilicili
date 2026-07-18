@@ -3062,6 +3062,9 @@ nonisolated final class BiliAPIClient {
         await recordStartupSchedulerMessage(schedulerMessage, bvid: bvid)
         var bestStartupResult: StartupPlayURLRaceResult?
         var lastError: Error?
+        let fallbackTracker = schedulingDecision.usesStaggeredFallback
+            ? StartupPlayURLFallbackTracker()
+            : nil
 
         return await withTaskGroup(of: StartupPlayURLAttempt.self, returning: StartupPlayURLRaceResult?.self) { group in
             if schedulingDecision.usesStaggeredFallback,
@@ -3082,6 +3085,7 @@ nonisolated final class BiliAPIClient {
                             nanoseconds: PlaybackStartupRequestSchedulingExperiment.staggeredFallbackDelayNanoseconds
                         )
                     } catch {
+                        await fallbackTracker?.markCancelledBeforeStart()
                         return StartupPlayURLAttempt(
                             stage: "startupFallbackCancelled",
                             route: nil,
@@ -3092,6 +3096,7 @@ nonisolated final class BiliAPIClient {
                         )
                     }
                     guard !Task.isCancelled else {
+                        await fallbackTracker?.markCancelledBeforeStart()
                         return StartupPlayURLAttempt(
                             stage: "startupFallbackCancelled",
                             route: nil,
@@ -3101,6 +3106,7 @@ nonisolated final class BiliAPIClient {
                             isAuthoritativePlayURLSource: false
                         )
                     }
+                    await fallbackTracker?.markStarted()
                     return await self.startupPlayURLAttempt(
                         route: fallbackRoute,
                         bvid: bvid,
@@ -3185,11 +3191,18 @@ nonisolated final class BiliAPIClient {
                     )
                     bestStartupResult = preferredStartupRaceCandidate(bestStartupResult, result)
                     if acceptsRequestedQuality, data.hasPlayableQuality(requestedQuality) {
+                        group.cancelAll()
+                        await group.waitForAll()
+                        let fallbackStatus = await startupFallbackStatus(
+                            tracker: fallbackTracker,
+                            route: schedulingDecision.fallbackRoute
+                        )
                         await recordStartupSchedulerResult(
                             attempt,
                             result: "winner",
                             requestedQuality: requestedQuality,
-                            bvid: bvid
+                            bvid: bvid,
+                            fallbackStatus: fallbackStatus
                         )
                         logPlayURLStage(
                             "startupRaceWinner.\(attempt.stage)",
@@ -3198,15 +3211,21 @@ nonisolated final class BiliAPIClient {
                             start: raceStart,
                             data: data
                         )
-                        group.cancelAll()
                         return result
                     }
                     if result.isVerifiedUnavailablePreferredFallback {
+                        group.cancelAll()
+                        await group.waitForAll()
+                        let fallbackStatus = await startupFallbackStatus(
+                            tracker: fallbackTracker,
+                            route: schedulingDecision.fallbackRoute
+                        )
                         await recordStartupSchedulerResult(
                             attempt,
                             result: "unavailablePreferred",
                             requestedQuality: requestedQuality,
-                            bvid: bvid
+                            bvid: bvid,
+                            fallbackStatus: fallbackStatus
                         )
                         logPlayURLStage(
                             "startupRaceUnavailablePreferredFallback.\(attempt.stage)",
@@ -3215,7 +3234,6 @@ nonisolated final class BiliAPIClient {
                             start: raceStart,
                             data: data
                         )
-                        group.cancelAll()
                         return result
                     }
                     logPreferredQualityMiss(
@@ -3360,14 +3378,26 @@ nonisolated final class BiliAPIClient {
         _ attempt: StartupPlayURLAttempt,
         result: String,
         requestedQuality: Int,
-        bvid: String
+        bvid: String,
+        fallbackStatus: String? = nil
     ) async {
         guard let route = attempt.route else { return }
         let elapsed = attempt.elapsedMilliseconds.map { "\($0)ms" } ?? "-"
+        let fallback = fallbackStatus.map { " fallback=\($0)" } ?? ""
         await recordStartupSchedulerMessage(
-            "startupSchedulerResult result=\(result) route=\(route.rawValue) elapsed=\(elapsed) requestedQ=\(requestedQuality)",
+            "startupSchedulerResult result=\(result) route=\(route.rawValue) elapsed=\(elapsed) requestedQ=\(requestedQuality)\(fallback)",
             bvid: bvid
         )
+    }
+
+    private func startupFallbackStatus(
+        tracker: StartupPlayURLFallbackTracker?,
+        route: StartupPlayURLRoute?
+    ) async -> String {
+        guard let route else { return "notScheduled" }
+        guard let tracker else { return "\(route.rawValue):unknown" }
+        let status = await tracker.currentStatus()
+        return "\(route.rawValue):\(status.rawValue)"
     }
 
     private func cancelPlayURLStage(

@@ -127,4 +127,20 @@ final class PlaybackStartupRequestSchedulingTests: XCTestCase {
 
         XCTAssertTrue(copy.contains("startupScheduler:\n  startupScheduler=experiment mode=race learning"))
     }
+
+    func testFallbackTrackerKeepsTheTerminalStatus() async {
+        let cancelledBeforeStart = StartupPlayURLFallbackTracker()
+        await cancelledBeforeStart.markCancelledBeforeStart()
+        await cancelledBeforeStart.markStarted()
+        let cancelledStatus = await cancelledBeforeStart.currentStatus()
+
+        XCTAssertEqual(cancelledStatus, .cancelledBeforeStart)
+
+        let started = StartupPlayURLFallbackTracker()
+        await started.markStarted()
+        await started.markCancelledBeforeStart()
+        let startedStatus = await started.currentStatus()
+
+        XCTAssertEqual(startedStatus, .started)
+    }
 }
