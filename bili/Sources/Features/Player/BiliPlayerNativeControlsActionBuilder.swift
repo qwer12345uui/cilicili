@@ -14,7 +14,7 @@ struct BiliPlayerNativeControlsActionBuilder {
                 guard !viewModel.isTerminated else { return }
                 visibilityActions.markInteraction(keepsVisible: true)
                 prepareUserSeekWarmup(progress, true)
-                viewModel.beginUserScrubInteraction()
+                viewModel.beginUserScrubInteraction(source: .nativeProgress)
             },
             onScrubChanged: { progress in
                 guard !viewModel.isTerminated else { return }

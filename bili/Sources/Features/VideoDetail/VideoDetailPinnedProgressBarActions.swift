@@ -44,7 +44,7 @@ struct VideoDetailPinnedProgressBarActions {
         let progress = progress(at: locationX, in: width)
         if !isScrubbing {
             prepareSeekWarmupIfNeeded(progress, force: true)
-            playerViewModel.beginUserScrubInteraction()
+            playerViewModel.beginUserScrubInteraction(source: .pinnedProgress)
         }
         isScrubbing = true
         scrubProgress = progress
@@ -72,7 +72,7 @@ struct VideoDetailPinnedProgressBarActions {
         scrubProgress = clampedProgress
         prepareSeekWarmupIfNeeded(clampedProgress, force: true)
         if beginsInteraction {
-            playerViewModel.beginUserScrubInteraction()
+            playerViewModel.beginUserScrubInteraction(source: .pinnedProgress)
         }
         playerViewModel.seekAfterSliderCommit(to: clampedProgress)
         lastPreparedProgress = -1

@@ -2113,11 +2113,12 @@ final class PlayerPerformanceStore: ObservableObject {
             )
         case .seek:
             let isBufferReady = event.message?.contains("bufferReady") == true
+            let isScrubInteraction = event.message?.hasPrefix("scrub ") == true
             if isBufferReady {
                 let tokens = Self.keyValueTokens(in: event.message ?? "")
                 session.lastSeekBufferReadyCoveragePercent = Self.percentageValue(for: "coverage", in: tokens)
                     ?? session.lastSeekBufferReadyCoveragePercent
-            } else {
+            } else if !isScrubInteraction {
                 session.seekCount += 1
             }
             session.seekMessage = Self.appendDiagnosticMessage(

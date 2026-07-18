@@ -26,7 +26,6 @@ struct BiliPlayerSurfaceGestureLayer<Content: View>: View {
     private let horizontalSeekActivationDistance: CGFloat = 8
     private let horizontalSeekDominanceRatio: CGFloat = 3
     private let horizontalSeekChangeReportDelta = 0.004
-    private let horizontalSeekSecondsPerFullWidth: TimeInterval = 90
 
     var body: some View {
         GeometryReader { proxy in
@@ -132,7 +131,8 @@ struct BiliPlayerSurfaceGestureLayer<Content: View>: View {
         let currentProgress = horizontalSeekCurrentProgress
             ?? horizontalSeekStartProgress
             ?? clock.progress
-        let progressDelta = Double(deltaX / size.width) * horizontalSeekSecondsPerFullWidth / duration
+        let secondsPerFullWidth = PlayerHorizontalSeekSensitivity.secondsPerFullWidth(duration: duration)
+        let progressDelta = Double(deltaX / size.width) * secondsPerFullWidth / duration
         let progress = min(max(currentProgress + progressDelta, 0), 1)
         horizontalSeekCurrentProgress = progress
         horizontalSeekPreviewProgress = progress

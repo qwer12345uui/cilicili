@@ -251,6 +251,12 @@ private final class PlayerRemoteControlSession {
     }
 }
 
+enum PlayerScrubInteractionSource: String, Sendable {
+    case nativeProgress = "native"
+    case surfaceGesture = "surface"
+    case pinnedProgress = "pinned"
+}
+
 @MainActor
 final class PlayerPlaybackClock: ObservableObject {
     @Published private(set) var currentTime: TimeInterval = 0
@@ -411,6 +417,8 @@ final class PlayerStateViewModel: NSObject, ObservableObject {
     private var pendingSeekRecoveryMetric: PendingSeekRecoveryMetric?
     private var lastRecoveredSeekMetricID: UUID?
     private var lastSeekBufferReadyMetricID: UUID?
+    private var activeUserScrubSource: PlayerScrubInteractionSource?
+    private var activeUserScrubStartedAt: CFTimeInterval?
     private var pendingUserSeekRevealTargetTime: TimeInterval?
     private var pendingUserSeekRevealReadySince: CFTimeInterval?
     private var pendingUserSeekRevealStartedAt: CFTimeInterval?
@@ -1862,6 +1870,33 @@ final class PlayerStateViewModel: NSObject, ObservableObject {
             clearPendingUserSeekRevealTarget()
             engine.setTemporaryAudioSuppressed(false)
         }
+        clearActiveUserScrubInteraction()
+    }
+
+    private func clearActiveUserScrubInteraction() {
+        activeUserScrubSource = nil
+        activeUserScrubStartedAt = nil
+    }
+
+    private func recordScrubInteraction(
+        source: PlayerScrubInteractionSource,
+        result: String,
+        progress: Double? = nil,
+        elapsedMilliseconds: Double? = nil
+    ) {
+        var parts = ["scrub", "source=\(source.rawValue)", "result=\(result)"]
+        if let progress {
+            parts.append("progress=\(String(format: "%.3f", min(max(progress, 0), 1)))")
+        }
+        if let elapsedMilliseconds {
+            parts.append("elapsed=\(String(format: "%.0fms", elapsedMilliseconds))")
+        }
+        PlayerMetricsLog.record(
+            .seek,
+            metricsID: metricsID,
+            title: title,
+            message: parts.joined(separator: " ")
+        )
     }
 
     @discardableResult
@@ -1942,6 +1977,19 @@ final class PlayerStateViewModel: NSObject, ObservableObject {
         let resolvedDuration = duration ?? durationHint ?? playbackClock.duration ?? initialSnapshot.duration ?? 0
         let optimisticTargetTime = resolvedDuration > 0 ? targetProgress * resolvedDuration : nil
         let userSeekStart = CACurrentMediaTime()
+        let scrubSource = activeUserScrubSource
+        let scrubElapsed = activeUserScrubStartedAt.map {
+            PlayerMetricsLog.elapsedMilliseconds(since: $0)
+        }
+        clearActiveUserScrubInteraction()
+        if let scrubSource {
+            recordScrubInteraction(
+                source: scrubSource,
+                result: "commit",
+                progress: targetProgress,
+                elapsedMilliseconds: scrubElapsed
+            )
+        }
         let signpostState = PlayerMetricsLog.beginSignpostedInterval(
             "PlayerSeek",
             message: "mode=slider target=\(String(format: "%.3f", targetProgress))"
@@ -2179,13 +2227,22 @@ final class PlayerStateViewModel: NSObject, ObservableObject {
         }
     }
 
-    func beginUserScrubInteraction() {
+    func beginUserScrubInteraction(source: PlayerScrubInteractionSource = .nativeProgress) {
         guard !isTerminated else { return }
         guard engine.hasMedia else { return }
         markUserSeekIntent()
+        guard hasPresentedPlayback else { return }
         let snapshot = engine.snapshot(durationHint: durationHint)
         shouldResumePlaybackAfterUserScrub = wantsAutoplay || isPlaying || snapshot.isPlaying
-        guard hasPresentedPlayback else { return }
+        if activeUserScrubSource == nil {
+            activeUserScrubSource = source
+            activeUserScrubStartedAt = CACurrentMediaTime()
+            recordScrubInteraction(
+                source: source,
+                result: "begin",
+                progress: playbackClock.progress
+            )
+        }
         wantsAutoplay = false
         if !isUserSeeking {
             isUserSeeking = true
@@ -2196,6 +2253,51 @@ final class PlayerStateViewModel: NSObject, ObservableObject {
         playbackPhase = .seeking
         engine.pause()
         engine.setTemporaryAudioSuppressed(true)
+    }
+
+    func cancelUserScrubInteraction() {
+        guard !isTerminated else { return }
+        guard isUserSeeking else {
+            clearActiveUserScrubInteraction()
+            shouldResumePlaybackAfterUserScrub = false
+            return
+        }
+
+        let shouldResume = shouldResumePlaybackAfterUserScrub
+        let scrubSource = activeUserScrubSource
+        let scrubElapsed = activeUserScrubStartedAt.map {
+            PlayerMetricsLog.elapsedMilliseconds(since: $0)
+        }
+        cancelScrubSeekTasks(resetUserSeeking: false)
+        cancelDeferredBufferingIndicator()
+        cancelSeekRecoveryTracking()
+        playbackRecoveryWatchdogTask?.cancel()
+        playbackRecoveryWatchdogTask = nil
+        isUserSeeking = false
+        isBuffering = false
+        shouldResumePlaybackAfterUserScrub = false
+        clearActiveUserScrubInteraction()
+        engine.setTemporaryAudioSuppressed(false)
+
+        if let scrubSource {
+            recordScrubInteraction(
+                source: scrubSource,
+                result: "cancel",
+                elapsedMilliseconds: scrubElapsed
+            )
+        }
+
+        if shouldResume {
+            resumePlaybackAfterUserSeek()
+        } else {
+            wantsAutoplay = false
+            isPlaying = false
+            playbackPhase = .paused
+            refreshPlaybackState()
+            invalidatePictureInPicturePlaybackState()
+        }
+        syncRemotePlaybackControls()
+        rescheduleTimeObserverIfNeeded(force: true)
     }
 
     func seek(by interval: TimeInterval) {

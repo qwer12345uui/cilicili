@@ -36,6 +36,7 @@ struct BiliPlayerSurfaceGestureActions {
         guard !viewModel.isTerminated else { return }
         visibilityActions.markInteraction(keepsVisible: true)
         prepareUserSeekWarmup(progress, true)
+        viewModel.beginUserScrubInteraction(source: .surfaceGesture)
     }
 
     func horizontalSeekChanged(_ progress: Double) {
@@ -58,6 +59,7 @@ struct BiliPlayerSurfaceGestureActions {
     }
 
     func horizontalSeekCancelled() {
+        viewModel.cancelUserScrubInteraction()
         viewModel.playbackClock.clearSeekPreview()
         resetPreparedScrubProgress()
         visibilityActions.markInteraction()
