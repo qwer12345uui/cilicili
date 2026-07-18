@@ -13,6 +13,7 @@ struct VideoDetailCoreTaskState {
     var commentsLoadingToken: UUID?
     var startupPlayURLTask: Task<PlayURLData, Error>?
     var startupPlayURLTaskKey: String?
+    var startupPlayURLRequestLease: StartupPlayURLRequestLease?
     var startupPlayURLGeneration = 0
     var cloudHistoryResumeTask: Task<VideoHistoryProgress?, Never>?
     var cloudHistoryResumeTaskAid: Int?
@@ -77,6 +78,11 @@ extension VideoDetailViewModel {
     var startupPlayURLTaskKey: String? {
         get { coreTaskState.startupPlayURLTaskKey }
         set { coreTaskState.startupPlayURLTaskKey = newValue }
+    }
+
+    var startupPlayURLRequestLease: StartupPlayURLRequestLease? {
+        get { coreTaskState.startupPlayURLRequestLease }
+        set { coreTaskState.startupPlayURLRequestLease = newValue }
     }
 
     var startupPlayURLGeneration: Int {

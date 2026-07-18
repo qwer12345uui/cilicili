@@ -2843,7 +2843,8 @@ nonisolated final class BiliAPIClient {
         bvid: String,
         cid: Int,
         page: Int? = nil,
-        preferredQuality: Int? = nil
+        preferredQuality: Int? = nil,
+        requestLease: StartupPlayURLRequestLease? = nil
     ) async throws -> PlayURLData {
         let snapshot = await requestSnapshot()
         let configuredQuality = preferredQuality ?? snapshot.effectivePreferredVideoQuality
@@ -2888,7 +2889,8 @@ nonisolated final class BiliAPIClient {
                 cid: cid,
                 page: page,
                 preferredQuality: preferredQuality,
-                usesExperimentalScheduling: snapshot.videoStartupRequestSchedulingExperimentEnabled
+                usesExperimentalScheduling: snapshot.videoStartupRequestSchedulingExperimentEnabled,
+                requestLease: requestLease
             )
         }
     }
@@ -2903,37 +2905,57 @@ nonisolated final class BiliAPIClient {
         operation: @escaping () async throws -> PlayURLData
     ) async throws -> PlayURLData {
         let pendingKey = PendingPlayURLRequestKey(cacheKey: cacheKey, scope: scope)
-        if let existingTask = await state.playURLRequestTask(for: pendingKey) {
+        if let existingRequest = await state.pendingPlayURLRequest(for: pendingKey) {
             PlayerMetricsLog.logger.info(
                 "playURLRequestJoined source=\(source, privacy: .public) bvid=\(bvid, privacy: .public) cid=\(cid, privacy: .public) qn=\(requestedQuality, privacy: .public)"
             )
-            let data = try await existingTask.value
-            await playURLCache.store(data, for: cacheKey, scope: scope)
-            return data
+            return try await awaitPendingPlayURLRequest(existingRequest.task)
         }
 
+        let requestID = UUID()
+        let startGate = PendingPlayURLRequestStartGate()
         let task = Task<PlayURLData, Error>(priority: .userInitiated) {
-            try Task.checkCancellation()
-            return try await operation()
+            await startGate.wait()
+            do {
+                try Task.checkCancellation()
+                let data = try await operation()
+                await self.playURLCache.store(data, for: cacheKey, scope: scope)
+                await self.state.clearPendingPlayURLRequest(for: pendingKey, id: requestID)
+                return data
+            } catch {
+                await self.state.clearPendingPlayURLRequest(for: pendingKey, id: requestID)
+                throw error
+            }
         }
-        if let existingTask = await state.setPlayURLRequestTaskIfAbsent(task, for: pendingKey) {
+        let request = PendingPlayURLRequest(id: requestID, task: task)
+        if let existingRequest = await state.insertPendingPlayURLRequestIfAbsent(request, for: pendingKey) {
             task.cancel()
+            await startGate.open()
             PlayerMetricsLog.logger.info(
                 "playURLRequestJoinedAfterRace source=\(source, privacy: .public) bvid=\(bvid, privacy: .public) cid=\(cid, privacy: .public) qn=\(requestedQuality, privacy: .public)"
             )
-            let data = try await existingTask.value
-            await playURLCache.store(data, for: cacheKey, scope: scope)
-            return data
+            return try await awaitPendingPlayURLRequest(existingRequest.task)
         }
 
-        do {
-            let data = try await task.value
-            await state.clearPlayURLRequestTask(for: pendingKey)
-            await playURLCache.store(data, for: cacheKey, scope: scope)
-            return data
-        } catch {
-            await state.clearPlayURLRequestTask(for: pendingKey)
-            throw error
+        await startGate.open()
+        return try await awaitPendingPlayURLRequest(task)
+    }
+
+    private func awaitPendingPlayURLRequest(
+        _ task: Task<PlayURLData, Error>
+    ) async throws -> PlayURLData {
+        let waiter = PendingPlayURLRequestWaiter()
+        Task(priority: .utility) {
+            do {
+                waiter.succeed(try await task.value)
+            } catch {
+                waiter.fail(error)
+            }
+        }
+        return try await withTaskCancellationHandler {
+            try await waiter.value()
+        } onCancel: {
+            waiter.fail(CancellationError())
         }
     }
 
@@ -2973,7 +2995,8 @@ nonisolated final class BiliAPIClient {
         cid: Int,
         page: Int? = nil,
         preferredQuality: Int? = nil,
-        usesExperimentalScheduling: Bool
+        usesExperimentalScheduling: Bool,
+        requestLease: StartupPlayURLRequestLease?
     ) async throws -> PlayURLData {
         let storedPreferredQuality = await preferredVideoQuality()
         let configuredQuality = preferredQuality ?? storedPreferredQuality
@@ -2985,7 +3008,8 @@ nonisolated final class BiliAPIClient {
             cid: cid,
             page: page,
             requestedQuality: requestedQuality,
-            usesExperimentalScheduling: usesExperimentalScheduling
+            usesExperimentalScheduling: usesExperimentalScheduling,
+            requestLease: requestLease
         ) {
             let racedStartupData = racedStartupResult.data
             if !honorsConfiguredQuality
@@ -3037,7 +3061,8 @@ nonisolated final class BiliAPIClient {
         cid: Int,
         page: Int?,
         requestedQuality: Int,
-        usesExperimentalScheduling: Bool
+        usesExperimentalScheduling: Bool,
+        requestLease: StartupPlayURLRequestLease?
     ) async throws -> StartupPlayURLRaceResult? {
         let raceStart = CACurrentMediaTime()
         let shouldRaceWBI = await shouldAttemptStartupWBI()
@@ -3183,27 +3208,39 @@ nonisolated final class BiliAPIClient {
                     )
                     let acceptsRequestedQuality = data.hasPlayableQuality(requestedQuality)
                         || result.isVerifiedUnavailablePreferredFallback
-                    await recordStartupRouteAttempt(
-                        attempt,
-                        accepted: acceptsRequestedQuality,
-                        networkClass: playbackEnvironment.networkClass,
-                        isExperimentEnabled: usesExperimentalScheduling
-                    )
+                    if StartupPlayURLFeedbackEligibility.allows(requestLease) {
+                        await recordStartupRouteAttempt(
+                            attempt,
+                            accepted: acceptsRequestedQuality,
+                            networkClass: playbackEnvironment.networkClass,
+                            isExperimentEnabled: usesExperimentalScheduling,
+                            requestLease: requestLease
+                        )
+                    }
                     bestStartupResult = preferredStartupRaceCandidate(bestStartupResult, result)
                     if acceptsRequestedQuality, data.hasPlayableQuality(requestedQuality) {
                         group.cancelAll()
                         await group.waitForAll()
-                        let fallbackStatus = await startupFallbackStatus(
-                            tracker: fallbackTracker,
-                            route: schedulingDecision.fallbackRoute
-                        )
-                        await recordStartupSchedulerResult(
-                            attempt,
-                            result: "winner",
-                            requestedQuality: requestedQuality,
-                            bvid: bvid,
-                            fallbackStatus: fallbackStatus
-                        )
+                        if StartupPlayURLFeedbackEligibility.allows(requestLease) {
+                            let fallbackStatus = await startupFallbackStatus(
+                                tracker: fallbackTracker,
+                                route: schedulingDecision.fallbackRoute
+                            )
+                            await recordStartupSchedulerResult(
+                                attempt,
+                                result: "winner",
+                                requestedQuality: requestedQuality,
+                                bvid: bvid,
+                                fallbackStatus: fallbackStatus
+                            )
+                        } else {
+                            await recordStartupSchedulerResult(
+                                attempt,
+                                result: "ignoredLate",
+                                requestedQuality: requestedQuality,
+                                bvid: bvid
+                            )
+                        }
                         logPlayURLStage(
                             "startupRaceWinner.\(attempt.stage)",
                             bvid: bvid,
@@ -3216,17 +3253,26 @@ nonisolated final class BiliAPIClient {
                     if result.isVerifiedUnavailablePreferredFallback {
                         group.cancelAll()
                         await group.waitForAll()
-                        let fallbackStatus = await startupFallbackStatus(
-                            tracker: fallbackTracker,
-                            route: schedulingDecision.fallbackRoute
-                        )
-                        await recordStartupSchedulerResult(
-                            attempt,
-                            result: "unavailablePreferred",
-                            requestedQuality: requestedQuality,
-                            bvid: bvid,
-                            fallbackStatus: fallbackStatus
-                        )
+                        if StartupPlayURLFeedbackEligibility.allows(requestLease) {
+                            let fallbackStatus = await startupFallbackStatus(
+                                tracker: fallbackTracker,
+                                route: schedulingDecision.fallbackRoute
+                            )
+                            await recordStartupSchedulerResult(
+                                attempt,
+                                result: "unavailablePreferred",
+                                requestedQuality: requestedQuality,
+                                bvid: bvid,
+                                fallbackStatus: fallbackStatus
+                            )
+                        } else {
+                            await recordStartupSchedulerResult(
+                                attempt,
+                                result: "ignoredLate",
+                                requestedQuality: requestedQuality,
+                                bvid: bvid
+                            )
+                        }
                         logPlayURLStage(
                             "startupRaceUnavailablePreferredFallback.\(attempt.stage)",
                             bvid: bvid,
@@ -3247,19 +3293,29 @@ nonisolated final class BiliAPIClient {
                 }
 
                 if let error = attempt.error {
-                    await recordStartupSchedulerResult(
-                        attempt,
-                        result: "failed",
-                        requestedQuality: requestedQuality,
-                        bvid: bvid
-                    )
-                    if !(error is CancellationError),
-                       (error as? URLError)?.code != .cancelled {
-                        await recordStartupRouteAttempt(
+                    if StartupPlayURLFeedbackEligibility.allows(requestLease) {
+                        await recordStartupSchedulerResult(
                             attempt,
-                            accepted: false,
-                            networkClass: playbackEnvironment.networkClass,
-                            isExperimentEnabled: usesExperimentalScheduling
+                            result: "failed",
+                            requestedQuality: requestedQuality,
+                            bvid: bvid
+                        )
+                        if !(error is CancellationError),
+                           (error as? URLError)?.code != .cancelled {
+                            await recordStartupRouteAttempt(
+                                attempt,
+                                accepted: false,
+                                networkClass: playbackEnvironment.networkClass,
+                                isExperimentEnabled: usesExperimentalScheduling,
+                                requestLease: requestLease
+                            )
+                        }
+                    } else {
+                        await recordStartupSchedulerResult(
+                            attempt,
+                            result: "ignoredLate",
+                            requestedQuality: requestedQuality,
+                            bvid: bvid
                         )
                     }
                     lastError = error
@@ -3270,7 +3326,8 @@ nonisolated final class BiliAPIClient {
                         start: raceStart,
                         error: error
                     )
-                    if attempt.stage == "startupWBI" {
+                    if attempt.stage == "startupWBI",
+                       StartupPlayURLFeedbackEligibility.allows(requestLease) {
                         await suppressStartupWBI()
                     }
                 }
@@ -3350,17 +3407,19 @@ nonisolated final class BiliAPIClient {
         _ attempt: StartupPlayURLAttempt,
         accepted: Bool,
         networkClass: PlaybackEnvironment.NetworkClass,
-        isExperimentEnabled: Bool
+        isExperimentEnabled: Bool,
+        requestLease: StartupPlayURLRequestLease?
     ) async {
         guard isExperimentEnabled,
               let route = attempt.route,
               let elapsedMilliseconds = attempt.elapsedMilliseconds
         else { return }
-        await StartupPlayURLRoutePerformanceStore.shared.record(
+        _ = await StartupPlayURLRoutePerformanceStore.shared.record(
             route: route,
             networkClass: networkClass,
             elapsedMilliseconds: elapsedMilliseconds,
-            accepted: accepted
+            accepted: accepted,
+            requestLease: requestLease
         )
     }
 
@@ -5984,9 +6043,78 @@ private struct CachedPlayURLFailure {
     let expiresAt: CFTimeInterval
 }
 
-private struct PendingPlayURLRequestKey: Hashable {
+nonisolated private struct PendingPlayURLRequestKey: Hashable, Sendable {
     let cacheKey: PlayURLCacheKey
     let scope: PlayURLCacheLoginScope
+}
+
+nonisolated private struct PendingPlayURLRequest: Sendable {
+    let id: UUID
+    let task: Task<PlayURLData, Error>
+}
+
+private actor PendingPlayURLRequestStartGate {
+    private var isOpen = false
+    private var waiters = [CheckedContinuation<Void, Never>]()
+
+    func wait() async {
+        guard !isOpen else { return }
+        await withCheckedContinuation { continuation in
+            if isOpen {
+                continuation.resume()
+            } else {
+                waiters.append(continuation)
+            }
+        }
+    }
+
+    func open() {
+        guard !isOpen else { return }
+        isOpen = true
+        let pendingWaiters = waiters
+        waiters.removeAll()
+        pendingWaiters.forEach { $0.resume() }
+    }
+}
+
+private nonisolated final class PendingPlayURLRequestWaiter: @unchecked Sendable {
+    private let lock = NSLock()
+    private var continuation: CheckedContinuation<PlayURLData, Error>?
+    private var result: Result<PlayURLData, Error>?
+
+    func value() async throws -> PlayURLData {
+        try await withCheckedThrowingContinuation { continuation in
+            lock.lock()
+            if let result {
+                lock.unlock()
+                continuation.resume(with: result)
+                return
+            }
+            self.continuation = continuation
+            lock.unlock()
+        }
+    }
+
+    func succeed(_ data: PlayURLData) {
+        complete(.success(data))
+    }
+
+    func fail(_ error: Error) {
+        complete(.failure(error))
+    }
+
+    private func complete(_ result: Result<PlayURLData, Error>) {
+        lock.lock()
+        guard self.result == nil else {
+            lock.unlock()
+            return
+        }
+        self.result = result
+        let continuation = self.continuation
+        self.continuation = nil
+        lock.unlock()
+        continuation?.resume(with: result)
+    }
 }
 
 private struct CachedDanmaku {
@@ -6029,7 +6157,7 @@ private actor BiliAPIClientState {
     private var appRecommendFeedIndex: Int?
     private var startupWBISuppressedUntil: CFTimeInterval = 0
     private var playURLFailureCache: [String: CachedPlayURLFailure] = [:]
-    private var playURLRequestTasks: [PendingPlayURLRequestKey: Task<PlayURLData, Error>] = [:]
+    private var playURLRequestTasks: [PendingPlayURLRequestKey: PendingPlayURLRequest] = [:]
     private var playURLStageTasks: [String: Task<PlayURLData, Error>] = [:]
     private var danmakuCache: [Int: CachedDanmaku] = [:]
 
@@ -6163,22 +6291,23 @@ private actor BiliAPIClientState {
         startupWBISuppressedUntil = CACurrentMediaTime() + duration
     }
 
-    func playURLRequestTask(for key: PendingPlayURLRequestKey) -> Task<PlayURLData, Error>? {
+    func pendingPlayURLRequest(for key: PendingPlayURLRequestKey) -> PendingPlayURLRequest? {
         playURLRequestTasks[key]
     }
 
-    func setPlayURLRequestTaskIfAbsent(
-        _ task: Task<PlayURLData, Error>,
+    func insertPendingPlayURLRequestIfAbsent(
+        _ request: PendingPlayURLRequest,
         for key: PendingPlayURLRequestKey
-    ) -> Task<PlayURLData, Error>? {
+    ) -> PendingPlayURLRequest? {
         if let existing = playURLRequestTasks[key] {
             return existing
         }
-        playURLRequestTasks[key] = task
+        playURLRequestTasks[key] = request
         return nil
     }
 
-    func clearPlayURLRequestTask(for key: PendingPlayURLRequestKey) {
+    func clearPendingPlayURLRequest(for key: PendingPlayURLRequestKey, id: UUID) {
+        guard playURLRequestTasks[key]?.id == id else { return }
         playURLRequestTasks[key] = nil
     }
 
@@ -6205,7 +6334,7 @@ private actor BiliAPIClientState {
         }
         let requestKeys = playURLRequestTasks.keys.filter { $0.cacheKey.bvid == bvid }
         for key in requestKeys {
-            playURLRequestTasks[key]?.cancel()
+            playURLRequestTasks[key]?.task.cancel()
             playURLRequestTasks[key] = nil
         }
     }

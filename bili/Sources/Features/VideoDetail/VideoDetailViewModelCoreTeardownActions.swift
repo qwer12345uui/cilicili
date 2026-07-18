@@ -18,9 +18,11 @@ extension VideoDetailViewModel {
         state.commentsLoadingTask?.cancel()
         state.commentsLoadingTask = nil
         state.commentsLoadingToken = nil
+        state.startupPlayURLRequestLease?.invalidate()
         state.startupPlayURLTask?.cancel()
         state.startupPlayURLTask = nil
         state.startupPlayURLTaskKey = nil
+        state.startupPlayURLRequestLease = nil
         state.startupPlayURLGeneration += 1
         state.cloudHistoryResumeTask?.cancel()
         state.cloudHistoryResumeTask = nil

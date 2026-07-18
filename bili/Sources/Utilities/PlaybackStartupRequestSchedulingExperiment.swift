@@ -6,6 +6,29 @@ nonisolated enum PlaybackStartupRequestSchedulingExperiment {
     static let staggeredFallbackDelayNanoseconds: UInt64 = 180_000_000
 }
 
+nonisolated final class StartupPlayURLRequestLease: @unchecked Sendable {
+    private let lock = NSLock()
+    private var active = true
+
+    var isActive: Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return active
+    }
+
+    func invalidate() {
+        lock.lock()
+        active = false
+        lock.unlock()
+    }
+}
+
+nonisolated enum StartupPlayURLFeedbackEligibility {
+    static func allows(_ lease: StartupPlayURLRequestLease?) -> Bool {
+        lease?.isActive ?? true
+    }
+}
+
 nonisolated enum StartupPlayURLRoute: String, CaseIterable, Hashable, Sendable {
     case webpage
     case wbi
@@ -143,12 +166,17 @@ actor StartupPlayURLRoutePerformanceStore {
         return StartupPlayURLSchedulingDecision(primaryRoute: .webpage, fallbackRoute: .wbi)
     }
 
+    @discardableResult
     func record(
         route: StartupPlayURLRoute,
         networkClass: PlaybackEnvironment.NetworkClass,
         elapsedMilliseconds: Int,
-        accepted: Bool
-    ) {
+        accepted: Bool,
+        requestLease: StartupPlayURLRequestLease? = nil
+    ) -> Bool {
+        guard StartupPlayURLFeedbackEligibility.allows(requestLease) else {
+            return false
+        }
         let key = networkKey(for: networkClass)
         var statistics = statisticsByNetwork[key, default: [:]]
         var routeStatistics = statistics[route, default: RouteStatistics()]
@@ -159,6 +187,7 @@ actor StartupPlayURLRoutePerformanceStore {
         )
         statistics[route] = routeStatistics
         statisticsByNetwork[key] = statistics
+        return true
     }
 
     func reset() {

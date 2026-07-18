@@ -143,4 +143,26 @@ final class PlaybackStartupRequestSchedulingTests: XCTestCase {
 
         XCTAssertEqual(startedStatus, .started)
     }
+
+    func testExpiredRequestLeaseRejectsLateSchedulerFeedback() async {
+        let scheduler = StartupPlayURLRoutePerformanceStore(
+            minimumAcceptedSamples: 1,
+            minimumMedianAdvantageMilliseconds: 0
+        )
+        let requestLease = StartupPlayURLRequestLease()
+        requestLease.invalidate()
+
+        let recorded = await scheduler.record(
+            route: .wbi,
+            networkClass: .wifi,
+            elapsedMilliseconds: 18_437,
+            accepted: true,
+            requestLease: requestLease
+        )
+        let decision = await scheduler.decision(networkClass: .wifi, wbiAvailable: true)
+
+        XCTAssertFalse(recorded)
+        XCTAssertFalse(StartupPlayURLFeedbackEligibility.allows(requestLease))
+        XCTAssertFalse(decision.usesStaggeredFallback)
+    }
 }

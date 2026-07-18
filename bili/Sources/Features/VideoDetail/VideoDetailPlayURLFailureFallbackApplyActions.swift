@@ -15,6 +15,7 @@ extension VideoDetailViewModel {
         guard isCurrentPlaybackContext(bvid: bvid, cid: cid, page: page) else {
             return "bvid=\(detail.bvid) fallback aborted"
         }
+        cancelStartupPlayURLTask()
         PlayerMetricsLog.record(
             .playURLLoaded,
             metricsID: detail.bvid,

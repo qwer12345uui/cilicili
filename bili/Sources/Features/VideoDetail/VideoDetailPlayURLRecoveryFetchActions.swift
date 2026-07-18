@@ -12,10 +12,18 @@ extension VideoDetailViewModel {
         cid: Int,
         page: Int?
     ) async throws -> PlayURLData {
-        try await fetchPlayURLWithTimeout(
-            timeout: playURLRecoveryTimeoutNanoseconds
-        ) { [self] in
-            try await startupPlayURL(bvid: detail.bvid, cid: cid, page: page)
+        do {
+            return try await fetchPlayURLWithTimeout(
+                timeout: playURLRecoveryTimeoutNanoseconds
+            ) { [self] in
+                try await startupPlayURL(bvid: detail.bvid, cid: cid, page: page)
+            }
+        } catch {
+            if let timeoutError = error as? VideoDetailLoadTimeoutError,
+               case .playURL = timeoutError {
+                cancelStartupPlayURLTask()
+            }
+            throw error
         }
     }
 

@@ -86,6 +86,7 @@ extension VideoDetailViewModel {
         else { return }
         startupPlayURLTask = nil
         startupPlayURLTaskKey = nil
+        startupPlayURLRequestLease = nil
     }
 
     func cancelBackgroundTasks() {

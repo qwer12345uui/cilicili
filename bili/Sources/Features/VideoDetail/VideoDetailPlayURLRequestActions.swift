@@ -6,10 +6,19 @@ extension VideoDetailViewModel {
         cid: Int,
         page: Int?
     ) async throws -> PlayURLData {
-        let startupData = try await fetchPlayURLWithTimeout(
-            timeout: playURLLoadTimeoutNanoseconds
-        ) { [self] in
-            try await startupPlayURL(bvid: bvid, cid: cid, page: page)
+        let startupData: PlayURLData
+        do {
+            startupData = try await fetchPlayURLWithTimeout(
+                timeout: playURLLoadTimeoutNanoseconds
+            ) { [self] in
+                try await startupPlayURL(bvid: bvid, cid: cid, page: page)
+            }
+        } catch {
+            if let timeoutError = error as? VideoDetailLoadTimeoutError,
+               case .playURL = timeoutError {
+                cancelStartupPlayURLTask()
+            }
+            throw error
         }
         return await supplementInitialTargetQualityIfNeeded(
             startupData,
@@ -22,7 +31,8 @@ extension VideoDetailViewModel {
     func fetchStartupPlayURL(
         bvid: String,
         cid: Int,
-        page: Int?
+        page: Int?,
+        requestLease: StartupPlayURLRequestLease? = nil
     ) async throws -> PlayURLData {
         if detail.isPGCEpisode {
             return try await api.fetchPgcPlayURL(
@@ -37,7 +47,8 @@ extension VideoDetailViewModel {
             bvid: bvid,
             cid: cid,
             page: page,
-            preferredQuality: adaptiveStartupPreferredQuality
+            preferredQuality: adaptiveStartupPreferredQuality,
+            requestLease: requestLease
         )
     }
 
