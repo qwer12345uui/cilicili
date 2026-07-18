@@ -1120,6 +1120,13 @@ nonisolated struct RemoteImageCacheStatistics: Sendable {
     let misses: Int
     let stores: Int
     let evictions: Int
+    let inFlightReuseCount: Int
+    let loadTaskCount: Int
+}
+
+nonisolated struct RemoteImageDisplayCacheStatistics: Sendable {
+    let hits: Int
+    let misses: Int
 }
 
 nonisolated struct SubtitleCueCacheKey: Hashable, Sendable {
@@ -1552,6 +1559,9 @@ nonisolated enum ResourceCacheCenter {
 
     static func clearImages(includeDisk: Bool) async {
         await RemoteImageCache.shared.clearMemoryCache(cancelInFlight: true)
+        await MainActor.run {
+            RemoteImageDisplayMemoryCache.shared.clear()
+        }
         if includeDisk {
             await RemoteImageCache.shared.clearDiskCache()
         }

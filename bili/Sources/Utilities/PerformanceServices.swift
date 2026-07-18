@@ -3504,6 +3504,8 @@ final class RemoteImageDisplayMemoryCache {
 
     private let cache = NSCache<NSString, UIImage>()
     private var appliedBudget: (countLimit: Int, costLimit: Int)?
+    private var loadHits = 0
+    private var loadMisses = 0
 
     private init() {
         cache.countLimit = 360
@@ -3515,6 +3517,16 @@ final class RemoteImageDisplayMemoryCache {
         return cache.object(forKey: identity as NSString)
     }
 
+    func imageForLoad(for identity: String) -> UIImage? {
+        applyAdaptiveBudgetIfNeeded()
+        if let image = cache.object(forKey: identity as NSString) {
+            loadHits += 1
+            return image
+        }
+        loadMisses += 1
+        return nil
+    }
+
     func store(_ image: UIImage, for identity: String) {
         applyAdaptiveBudgetIfNeeded()
         cache.setObject(image, forKey: identity as NSString, cost: image.memoryCost)
@@ -3522,6 +3534,15 @@ final class RemoteImageDisplayMemoryCache {
 
     func clear() {
         cache.removeAllObjects()
+    }
+
+    func statistics() -> RemoteImageDisplayCacheStatistics {
+        RemoteImageDisplayCacheStatistics(hits: loadHits, misses: loadMisses)
+    }
+
+    func resetDiagnostics() {
+        loadHits = 0
+        loadMisses = 0
     }
 
     private func applyAdaptiveBudgetIfNeeded() {
@@ -3784,6 +3805,14 @@ final class CachedRemoteImageLoader: ObservableObject {
             image = nil
             imageIdentity = nil
         }
+        if displayCachePolicy.retainsImage,
+           let cachedImage = RemoteImageDisplayMemoryCache.shared.imageForLoad(for: identity) {
+            image = cachedImage
+            imageIdentity = identity
+            phase = .loaded
+            task = nil
+            return
+        }
         phase = .loading
 
         if clearsFailedMarkers {
@@ -3880,6 +3909,8 @@ actor RemoteImageCache {
     private var misses = 0
     private var stores = 0
     private var evictions = 0
+    private var inFlightReuseCount = 0
+    private var loadTaskCount = 0
     private var failedLoads: [ImageCacheKey: Date] = [:]
     private var appliedBudget: RemoteImageAdaptiveBudget?
     private var diskTrimTask: Task<Void, Never>?
@@ -3963,7 +3994,9 @@ actor RemoteImageCache {
             hits: hits,
             misses: misses,
             stores: stores,
-            evictions: evictions
+            evictions: evictions,
+            inFlightReuseCount: inFlightReuseCount,
+            loadTaskCount: loadTaskCount
         )
     }
 
@@ -3972,6 +4005,8 @@ actor RemoteImageCache {
         misses = 0
         stores = 0
         evictions = 0
+        inFlightReuseCount = 0
+        loadTaskCount = 0
         RemoteImageCDNHealthMemory.shared.resetDiagnostics()
     }
 
@@ -4091,6 +4126,7 @@ actor RemoteImageCache {
         }
 
         if cachePolicy == .standard, let task = inFlight[key] {
+            inFlightReuseCount += 1
             touchDiskRequest(key)
             let image = await task.value
             finish(key: key, image: image)
@@ -4158,6 +4194,7 @@ actor RemoteImageCache {
         if cachePolicy == .standard {
             recordDiskRequest(key: cacheKey(for: url, scale: scale, targetPixelSize: targetPixelSize), request: request)
         }
+        loadTaskCount += 1
         RemoteImageCDNHealthMemory.shared.recordRequest(
             for: url,
             originalURL: originalURL,

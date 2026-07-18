@@ -5,6 +5,7 @@ import UIKit
 struct RemoteImageDiagnosticsView: View {
     @ObservedObject var libraryStore: LibraryStore
     @State private var cacheStatistics: RemoteImageCacheStatistics?
+    @State private var displayCacheStatistics: RemoteImageDisplayCacheStatistics?
     @State private var cdnStatistics: RemoteImageCDNDiagnosticsSnapshot?
     @State private var isLoading = false
     @State private var didCopy = false
@@ -22,7 +23,7 @@ struct RemoteImageDiagnosticsView: View {
                 } label: {
                     Label(didCopy ? "已复制" : "复制测试数据", systemImage: didCopy ? "checkmark" : "doc.on.doc")
                 }
-                .disabled(cacheStatistics == nil || cdnStatistics == nil)
+                .disabled(cacheStatistics == nil || displayCacheStatistics == nil || cdnStatistics == nil)
 
                 Button(role: .destructive) {
                     Task {
@@ -61,10 +62,15 @@ struct RemoteImageDiagnosticsView: View {
 
     private var cacheSection: some View {
         Section("缓存") {
-            if let cacheStatistics {
-                LabeledContent("命中", value: cacheStatistics.hits.formatted())
-                LabeledContent("未命中", value: cacheStatistics.misses.formatted())
-                LabeledContent("命中率", value: cacheHitRate(cacheStatistics))
+            if let cacheStatistics, let displayCacheStatistics {
+                LabeledContent("显示缓存命中", value: displayCacheStatistics.hits.formatted())
+                LabeledContent("显示缓存未命中", value: displayCacheStatistics.misses.formatted())
+                LabeledContent("显示缓存命中率", value: cacheHitRate(hits: displayCacheStatistics.hits, misses: displayCacheStatistics.misses))
+                LabeledContent("图片内存命中", value: cacheStatistics.hits.formatted())
+                LabeledContent("图片内存未命中", value: cacheStatistics.misses.formatted())
+                LabeledContent("图片内存命中率", value: cacheHitRate(hits: cacheStatistics.hits, misses: cacheStatistics.misses))
+                LabeledContent("复用进行中加载", value: cacheStatistics.inFlightReuseCount.formatted())
+                LabeledContent("新建图片加载任务", value: cacheStatistics.loadTaskCount.formatted())
                 LabeledContent("内存条目", value: cacheStatistics.memoryEntryCount.formatted())
                 LabeledContent("正在加载", value: cacheStatistics.inFlightCount.formatted())
                 LabeledContent(
@@ -141,16 +147,17 @@ struct RemoteImageDiagnosticsView: View {
         }
     }
 
-    private func cacheHitRate(_ statistics: RemoteImageCacheStatistics) -> String {
-        let total = statistics.hits + statistics.misses
+    private func cacheHitRate(hits: Int, misses: Int) -> String {
+        let total = hits + misses
         guard total > 0 else { return "-" }
-        return "\(Int((Double(statistics.hits) / Double(total) * 100).rounded()))%"
+        return "\(Int((Double(hits) / Double(total) * 100).rounded()))%"
     }
 
     @MainActor
     private func reload() async {
         guard !isLoading else { return }
         isLoading = true
+        displayCacheStatistics = RemoteImageDisplayMemoryCache.shared.statistics()
         cacheStatistics = await RemoteImageCache.shared.statistics()
         cdnStatistics = RemoteImageCDNHealthMemory.shared.diagnostics()
         isLoading = false
@@ -158,19 +165,22 @@ struct RemoteImageDiagnosticsView: View {
 
     @MainActor
     private func resetDiagnostics() async {
+        RemoteImageDisplayMemoryCache.shared.resetDiagnostics()
         await RemoteImageCache.shared.resetDiagnostics()
         cacheStatistics = nil
+        displayCacheStatistics = nil
         cdnStatistics = nil
         await reload()
     }
 
     @MainActor
     private func copyDiagnostics() {
-        guard let cacheStatistics, let cdnStatistics else { return }
+        guard let cacheStatistics, let displayCacheStatistics, let cdnStatistics else { return }
         let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "-"
         let build = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "-"
         UIPasteboard.general.string = RemoteImageDiagnosticsTextFormatter.makeText(
             cache: cacheStatistics,
+            displayCache: displayCacheStatistics,
             cdn: cdnStatistics,
             isCDNFailoverEnabled: libraryStore.remoteImageCDNFailoverExperimentEnabled,
             version: version,
@@ -188,6 +198,7 @@ struct RemoteImageDiagnosticsView: View {
 nonisolated enum RemoteImageDiagnosticsTextFormatter {
     static func makeText(
         cache: RemoteImageCacheStatistics,
+        displayCache: RemoteImageDisplayCacheStatistics,
         cdn: RemoteImageCDNDiagnosticsSnapshot,
         isCDNFailoverEnabled: Bool,
         version: String,
@@ -199,10 +210,17 @@ nonisolated enum RemoteImageDiagnosticsTextFormatter {
             "generated: \(generatedAt)",
             "version: \(version) (\(build))",
             "",
-            "图片缓存",
+            "显示内存缓存",
+            "  命中: \(displayCache.hits)",
+            "  未命中: \(displayCache.misses)",
+            "  命中率: \(percentage(numerator: displayCache.hits, denominator: displayCache.hits + displayCache.misses))",
+            "",
+            "图片内存缓存",
             "  命中: \(cache.hits)",
             "  未命中: \(cache.misses)",
             "  命中率: \(percentage(numerator: cache.hits, denominator: cache.hits + cache.misses))",
+            "  复用进行中加载: \(cache.inFlightReuseCount)",
+            "  新建图片加载任务: \(cache.loadTaskCount)",
             "  内存条目: \(cache.memoryEntryCount)",
             "  正在加载: \(cache.inFlightCount)",
             "  磁盘占用: \(byteCount(cache.diskUsage)) / \(byteCount(cache.diskCapacity))",

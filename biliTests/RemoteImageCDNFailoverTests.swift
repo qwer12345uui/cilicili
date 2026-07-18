@@ -1,4 +1,5 @@
 import XCTest
+import UIKit
 @testable import bili
 
 final class RemoteImageCDNFailoverTests: XCTestCase {
@@ -141,8 +142,11 @@ final class RemoteImageCDNFailoverTests: XCTestCase {
             hits: 80,
             misses: 20,
             stores: 16,
-            evictions: 3
+            evictions: 3,
+            inFlightReuseCount: 9,
+            loadTaskCount: 21
         )
+        let displayCache = RemoteImageDisplayCacheStatistics(hits: 12, misses: 8)
         let cdn = RemoteImageCDNDiagnosticsSnapshot(
             requestCount: 100,
             successCount: 98,
@@ -169,18 +173,40 @@ final class RemoteImageCDNFailoverTests: XCTestCase {
 
         let text = RemoteImageDiagnosticsTextFormatter.makeText(
             cache: cache,
+            displayCache: displayCache,
             cdn: cdn,
             isCDNFailoverEnabled: true,
             version: "1.0.14",
-            build: "47",
+            build: "48",
             generatedAt: "2026-07-18 12:00"
         )
 
-        XCTAssertTrue(text.contains("version: 1.0.14 (47)"))
-        XCTAssertTrue(text.contains("命中率: 80%"))
+        XCTAssertTrue(text.contains("version: 1.0.14 (48)"))
+        XCTAssertTrue(text.contains("显示内存缓存"))
+        XCTAssertTrue(text.contains("复用进行中加载: 9"))
+        XCTAssertTrue(text.contains("新建图片加载任务: 21"))
         XCTAssertTrue(text.contains("i0.hdslb.com: 请求 50 · 成功 49 · 瞬时失败 1 · 失败率 2%"))
         XCTAssertTrue(text.contains("i1.hdslb.com: 剩余 42 秒"))
         XCTAssertFalse(text.contains("https://"))
         XCTAssertFalse(text.contains("example.jpg"))
+    }
+
+    @MainActor
+    func testDisplayCacheDiagnosticsCountLoadLookups() {
+        let cache = RemoteImageDisplayMemoryCache.shared
+        cache.clear()
+        cache.resetDiagnostics()
+
+        XCTAssertNil(cache.imageForLoad(for: "missing"))
+        let image = UIGraphicsImageRenderer(size: CGSize(width: 1, height: 1)).image { _ in }
+        cache.store(image, for: "cached")
+        XCTAssertNotNil(cache.imageForLoad(for: "cached"))
+
+        let statistics = cache.statistics()
+        XCTAssertEqual(statistics.hits, 1)
+        XCTAssertEqual(statistics.misses, 1)
+
+        cache.clear()
+        cache.resetDiagnostics()
     }
 }
