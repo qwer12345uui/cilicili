@@ -4031,7 +4031,7 @@ actor RemoteImageCache {
         targetPixelSize: Int? = 760,
         maximumConcurrentLoads: Int = 3
     ) async {
-        await RemoteImageLoadSuppressionGate.shared.waitUntilAllowed()
+        await RemoteImageLoadSuppressionGate.shared.waitUntilAllowed(priority: .prefetch)
         guard !Task.isCancelled else { return }
         applyAdaptiveBudgetIfNeeded()
         let imageBudget = RemoteImagePrefetchBudget.current
@@ -4088,7 +4088,7 @@ actor RemoteImageCache {
                 }
             }
         }
-        await RemoteImageLoadSuppressionGate.shared.waitUntilAllowed()
+        await RemoteImageLoadSuppressionGate.shared.waitUntilAllowed(priority: priority)
         guard !Task.isCancelled else { return nil }
 
         for candidateURL in candidateURLs {

@@ -27,10 +27,25 @@ final class RemoteImageScrollLoadSuppressionTests: XCTestCase {
         let scopeID = UUID()
         await gate.setSuppressed(true, for: scopeID)
 
-        await gate.waitUntilAllowed(hasCachedImage: true)
+        await gate.waitUntilAllowed(priority: .prefetch, hasCachedImage: true)
 
         let waiterCount = await gate.waiterCountForTesting()
         XCTAssertEqual(waiterCount, 0)
+        await gate.setSuppressed(false, for: scopeID)
+    }
+
+    func testVisibleNetworkLoadBypassesSuppression() async {
+        let gate = RemoteImageLoadSuppressionGate()
+        let scopeID = UUID()
+        await gate.setSuppressed(true, for: scopeID)
+
+        await gate.waitUntilAllowed(priority: .visible)
+
+        let waiterCount = await gate.waiterCountForTesting()
+        let statistics = await gate.statistics()
+        XCTAssertEqual(waiterCount, 0)
+        XCTAssertEqual(statistics.visibleBypassCount, 1)
+        XCTAssertEqual(statistics.deferredPrefetchCount, 0)
         await gate.setSuppressed(false, for: scopeID)
     }
 
@@ -40,7 +55,7 @@ final class RemoteImageScrollLoadSuppressionTests: XCTestCase {
         await gate.setSuppressed(true, for: scopeID)
 
         let waiter = Task {
-            await gate.waitUntilAllowed()
+            await gate.waitUntilAllowed(priority: .prefetch)
         }
 
         var waiterCount = 0
@@ -56,5 +71,8 @@ final class RemoteImageScrollLoadSuppressionTests: XCTestCase {
 
         let resumedWaiterCount = await gate.waiterCountForTesting()
         XCTAssertEqual(resumedWaiterCount, 0)
+
+        let statistics = await gate.statistics()
+        XCTAssertEqual(statistics.deferredPrefetchCount, 1)
     }
 }

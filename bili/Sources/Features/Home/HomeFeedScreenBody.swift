@@ -1,6 +1,7 @@
 import SwiftUI
 
 struct HomeFeedScreenBody: View {
+    @Environment(\.displayScale) private var displayScale
     @ObservedObject var viewModel: HomeViewModel
     @ObservedObject var runtimeSettings: HomeRuntimeSettingsStore
     @ObservedObject var libraryStore: LibraryStore
@@ -11,6 +12,13 @@ struct HomeFeedScreenBody: View {
     let launchConfiguration: HomeFeedLaunchConfiguration
 
     var body: some View {
+        let layoutMetrics = viewportState.layoutMetrics(for: runtimeSettings.homeFeedLayout)
+        let imagePrefetchProfile = HomeFeedCoverPrefetchProfile.make(
+            layout: runtimeSettings.homeFeedLayout,
+            metrics: layoutMetrics,
+            displayScale: displayScale
+        )
+
         HomeFeedScrollView(
             viewModel: viewModel,
             runtimeSettings: runtimeSettings,
@@ -19,7 +27,7 @@ struct HomeFeedScreenBody: View {
             refreshActions: actionStore.refresh
         ) {
             HomeFeedContentSection(
-                metrics: viewportState.layoutMetrics(for: runtimeSettings.homeFeedLayout),
+                metrics: layoutMetrics,
                 cells: viewModel.videoCells,
                 lastSeenMarkerIndex: viewModel.lastSeenMarkerIndex,
                 isLoadingMore: viewModel.state.isLoading && !viewModel.isRefreshing && !viewModel.isUserRefreshing,
@@ -27,6 +35,9 @@ struct HomeFeedScreenBody: View {
             )
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .task(id: imagePrefetchProfile.cacheIdentity) {
+            viewModel.updateImagePrefetchProfile(imagePrefetchProfile)
+        }
         .background(runtimeSettings.homeFeedLayout.homeFeedBackground)
         .homeFeedScreenLifecycle(
             viewModel: viewModel,

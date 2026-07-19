@@ -6,6 +6,7 @@ struct RemoteImageDiagnosticsView: View {
     @ObservedObject var libraryStore: LibraryStore
     @State private var cacheStatistics: RemoteImageCacheStatistics?
     @State private var displayCacheStatistics: RemoteImageDisplayCacheStatistics?
+    @State private var scrollStatistics: RemoteImageScrollLoadSuppressionStatistics?
     @State private var cdnStatistics: RemoteImageCDNDiagnosticsSnapshot?
     @State private var isLoading = false
     @State private var didCopy = false
@@ -13,6 +14,7 @@ struct RemoteImageDiagnosticsView: View {
     var body: some View {
         Form {
             cacheSection
+            scrollSection
             cdnSection
             nodeSection
             degradedNodeSection
@@ -23,7 +25,12 @@ struct RemoteImageDiagnosticsView: View {
                 } label: {
                     Label(didCopy ? "已复制" : "复制测试数据", systemImage: didCopy ? "checkmark" : "doc.on.doc")
                 }
-                .disabled(cacheStatistics == nil || displayCacheStatistics == nil || cdnStatistics == nil)
+                .disabled(
+                    cacheStatistics == nil
+                        || displayCacheStatistics == nil
+                        || scrollStatistics == nil
+                        || cdnStatistics == nil
+                )
 
                 Button(role: .destructive) {
                     Task {
@@ -100,6 +107,22 @@ struct RemoteImageDiagnosticsView: View {
         }
     }
 
+    private var scrollSection: some View {
+        Section("滚动图片调度") {
+            LabeledContent(
+                "快速滚动抑制实验",
+                value: libraryStore.fastScrollImageLoadSuppressionExperimentEnabled ? "已开启" : "未开启"
+            )
+            if let scrollStatistics {
+                LabeledContent("滚动中可见请求放行", value: scrollStatistics.visibleBypassCount.formatted())
+                LabeledContent("滚动中后台预取延后", value: scrollStatistics.deferredPrefetchCount.formatted())
+                LabeledContent("当前抑制滚动容器", value: scrollStatistics.activeScopeCount.formatted())
+            } else {
+                loadingRow
+            }
+        }
+    }
+
     private var nodeSection: some View {
         Section("CDN 节点") {
             if let cdnStatistics {
@@ -159,6 +182,7 @@ struct RemoteImageDiagnosticsView: View {
         isLoading = true
         displayCacheStatistics = RemoteImageDisplayMemoryCache.shared.statistics()
         cacheStatistics = await RemoteImageCache.shared.statistics()
+        scrollStatistics = await RemoteImageLoadSuppressionGate.shared.statistics()
         cdnStatistics = RemoteImageCDNHealthMemory.shared.diagnostics()
         isLoading = false
     }
@@ -167,21 +191,29 @@ struct RemoteImageDiagnosticsView: View {
     private func resetDiagnostics() async {
         RemoteImageDisplayMemoryCache.shared.resetDiagnostics()
         await RemoteImageCache.shared.resetDiagnostics()
+        await RemoteImageLoadSuppressionGate.shared.resetDiagnostics()
         cacheStatistics = nil
         displayCacheStatistics = nil
+        scrollStatistics = nil
         cdnStatistics = nil
         await reload()
     }
 
     @MainActor
     private func copyDiagnostics() {
-        guard let cacheStatistics, let displayCacheStatistics, let cdnStatistics else { return }
+        guard let cacheStatistics,
+              let displayCacheStatistics,
+              let scrollStatistics,
+              let cdnStatistics
+        else { return }
         let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "-"
         let build = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "-"
         UIPasteboard.general.string = RemoteImageDiagnosticsTextFormatter.makeText(
             cache: cacheStatistics,
             displayCache: displayCacheStatistics,
+            scroll: scrollStatistics,
             cdn: cdnStatistics,
+            isFastScrollImageLoadSuppressionEnabled: libraryStore.fastScrollImageLoadSuppressionExperimentEnabled,
             isCDNFailoverEnabled: libraryStore.remoteImageCDNFailoverExperimentEnabled,
             version: version,
             build: build,
@@ -199,7 +231,9 @@ nonisolated enum RemoteImageDiagnosticsTextFormatter {
     static func makeText(
         cache: RemoteImageCacheStatistics,
         displayCache: RemoteImageDisplayCacheStatistics,
+        scroll: RemoteImageScrollLoadSuppressionStatistics = .empty,
         cdn: RemoteImageCDNDiagnosticsSnapshot,
+        isFastScrollImageLoadSuppressionEnabled: Bool = false,
         isCDNFailoverEnabled: Bool,
         version: String,
         build: String,
@@ -224,6 +258,12 @@ nonisolated enum RemoteImageDiagnosticsTextFormatter {
             "  内存条目: \(cache.memoryEntryCount)",
             "  正在加载: \(cache.inFlightCount)",
             "  磁盘占用: \(byteCount(cache.diskUsage)) / \(byteCount(cache.diskCapacity))",
+            "",
+            "滚动图片调度",
+            "  快速滚动抑制实验: \(isFastScrollImageLoadSuppressionEnabled ? "已开启" : "未开启")",
+            "  滚动中可见请求放行: \(scroll.visibleBypassCount)",
+            "  滚动中后台预取延后: \(scroll.deferredPrefetchCount)",
+            "  当前抑制滚动容器: \(scroll.activeScopeCount)",
             "",
             "B站图片 CDN",
             "  自动切换实验: \(isCDNFailoverEnabled ? "已开启" : "未开启")",

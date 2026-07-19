@@ -147,6 +147,11 @@ final class RemoteImageCDNFailoverTests: XCTestCase {
             loadTaskCount: 21
         )
         let displayCache = RemoteImageDisplayCacheStatistics(hits: 12, misses: 8)
+        let scroll = RemoteImageScrollLoadSuppressionStatistics(
+            visibleBypassCount: 7,
+            deferredPrefetchCount: 4,
+            activeScopeCount: 1
+        )
         let cdn = RemoteImageCDNDiagnosticsSnapshot(
             requestCount: 100,
             successCount: 98,
@@ -174,7 +179,9 @@ final class RemoteImageCDNFailoverTests: XCTestCase {
         let text = RemoteImageDiagnosticsTextFormatter.makeText(
             cache: cache,
             displayCache: displayCache,
+            scroll: scroll,
             cdn: cdn,
+            isFastScrollImageLoadSuppressionEnabled: true,
             isCDNFailoverEnabled: true,
             version: "1.0.14",
             build: "48",
@@ -185,6 +192,8 @@ final class RemoteImageCDNFailoverTests: XCTestCase {
         XCTAssertTrue(text.contains("显示内存缓存"))
         XCTAssertTrue(text.contains("复用进行中加载: 9"))
         XCTAssertTrue(text.contains("新建图片加载任务: 21"))
+        XCTAssertTrue(text.contains("滚动中可见请求放行: 7"))
+        XCTAssertTrue(text.contains("滚动中后台预取延后: 4"))
         XCTAssertTrue(text.contains("i0.hdslb.com: 请求 50 · 成功 49 · 瞬时失败 1 · 失败率 2%"))
         XCTAssertTrue(text.contains("i1.hdslb.com: 剩余 42 秒"))
         XCTAssertFalse(text.contains("https://"))

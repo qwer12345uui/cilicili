@@ -32,11 +32,25 @@ enum FastScrollImageLoadSuppressionPolicy {
     }
 }
 
+nonisolated struct RemoteImageScrollLoadSuppressionStatistics: Sendable, Equatable {
+    let visibleBypassCount: Int
+    let deferredPrefetchCount: Int
+    let activeScopeCount: Int
+
+    static let empty = RemoteImageScrollLoadSuppressionStatistics(
+        visibleBypassCount: 0,
+        deferredPrefetchCount: 0,
+        activeScopeCount: 0
+    )
+}
+
 actor RemoteImageLoadSuppressionGate {
     static let shared = RemoteImageLoadSuppressionGate()
 
     private var activeScopes = Set<UUID>()
     private var waiters: [UUID: CheckedContinuation<Void, Never>] = [:]
+    private var visibleBypassCount = 0
+    private var deferredPrefetchCount = 0
 
     func setSuppressed(_ isSuppressed: Bool, for scopeID: UUID) {
         if isSuppressed {
@@ -47,12 +61,26 @@ actor RemoteImageLoadSuppressionGate {
         }
     }
 
-    func waitUntilAllowed(hasCachedImage: Bool = false) async {
+    func waitUntilAllowed(
+        priority: RemoteImageLoadPriority = .prefetch,
+        hasCachedImage: Bool = false
+    ) async {
+        guard !hasCachedImage else { return }
+        switch priority {
+        case .visible:
+            if !activeScopes.isEmpty {
+                visibleBypassCount += 1
+            }
+            return
+        case .prefetch:
+            break
+        }
         guard FastScrollImageLoadSuppressionPolicy.shouldWaitForNetwork(
             hasCachedImage: hasCachedImage,
             suppressionActive: !activeScopes.isEmpty
         ) else { return }
 
+        deferredPrefetchCount += 1
         let waiterID = UUID()
         await withTaskCancellationHandler {
             await withCheckedContinuation { continuation in
@@ -74,6 +102,19 @@ actor RemoteImageLoadSuppressionGate {
         waiters.count
     }
 #endif
+
+    func statistics() -> RemoteImageScrollLoadSuppressionStatistics {
+        RemoteImageScrollLoadSuppressionStatistics(
+            visibleBypassCount: visibleBypassCount,
+            deferredPrefetchCount: deferredPrefetchCount,
+            activeScopeCount: activeScopes.count
+        )
+    }
+
+    func resetDiagnostics() {
+        visibleBypassCount = 0
+        deferredPrefetchCount = 0
+    }
 
     private func cancelWaiter(_ waiterID: UUID) {
         waiters.removeValue(forKey: waiterID)?.resume()

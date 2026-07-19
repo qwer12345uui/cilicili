@@ -6,20 +6,18 @@ nonisolated struct HomeFeedImagePrefetchPlan {
 
     static func make(
         for videos: [VideoItem],
-        layout: HomeFeedLayout,
+        profile: HomeFeedCoverPrefetchProfile,
+        startIndex: Int = 0,
         limit: Int
     ) -> HomeFeedImagePrefetchPlan {
         var seenCovers = Set<String>()
         var coverSources = [RemoteImageSource]()
-        let coverTargetPixelSize = targetPixelSize(for: layout)
+        let coverTargetPixelSize = profile.targetPixelSize
+        let safeStartIndex = min(max(startIndex, 0), videos.count)
 
-        for video in videos.prefix(limit) {
+        for video in videos.dropFirst(safeStartIndex).prefix(limit) {
             if let source = video.pic?.normalizedBiliURL(),
-               let coverSource = homeCoverImageSource(
-                source: source,
-                layout: layout,
-                targetPixelSize: coverTargetPixelSize
-               ),
+               let coverSource = profile.source(for: source),
                seenCovers.insert(source).inserted {
                 coverSources.append(coverSource)
             }

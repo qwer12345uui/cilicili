@@ -41,6 +41,7 @@ struct HomeFeedScreenContentActionsBuilder {
 
     private func recordExposure(_ video: VideoItem, index: Int) {
         viewModel.recordRecommendExposure(video, index: index)
+        viewModel.scheduleImageLookahead(visibleIndex: index)
         actionStore.preload.recordVisibleCard(
             video,
             index: index,

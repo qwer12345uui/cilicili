@@ -88,6 +88,15 @@ final class HomeViewModel: ObservableObject {
         )
     }
 
+    func updateImagePrefetchProfile(_ profile: HomeFeedCoverPrefetchProfile) {
+        mediaPreloadCoordinator.updateImagePrefetchProfile(profile)
+        mediaPreloadCoordinator.scheduleImagePrefetch(for: videos)
+    }
+
+    func scheduleImageLookahead(visibleIndex: Int) {
+        mediaPreloadCoordinator.scheduleImageLookahead(for: videos, visibleIndex: visibleIndex)
+    }
+
     func recordRecommendClick(_ video: VideoItem) {
         guard mode == .recommend else { return }
         HomeRecommendFeedbackCenter.shared.recordClick(

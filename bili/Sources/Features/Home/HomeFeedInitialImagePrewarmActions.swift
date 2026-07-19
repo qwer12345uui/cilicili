@@ -2,10 +2,15 @@ import Foundation
 
 extension HomeFeedMediaPreloadCoordinator {
     func prewarmInitialImagesBeforePublishing(_ videos: [VideoItem]) async {
+        let environment = PlaybackEnvironment.current
+        let layout = libraryStore.homeFeedLayout
         let prefetchPlan = HomeFeedImagePrefetchPlan.make(
             for: videos,
-            layout: libraryStore.homeFeedLayout,
-            limit: 3
+            profile: resolvedImagePrefetchProfile(for: layout),
+            limit: HomeFeedImagePrefetchPolicy.initialPrefetchLimit(
+                layout: layout,
+                isConservative: environment.shouldPreferConservativePlayback
+            )
         )
         guard !prefetchPlan.coverSources.isEmpty else { return }
 
@@ -14,11 +19,17 @@ extension HomeFeedMediaPreloadCoordinator {
                 await RemoteImageCache.shared.prefetch(
                     prefetchPlan.coverSources,
                     targetPixelSize: prefetchPlan.coverTargetPixelSize,
-                    maximumConcurrentLoads: 1
+                    maximumConcurrentLoads: HomeFeedImagePrefetchPolicy.maximumConcurrentLoads(
+                        isConservative: environment.shouldPreferConservativePlayback
+                    )
                 )
             }
             group.addTask {
-                try? await Task.sleep(nanoseconds: 320_000_000)
+                try? await Task.sleep(
+                    nanoseconds: HomeFeedImagePrefetchPolicy.initialPrewarmDeadlineNanoseconds(
+                        isConservative: environment.shouldPreferConservativePlayback
+                    )
+                )
             }
             _ = await group.next()
             group.cancelAll()
