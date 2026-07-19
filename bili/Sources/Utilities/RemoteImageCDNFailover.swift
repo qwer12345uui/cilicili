@@ -2,11 +2,47 @@ import Foundation
 
 nonisolated enum RemoteImageCDNFailoverExperiment {
     static let storageKey = "cc.bili.display.remoteImageCDNFailoverExperimentEnabled.v1"
-    static let defaultIsEnabled = false
+    static let defaultIsEnabled = true
     static let failureTTL: TimeInterval = 90
 
     static func isEnabled(in userDefaults: UserDefaults = .standard) -> Bool {
         userDefaults.object(forKey: storageKey) as? Bool ?? defaultIsEnabled
+    }
+}
+
+nonisolated enum RemoteImageDiagnosticsSettings {
+    static let storageKey = "cc.bili.display.remoteImageDiagnosticsEnabled.v1"
+    static let defaultIsEnabled = true
+
+    static func isEnabled(in userDefaults: UserDefaults = .standard) -> Bool {
+        userDefaults.object(forKey: storageKey) as? Bool ?? defaultIsEnabled
+    }
+
+    static var isRecordingEnabled: Bool {
+        RemoteImageDiagnosticsRuntime.shared.isEnabled
+    }
+
+    static func setEnabled(_ isEnabled: Bool, in userDefaults: UserDefaults = .standard) {
+        userDefaults.set(isEnabled, forKey: storageKey)
+        guard userDefaults === UserDefaults.standard else { return }
+        RemoteImageDiagnosticsRuntime.shared.setEnabled(isEnabled)
+    }
+}
+
+nonisolated final class RemoteImageDiagnosticsRuntime: @unchecked Sendable {
+    static let shared = RemoteImageDiagnosticsRuntime()
+
+    private let lock = NSLock()
+    private var enabled = RemoteImageDiagnosticsSettings.isEnabled()
+
+    var isEnabled: Bool {
+        lock.withLock { enabled }
+    }
+
+    func setEnabled(_ isEnabled: Bool) {
+        lock.withLock {
+            enabled = isEnabled
+        }
     }
 }
 
@@ -142,6 +178,7 @@ nonisolated final class RemoteImageCDNHealthMemory: @unchecked Sendable {
         guard RemoteImageCDNFailoverPolicy.isEligible(url),
               let host = url.host?.lowercased()
         else { return }
+        guard RemoteImageDiagnosticsSettings.isRecordingEnabled else { return }
         let originalHost = originalURL.host?.lowercased()
         lock.withLock {
             requestCount += 1
@@ -163,8 +200,10 @@ nonisolated final class RemoteImageCDNHealthMemory: @unchecked Sendable {
               let host = url.host?.lowercased()
         else { return }
         lock.withLock {
-            transientFailureCount += 1
-            countersByHost[host, default: HostCounters()].transientFailureCount += 1
+            if RemoteImageDiagnosticsSettings.isRecordingEnabled {
+                transientFailureCount += 1
+                countersByHost[host, default: HostCounters()].transientFailureCount += 1
+            }
             if experimentEnabled {
                 unhealthyUntilByHost[host] = now.addingTimeInterval(failureTTL)
             }
@@ -176,8 +215,10 @@ nonisolated final class RemoteImageCDNHealthMemory: @unchecked Sendable {
               let host = url.host?.lowercased()
         else { return }
         lock.withLock {
-            successCount += 1
-            countersByHost[host, default: HostCounters()].successCount += 1
+            if RemoteImageDiagnosticsSettings.isRecordingEnabled {
+                successCount += 1
+                countersByHost[host, default: HostCounters()].successCount += 1
+            }
             if experimentEnabled {
                 unhealthyUntilByHost[host] = nil
             }

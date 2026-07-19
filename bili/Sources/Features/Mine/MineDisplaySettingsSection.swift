@@ -71,14 +71,42 @@ struct MineDisplaySettingsSection: View {
                 get: { libraryStore.fastScrollImageLoadSuppressionExperimentEnabled },
                 set: { libraryStore.setFastScrollImageLoadSuppressionExperimentEnabled($0) }
             )) {
-                Label("快速滚动图片负载抑制实验", systemImage: "photo.stack")
+                VStack(alignment: .leading, spacing: 4) {
+                    Label("快速滚动图片负载抑制实验", systemImage: "photo.stack")
+
+                    Text("开着时猛刷列表会先顾屏幕里的封面，后台预取等停下来再做，滑动更稳；关掉后预取会边滑边跑。")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
             }
 
             Toggle(isOn: Binding(
                 get: { libraryStore.remoteImageCDNFailoverExperimentEnabled },
                 set: { libraryStore.setRemoteImageCDNFailoverExperimentEnabled($0) }
             )) {
-                Label("图片 CDN 自动切换实验", systemImage: "arrow.triangle.branch")
+                VStack(alignment: .leading, spacing: 4) {
+                    Label("图片 CDN 自动切换实验", systemImage: "arrow.triangle.branch")
+
+                    Text("开着时某个图片节点临时抽风会短暂换别的节点拿图，封面更不容易卡住；关掉后只用原节点。")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+
+            Toggle(isOn: Binding(
+                get: { libraryStore.remoteImageDiagnosticsEnabled },
+                set: { libraryStore.setRemoteImageDiagnosticsEnabled($0) }
+            )) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Label("记录图片加载诊断", systemImage: "chart.bar.xaxis")
+
+                    Text("开着会记缓存、滚动和 CDN 的汇总数字，方便复制给我分析；不记图片、链接、账号或 Cookie。关掉后不再记数，图片照常加载。")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
             }
 
             NavigationLink {

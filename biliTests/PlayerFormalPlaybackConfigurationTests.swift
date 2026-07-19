@@ -80,10 +80,10 @@ final class PlayerFormalPlaybackConfigurationTests: XCTestCase {
         let defaults = makeUserDefaults()
         let store = LibraryStore(userDefaults: defaults)
 
-        XCTAssertFalse(store.fastScrollImageLoadSuppressionExperimentEnabled)
-        store.setFastScrollImageLoadSuppressionExperimentEnabled(true)
+        XCTAssertTrue(store.fastScrollImageLoadSuppressionExperimentEnabled)
+        store.setFastScrollImageLoadSuppressionExperimentEnabled(false)
 
-        XCTAssertTrue(
+        XCTAssertFalse(
             LibraryStore(userDefaults: defaults).fastScrollImageLoadSuppressionExperimentEnabled
         )
     }
@@ -93,11 +93,24 @@ final class PlayerFormalPlaybackConfigurationTests: XCTestCase {
         let defaults = makeUserDefaults()
         let store = LibraryStore(userDefaults: defaults)
 
-        XCTAssertFalse(store.remoteImageCDNFailoverExperimentEnabled)
-        store.setRemoteImageCDNFailoverExperimentEnabled(true)
+        XCTAssertTrue(store.remoteImageCDNFailoverExperimentEnabled)
+        store.setRemoteImageCDNFailoverExperimentEnabled(false)
 
-        XCTAssertTrue(
+        XCTAssertFalse(
             LibraryStore(userDefaults: defaults).remoteImageCDNFailoverExperimentEnabled
+        )
+    }
+
+    @MainActor
+    func testLibraryStoreDefaultsImageDiagnosticsOnAndPersistsToggle() {
+        let defaults = makeUserDefaults()
+        let store = LibraryStore(userDefaults: defaults)
+
+        XCTAssertTrue(store.remoteImageDiagnosticsEnabled)
+        store.setRemoteImageDiagnosticsEnabled(false)
+
+        XCTAssertFalse(
+            LibraryStore(userDefaults: defaults).remoteImageDiagnosticsEnabled
         )
     }
 

@@ -3521,10 +3521,14 @@ final class RemoteImageDisplayMemoryCache {
     func imageForLoad(for identity: String) -> UIImage? {
         applyAdaptiveBudgetIfNeeded()
         if let image = cache.object(forKey: identity as NSString) {
-            loadHits += 1
+            if RemoteImageDiagnosticsSettings.isRecordingEnabled {
+                loadHits += 1
+            }
             return image
         }
-        loadMisses += 1
+        if RemoteImageDiagnosticsSettings.isRecordingEnabled {
+            loadMisses += 1
+        }
         return nil
     }
 
@@ -3936,7 +3940,9 @@ actor RemoteImageCache {
 
     func clearMemoryCache(cancelInFlight: Bool = false) {
         cache.removeAllObjects()
-        evictions += storedKeys.count
+        if RemoteImageDiagnosticsSettings.isRecordingEnabled {
+            evictions += storedKeys.count
+        }
         storedKeys.removeAll()
         guard cancelInFlight else { return }
         inFlight.values.forEach { $0.cancel() }
@@ -3961,11 +3967,15 @@ actor RemoteImageCache {
         for candidateURL in imageCandidateURLs(for: url) {
             let key = cacheKey(for: candidateURL, scale: scale, targetPixelSize: targetPixelSize)
             if let image = cache.object(forKey: key.nsKey) {
-                hits += 1
+                if RemoteImageDiagnosticsSettings.isRecordingEnabled {
+                    hits += 1
+                }
                 return image
             }
         }
-        misses += 1
+        if RemoteImageDiagnosticsSettings.isRecordingEnabled {
+            misses += 1
+        }
         return nil
     }
 
@@ -4083,7 +4093,9 @@ actor RemoteImageCache {
         if cachePolicy == .standard {
             for candidateURL in candidateURLs {
                 if let cached = cachedImage(for: candidateURL, scale: scale, targetPixelSize: targetPixelSize) {
-                    hits += 1
+                    if RemoteImageDiagnosticsSettings.isRecordingEnabled {
+                        hits += 1
+                    }
                     return cached
                 }
             }
@@ -4118,16 +4130,22 @@ actor RemoteImageCache {
         let key = cacheKey(for: url, scale: scale, targetPixelSize: targetPixelSize)
         if cachePolicy == .standard,
            let cached = cachedImage(for: url, scale: scale, targetPixelSize: targetPixelSize) {
-            hits += 1
+            if RemoteImageDiagnosticsSettings.isRecordingEnabled {
+                hits += 1
+            }
             return cached
         }
         guard !isTemporarilyFailed(key) else {
-            misses += 1
+            if RemoteImageDiagnosticsSettings.isRecordingEnabled {
+                misses += 1
+            }
             return nil
         }
 
         if cachePolicy == .standard, let task = inFlight[key] {
-            inFlightReuseCount += 1
+            if RemoteImageDiagnosticsSettings.isRecordingEnabled {
+                inFlightReuseCount += 1
+            }
             touchDiskRequest(key)
             let image = await task.value
             finish(key: key, image: image)
@@ -4155,7 +4173,9 @@ actor RemoteImageCache {
             failedLoads[key] = nil
             cache.setObject(image, forKey: key.nsKey, cost: image.memoryCost)
             storedKeys.insert(key)
-            stores += 1
+            if RemoteImageDiagnosticsSettings.isRecordingEnabled {
+                stores += 1
+            }
             scheduleDiskTrimIfNeeded()
             ResourceCacheAutoTrim.schedule()
         } else {
@@ -4195,7 +4215,9 @@ actor RemoteImageCache {
         if cachePolicy == .standard {
             recordDiskRequest(key: cacheKey(for: url, scale: scale, targetPixelSize: targetPixelSize), request: request)
         }
-        loadTaskCount += 1
+        if RemoteImageDiagnosticsSettings.isRecordingEnabled {
+            loadTaskCount += 1
+        }
         RemoteImageCDNHealthMemory.shared.recordRequest(
             for: url,
             originalURL: originalURL,
@@ -4330,11 +4352,15 @@ actor RemoteImageCache {
             guard BiliURLSessionFactory.imageURLCache.currentDiskUsage > targetUsage else { return }
             guard let entry = diskRequests.removeValue(forKey: key) else { continue }
             BiliURLSessionFactory.imageURLCache.removeCachedResponse(for: entry.request)
-            evictions += 1
+            if RemoteImageDiagnosticsSettings.isRecordingEnabled {
+                evictions += 1
+            }
         }
         guard BiliURLSessionFactory.imageURLCache.currentDiskUsage > budget.diskCapacity + budget.diskTrimSlackBytes else { return }
         BiliURLSessionFactory.imageURLCache.removeAllCachedResponses()
-        evictions += diskRequests.count
+        if RemoteImageDiagnosticsSettings.isRecordingEnabled {
+            evictions += diskRequests.count
+        }
         diskRequests.removeAll()
     }
 

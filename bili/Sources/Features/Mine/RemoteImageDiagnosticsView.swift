@@ -13,35 +13,18 @@ struct RemoteImageDiagnosticsView: View {
 
     var body: some View {
         Form {
-            cacheSection
-            scrollSection
-            cdnSection
-            nodeSection
-            degradedNodeSection
-
-            Section {
-                Button {
-                    copyDiagnostics()
-                } label: {
-                    Label(didCopy ? "已复制" : "复制测试数据", systemImage: didCopy ? "checkmark" : "doc.on.doc")
+            if libraryStore.remoteImageDiagnosticsEnabled {
+                cacheSection
+                scrollSection
+                cdnSection
+                nodeSection
+                degradedNodeSection
+                actionsSection
+            } else {
+                Section {
+                    Text("图片加载诊断已关闭。图片会照常加载；回到显示设置打开“记录图片加载诊断”后，新的统计会从零开始。")
+                        .foregroundStyle(.secondary)
                 }
-                .disabled(
-                    cacheStatistics == nil
-                        || displayCacheStatistics == nil
-                        || scrollStatistics == nil
-                        || cdnStatistics == nil
-                )
-
-                Button(role: .destructive) {
-                    Task {
-                        await resetDiagnostics()
-                    }
-                } label: {
-                    Label("重置诊断数据", systemImage: "arrow.counterclockwise")
-                }
-                .disabled(isLoading)
-            } footer: {
-                Text("只统计数量和 CDN 节点名，不记录图片地址、图片内容或账号信息。重置不会清理图片缓存，也不会改变当前节点降级状态。")
             }
         }
         .tint(libraryStore.appTintColor)
@@ -58,12 +41,49 @@ struct RemoteImageDiagnosticsView: View {
                 } label: {
                     Image(systemName: "arrow.clockwise")
                 }
-                .disabled(isLoading)
+                .disabled(isLoading || !libraryStore.remoteImageDiagnosticsEnabled)
                 .accessibilityLabel("刷新图片加载诊断")
             }
         }
         .task {
             await reload()
+        }
+        .onChange(of: libraryStore.remoteImageDiagnosticsEnabled) { _, isEnabled in
+            if isEnabled {
+                Task {
+                    await reload()
+                }
+            } else {
+                clearVisibleStatistics()
+            }
+        }
+    }
+
+    private var actionsSection: some View {
+        Section {
+            Button {
+                copyDiagnostics()
+            } label: {
+                Label(didCopy ? "已复制" : "复制测试数据", systemImage: didCopy ? "checkmark" : "doc.on.doc")
+            }
+            .disabled(
+                isLoading
+                    || cacheStatistics == nil
+                    || displayCacheStatistics == nil
+                    || scrollStatistics == nil
+                    || cdnStatistics == nil
+            )
+
+            Button(role: .destructive) {
+                Task {
+                    await resetDiagnostics()
+                }
+            } label: {
+                Label("重置诊断数据", systemImage: "arrow.counterclockwise")
+            }
+            .disabled(isLoading)
+        } footer: {
+            Text("只统计数量和 CDN 节点名，不记录图片地址、图片内容或账号信息。重置不会清理图片缓存，也不会改变当前节点降级状态。")
         }
     }
 
@@ -179,6 +199,10 @@ struct RemoteImageDiagnosticsView: View {
     @MainActor
     private func reload() async {
         guard !isLoading else { return }
+        guard libraryStore.remoteImageDiagnosticsEnabled else {
+            clearVisibleStatistics()
+            return
+        }
         isLoading = true
         displayCacheStatistics = RemoteImageDisplayMemoryCache.shared.statistics()
         cacheStatistics = await RemoteImageCache.shared.statistics()
@@ -192,10 +216,7 @@ struct RemoteImageDiagnosticsView: View {
         RemoteImageDisplayMemoryCache.shared.resetDiagnostics()
         await RemoteImageCache.shared.resetDiagnostics()
         await RemoteImageLoadSuppressionGate.shared.resetDiagnostics()
-        cacheStatistics = nil
-        displayCacheStatistics = nil
-        scrollStatistics = nil
-        cdnStatistics = nil
+        clearVisibleStatistics()
         await reload()
     }
 
@@ -204,7 +225,8 @@ struct RemoteImageDiagnosticsView: View {
         guard let cacheStatistics,
               let displayCacheStatistics,
               let scrollStatistics,
-              let cdnStatistics
+              let cdnStatistics,
+              libraryStore.remoteImageDiagnosticsEnabled
         else { return }
         let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "-"
         let build = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "-"
@@ -215,6 +237,7 @@ struct RemoteImageDiagnosticsView: View {
             cdn: cdnStatistics,
             isFastScrollImageLoadSuppressionEnabled: libraryStore.fastScrollImageLoadSuppressionExperimentEnabled,
             isCDNFailoverEnabled: libraryStore.remoteImageCDNFailoverExperimentEnabled,
+            isDiagnosticsEnabled: libraryStore.remoteImageDiagnosticsEnabled,
             version: version,
             build: build,
             generatedAt: Date.now.formatted(date: .numeric, time: .standard)
@@ -224,6 +247,13 @@ struct RemoteImageDiagnosticsView: View {
             try? await Task.sleep(nanoseconds: 1_200_000_000)
             didCopy = false
         }
+    }
+
+    private func clearVisibleStatistics() {
+        cacheStatistics = nil
+        displayCacheStatistics = nil
+        scrollStatistics = nil
+        cdnStatistics = nil
     }
 }
 
@@ -235,6 +265,7 @@ nonisolated enum RemoteImageDiagnosticsTextFormatter {
         cdn: RemoteImageCDNDiagnosticsSnapshot,
         isFastScrollImageLoadSuppressionEnabled: Bool = false,
         isCDNFailoverEnabled: Bool,
+        isDiagnosticsEnabled: Bool = true,
         version: String,
         build: String,
         generatedAt: String
@@ -243,6 +274,7 @@ nonisolated enum RemoteImageDiagnosticsTextFormatter {
             "CiliCili 图片加载诊断",
             "generated: \(generatedAt)",
             "version: \(version) (\(build))",
+            "图片加载诊断: \(isDiagnosticsEnabled ? "已开启" : "已关闭")",
             "",
             "显示内存缓存",
             "  命中: \(displayCache.hits)",

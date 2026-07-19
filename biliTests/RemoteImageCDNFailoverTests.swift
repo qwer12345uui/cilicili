@@ -183,12 +183,14 @@ final class RemoteImageCDNFailoverTests: XCTestCase {
             cdn: cdn,
             isFastScrollImageLoadSuppressionEnabled: true,
             isCDNFailoverEnabled: true,
+            isDiagnosticsEnabled: true,
             version: "1.0.14",
             build: "48",
             generatedAt: "2026-07-18 12:00"
         )
 
         XCTAssertTrue(text.contains("version: 1.0.14 (48)"))
+        XCTAssertTrue(text.contains("图片加载诊断: 已开启"))
         XCTAssertTrue(text.contains("显示内存缓存"))
         XCTAssertTrue(text.contains("复用进行中加载: 9"))
         XCTAssertTrue(text.contains("新建图片加载任务: 21"))

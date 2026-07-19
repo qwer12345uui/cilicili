@@ -1,7 +1,7 @@
 import SwiftUI
 
 enum FastScrollImageLoadSuppressionExperiment {
-    static let defaultIsEnabled = false
+    static let defaultIsEnabled = true
     static let resumeDelayNanoseconds: UInt64 = 120_000_000
 }
 
@@ -68,7 +68,8 @@ actor RemoteImageLoadSuppressionGate {
         guard !hasCachedImage else { return }
         switch priority {
         case .visible:
-            if !activeScopes.isEmpty {
+            if RemoteImageDiagnosticsSettings.isRecordingEnabled,
+               !activeScopes.isEmpty {
                 visibleBypassCount += 1
             }
             return
@@ -80,7 +81,9 @@ actor RemoteImageLoadSuppressionGate {
             suppressionActive: !activeScopes.isEmpty
         ) else { return }
 
-        deferredPrefetchCount += 1
+        if RemoteImageDiagnosticsSettings.isRecordingEnabled {
+            deferredPrefetchCount += 1
+        }
         let waiterID = UUID()
         await withTaskCancellationHandler {
             await withCheckedContinuation { continuation in
