@@ -64,7 +64,14 @@ struct MineDisplaySettingsSection: View {
                 get: { libraryStore.unifiedVideoCoverBorderExperimentEnabled },
                 set: { libraryStore.setUnifiedVideoCoverBorderExperimentEnabled($0) }
             )) {
-                Label("统一视频封面描边实验", systemImage: "rectangle.dashed")
+                VStack(alignment: .leading, spacing: 4) {
+                    Label("统一视频封面描边实验", systemImage: "rectangle.dashed")
+
+                    Text("开着后视频封面用 iOS 自适应分隔线做一层细描边，保留轻阴影，不给整张图盖玻璃。")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
             }
 
             Toggle(isOn: Binding(

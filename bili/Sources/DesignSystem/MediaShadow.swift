@@ -209,17 +209,19 @@ private struct UnifiedVideoCoverExperimentBorderModifier<BorderShape: Shape>: Vi
     func body(content: Content) -> some View {
         content.overlay {
             if isEnabled {
-                ZStack {
-                    shape
-                        .stroke(.black.opacity(0.12 * opacityScale), lineWidth: physicalPixel)
-                        .padding(physicalPixel * 0.5)
-
-                    shape
-                        .stroke(.white.opacity(0.30 * opacityScale), lineWidth: physicalPixel)
-                        .padding(physicalPixel * 1.5)
-                }
+                shape
+                    .stroke(systemSeparatorColor, lineWidth: physicalPixel)
+                    .padding(physicalPixel * 0.5)
             }
         }
+    }
+
+    private var systemSeparatorColor: Color {
+        Color(.separator).opacity(0.72 * normalizedOpacityScale)
+    }
+
+    private var normalizedOpacityScale: Double {
+        min(max(opacityScale, 0), 1)
     }
 
     private var physicalPixel: CGFloat {
