@@ -394,7 +394,6 @@ private struct SurfaceOnlyPlayerOverlayRoot: View {
     @StateObject private var rotationTransitionSnapshotModel = PlayerRotationTransitionSnapshotModel()
     @StateObject private var seekTransitionSnapshotModel = PlayerRotationTransitionSnapshotModel()
     @StateObject private var speedBoostModel = PlayerSpeedBoostModel()
-    @StateObject private var doubleTapSeekModel = PlayerDoubleTapSeekModel()
     @StateObject private var seekPreviewModel = PlayerSeekPreviewModel()
     @StateObject private var playbackProgressCoordinator = PlayerPlaybackProgressCoordinator()
     @StateObject private var progressReporter = PlayerPlaybackProgressReporter()
@@ -474,7 +473,6 @@ private struct SurfaceOnlyPlayerOverlayRoot: View {
                                 .frame(maxWidth: .infinity, maxHeight: .infinity),
                             visibilityActions: visibilityActions,
                             speedBoostActions: speedActions,
-                            doubleTapSeekModel: renderContext.doubleTapSeekModel,
                             viewModel: viewModel,
                             seekPreviewModel: renderContext.seekPreviewModel,
                             seekPreviewAPI: renderContext.seekPreviewAPI,
@@ -488,7 +486,6 @@ private struct SurfaceOnlyPlayerOverlayRoot: View {
                         BiliPlayerSurfaceOverlayLayer(
                             state: chromeState,
                             speedBoostModel: renderContext.speedBoostModel,
-                            doubleTapSeekModel: renderContext.doubleTapSeekModel,
                             seekPreviewModel: renderContext.seekPreviewModel
                         )
                             .zIndex(2)
@@ -664,7 +661,6 @@ private struct SurfaceOnlyPlayerOverlayRoot: View {
             rotationTransitionSnapshotModel: rotationTransitionSnapshotModel,
             seekTransitionSnapshotModel: seekTransitionSnapshotModel,
             speedBoostModel: speedBoostModel,
-            doubleTapSeekModel: doubleTapSeekModel,
             seekPreviewModel: seekPreviewModel,
             playbackProgressCoordinator: playbackProgressCoordinator,
             progressReporter: progressReporter,

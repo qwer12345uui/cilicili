@@ -12,7 +12,6 @@ struct BiliPlayerViewContent: View {
             playbackSurface: AnyView(surfaceGestureLayer),
             state: surfaceChromeState,
             speedBoostModel: context.speedBoostModel,
-            doubleTapSeekModel: context.doubleTapSeekModel,
             seekPreviewModel: context.seekPreviewModel,
             playbackControls: AnyView(playbackControls)
         )
@@ -30,7 +29,6 @@ struct BiliPlayerViewContent: View {
             content: playbackSurface,
             visibilityActions: renderState.visibilityActions,
             speedBoostActions: renderState.speedBoostActions,
-            doubleTapSeekModel: context.doubleTapSeekModel,
             viewModel: context.viewModel,
             seekPreviewModel: context.seekPreviewModel,
             seekPreviewAPI: context.seekPreviewAPI,

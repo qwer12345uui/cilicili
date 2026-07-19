@@ -6,7 +6,7 @@ struct BiliPlayerSurfaceGestureLayer<Content: View>: View {
     let durationHint: TimeInterval?
     let canSeek: Bool
     let onSingleTap: () -> Void
-    let onDoubleTap: (PlayerDoubleTapSeekTarget) -> Void
+    let onDoubleTap: () -> Void
     let onBeginSpeedBoost: () -> Bool
     let onEndSpeedBoost: (PlayerSpeedBoostEndReason) -> Void
     let onHorizontalSeekStart: (Double) -> Void
@@ -92,12 +92,11 @@ struct BiliPlayerSurfaceGestureLayer<Content: View>: View {
             .onEnded { value in
                 switch value {
                 case .first(let doubleTap):
-                    onDoubleTap(
-                        PlayerDoubleTapSeekPolicy.target(
-                            locationX: doubleTap.location.x,
-                            width: size.width
-                        )
-                    )
+                    guard PlayerDoubleTapGesturePolicy.shouldTogglePlayback(
+                        locationX: doubleTap.location.x,
+                        width: size.width
+                    ) else { return }
+                    onDoubleTap()
                 case .second:
                     onSingleTap()
                 }

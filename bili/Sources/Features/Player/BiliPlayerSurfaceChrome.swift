@@ -4,7 +4,6 @@ struct BiliPlayerSurfaceChrome: View {
     let playbackSurface: AnyView
     let state: BiliPlayerSurfaceChromeState
     let speedBoostModel: PlayerSpeedBoostModel
-    let doubleTapSeekModel: PlayerDoubleTapSeekModel
     let seekPreviewModel: PlayerSeekPreviewModel
     let playbackControls: AnyView
 
@@ -18,7 +17,6 @@ struct BiliPlayerSurfaceChrome: View {
             BiliPlayerSurfaceOverlayLayer(
                 state: state,
                 speedBoostModel: speedBoostModel,
-                doubleTapSeekModel: doubleTapSeekModel,
                 seekPreviewModel: seekPreviewModel
             )
 

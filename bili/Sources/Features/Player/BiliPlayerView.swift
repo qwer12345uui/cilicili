@@ -10,7 +10,6 @@ struct BiliPlayerView: View {
     @StateObject private var rotationTransitionSnapshotModel = PlayerRotationTransitionSnapshotModel()
     @StateObject private var seekTransitionSnapshotModel = PlayerRotationTransitionSnapshotModel()
     @StateObject private var speedBoostModel = PlayerSpeedBoostModel()
-    @StateObject private var doubleTapSeekModel = PlayerDoubleTapSeekModel()
     @StateObject private var seekPreviewModel = PlayerSeekPreviewModel()
     @StateObject private var playbackProgressCoordinator = PlayerPlaybackProgressCoordinator()
     @State private var lastPreparedScrubProgress = -1.0
@@ -33,7 +32,6 @@ struct BiliPlayerView: View {
             rotationTransitionSnapshotModel: rotationTransitionSnapshotModel,
             seekTransitionSnapshotModel: seekTransitionSnapshotModel,
             speedBoostModel: speedBoostModel,
-            doubleTapSeekModel: doubleTapSeekModel,
             seekPreviewModel: seekPreviewModel,
             playbackProgressCoordinator: playbackProgressCoordinator,
             progressReporter: progressReporter,
