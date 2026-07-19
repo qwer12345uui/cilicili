@@ -6,7 +6,7 @@ struct BiliPlayerSurfaceGestureLayer<Content: View>: View {
     let durationHint: TimeInterval?
     let canSeek: Bool
     let onSingleTap: () -> Void
-    let onDoubleTap: () -> Void
+    let onDoubleTap: (PlayerDoubleTapSeekTarget) -> Void
     let onBeginSpeedBoost: () -> Bool
     let onEndSpeedBoost: (PlayerSpeedBoostEndReason) -> Void
     let onHorizontalSeekStart: (Double) -> Void
@@ -33,18 +33,7 @@ struct BiliPlayerSurfaceGestureLayer<Content: View>: View {
             content
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             .contentShape(Rectangle())
-            .simultaneousGesture(
-                TapGesture(count: 2)
-                    .exclusively(before: TapGesture(count: 1))
-                    .onEnded { value in
-                        switch value {
-                        case .first:
-                            onSingleTap()
-                        case .second:
-                            onDoubleTap()
-                        }
-                    }
-            )
+            .simultaneousGesture(tapGesture(size: proxy.size))
             .simultaneousGesture(
                 LongPressGesture(minimumDuration: 0.28, maximumDistance: 80)
                     .sequenced(before: DragGesture(minimumDistance: 0, coordinateSpace: .local))
@@ -94,6 +83,24 @@ struct BiliPlayerSurfaceGestureLayer<Content: View>: View {
                     ?? clock.progress
                 onHorizontalSeekEnded(progress)
                 resetHorizontalSeekState(clearsClockPreview: false)
+            }
+    }
+
+    private func tapGesture(size: CGSize) -> some Gesture {
+        SpatialTapGesture(count: 2, coordinateSpace: .local)
+            .exclusively(before: SpatialTapGesture(count: 1, coordinateSpace: .local))
+            .onEnded { value in
+                switch value {
+                case .first(let doubleTap):
+                    onDoubleTap(
+                        PlayerDoubleTapSeekPolicy.target(
+                            locationX: doubleTap.location.x,
+                            width: size.width
+                        )
+                    )
+                case .second:
+                    onSingleTap()
+                }
             }
     }
 

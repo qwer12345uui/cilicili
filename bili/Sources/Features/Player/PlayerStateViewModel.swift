@@ -2304,9 +2304,10 @@ final class PlayerStateViewModel: NSObject, ObservableObject {
         rescheduleTimeObserverIfNeeded(force: true)
     }
 
-    func seek(by interval: TimeInterval) {
-        guard !isTerminated else { return }
-        guard engine.hasMedia else { return }
+    @discardableResult
+    func seek(by interval: TimeInterval, source: String = "step") -> TimeInterval? {
+        guard !isTerminated else { return nil }
+        guard engine.hasMedia else { return nil }
         markUserSeekIntent()
         let signpostState = PlayerMetricsLog.beginSignpostedInterval(
             "PlayerSeek",
@@ -2321,9 +2322,12 @@ final class PlayerStateViewModel: NSObject, ObservableObject {
                 message: signpostMessage
             )
         }
+        let appliedTime: TimeInterval?
         if let time = engine.seek(by: interval, from: currentTime, duration: duration ?? durationHint) {
+            appliedTime = time
             updatePlaybackTime(time, force: true, countsAsNaturalPlayback: false)
-            let reason = interval < 0 ? "step-back" : "step-forward"
+            let direction = interval < 0 ? "back" : "forward"
+            let reason = source == "step" ? "step-\(direction)" : "\(source)-\(direction)"
             beginSeekRecoveryTracking(
                 reason: reason,
                 targetTime: time,
@@ -2340,9 +2344,11 @@ final class PlayerStateViewModel: NSObject, ObservableObject {
             )
             signpostMessage = "mode=step delta=\(String(format: "%.2f", interval)) applied=\(String(format: "%.2f", time))"
         } else {
+            appliedTime = nil
             signpostMessage = "mode=step delta=\(String(format: "%.2f", interval)) skipped"
         }
         invalidatePictureInPicturePlaybackState()
+        return appliedTime
     }
 
     func setPlaybackRate(_ rate: BiliPlaybackRate) {

@@ -4,6 +4,7 @@ struct BiliPlayerSurfaceGestureLayerHost<Content: View>: View {
     let content: Content
     let visibilityActions: BiliPlayerPlaybackControlsVisibilityActions
     let speedBoostActions: BiliPlayerSpeedBoostActions
+    let doubleTapSeekModel: PlayerDoubleTapSeekModel
     let viewModel: PlayerStateViewModel
     @ObservedObject var seekPreviewModel: PlayerSeekPreviewModel
     let seekPreviewAPI: BiliAPIClient?
@@ -17,6 +18,7 @@ struct BiliPlayerSurfaceGestureLayerHost<Content: View>: View {
             viewModel: viewModel,
             visibilityActions: visibilityActions,
             speedBoostActions: speedBoostActions,
+            doubleTapSeekModel: doubleTapSeekModel,
             holdCurrentFrameForSeek: holdCurrentFrameForSeek,
             prepareUserSeekWarmup: prepareUserSeekWarmup,
             resetPreparedScrubProgress: resetPreparedScrubProgress
@@ -30,7 +32,7 @@ struct BiliPlayerSurfaceGestureLayerHost<Content: View>: View {
             durationHint: viewModel.displayDuration,
             canSeek: viewModel.canSeek,
             onSingleTap: gestureActions.singleTap,
-            onDoubleTap: gestureActions.doubleTap,
+            onDoubleTap: gestureActions.doubleTap(target:),
             onBeginSpeedBoost: gestureActions.beginSpeedBoost,
             onEndSpeedBoost: gestureActions.endSpeedBoost(reason:),
             onHorizontalSeekStart: { progress in
@@ -62,6 +64,7 @@ struct BiliPlayerSurfaceGestureLayerHost<Content: View>: View {
         .onDisappear {
             seekPreviewModel.endScrub()
             speedBoostActions.end(reason: .disappear)
+            doubleTapSeekModel.dismiss()
         }
     }
 

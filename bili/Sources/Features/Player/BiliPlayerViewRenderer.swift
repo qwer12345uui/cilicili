@@ -9,6 +9,7 @@ struct BiliPlayerViewRenderContext {
     let seekTransitionSnapshotModel: PlayerRotationTransitionSnapshotModel
     let rotationFallbackCoverURL: URL?
     let speedBoostModel: PlayerSpeedBoostModel
+    let doubleTapSeekModel: PlayerDoubleTapSeekModel
     let seekPreviewModel: PlayerSeekPreviewModel
     let seekPreviewAPI: BiliAPIClient?
     let seekPreviewContext: PlayerSeekPreviewContext?

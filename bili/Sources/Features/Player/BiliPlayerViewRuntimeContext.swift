@@ -15,6 +15,7 @@ struct BiliPlayerViewRuntimeContextBuilder {
     let rotationTransitionSnapshotModel: PlayerRotationTransitionSnapshotModel
     let seekTransitionSnapshotModel: PlayerRotationTransitionSnapshotModel
     let speedBoostModel: PlayerSpeedBoostModel
+    let doubleTapSeekModel: PlayerDoubleTapSeekModel
     let seekPreviewModel: PlayerSeekPreviewModel
     let playbackProgressCoordinator: PlayerPlaybackProgressCoordinator
     let progressReporter: PlayerPlaybackProgressReporter
@@ -73,6 +74,7 @@ struct BiliPlayerViewRuntimeContextBuilder {
             seekTransitionSnapshotModel: seekTransitionSnapshotModel,
             rotationFallbackCoverURL: rotationFallbackCoverURL,
             speedBoostModel: speedBoostModel,
+            doubleTapSeekModel: doubleTapSeekModel,
             seekPreviewModel: seekPreviewModel,
             seekPreviewAPI: historyVideo == nil ? nil : dependencies.api,
             seekPreviewContext: PlayerSeekPreviewContext(

@@ -3,6 +3,7 @@ import SwiftUI
 struct BiliPlayerSurfaceOverlayLayer: View {
     let state: BiliPlayerSurfaceChromeState
     @ObservedObject var speedBoostModel: PlayerSpeedBoostModel
+    @ObservedObject var doubleTapSeekModel: PlayerDoubleTapSeekModel
     @ObservedObject var seekPreviewModel: PlayerSeekPreviewModel
 
     var body: some View {
@@ -69,6 +70,18 @@ struct BiliPlayerSurfaceOverlayLayer: View {
                     .padding(.top, state.presentation == .embedded ? 10 : 16)
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
                     .transition(.opacity.combined(with: .scale(scale: 0.96)))
+                    .zIndex(6)
+            }
+
+            if let presentation = doubleTapSeekModel.presentation {
+                PlayerDoubleTapSeekOverlay(presentation: presentation)
+                    .padding(.horizontal, state.presentation == .embedded ? 18 : 28)
+                    .frame(
+                        maxWidth: .infinity,
+                        maxHeight: .infinity,
+                        alignment: presentation.direction == .backward ? .leading : .trailing
+                    )
+                    .transition(.opacity.combined(with: .scale(scale: 0.94)))
                     .zIndex(6)
             }
 
