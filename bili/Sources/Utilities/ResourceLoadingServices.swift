@@ -19,6 +19,19 @@ nonisolated struct PlayURLCacheLoginScope: Hashable, Sendable {
     let isLoggedIn: Bool
     let userMID: Int?
     let guestModeEnabled: Bool
+    let credentialVersion: Int
+
+    init(
+        isLoggedIn: Bool,
+        userMID: Int?,
+        guestModeEnabled: Bool,
+        credentialVersion: Int = 0
+    ) {
+        self.isLoggedIn = isLoggedIn
+        self.userMID = userMID
+        self.guestModeEnabled = guestModeEnabled
+        self.credentialVersion = credentialVersion
+    }
 }
 
 nonisolated struct PlayURLCacheStatistics: Sendable {

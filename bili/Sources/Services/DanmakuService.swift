@@ -6,19 +6,22 @@ struct DanmakuSettings: Codable, Equatable, Sendable {
     var displayArea: DanmakuDisplayArea
     var fontWeight: DanmakuFontWeightOption
     var loadFactor: Double
+    var hidesInPortrait: Bool
 
     init(
         fontScale: Double,
         opacity: Double,
         displayArea: DanmakuDisplayArea,
         fontWeight: DanmakuFontWeightOption,
-        loadFactor: Double = 1.0
+        loadFactor: Double = 1.0,
+        hidesInPortrait: Bool = true
     ) {
         self.fontScale = fontScale
         self.opacity = opacity
         self.displayArea = displayArea
         self.fontWeight = fontWeight
         self.loadFactor = loadFactor
+        self.hidesInPortrait = hidesInPortrait
     }
 
     private enum CodingKeys: String, CodingKey {
@@ -27,6 +30,7 @@ struct DanmakuSettings: Codable, Equatable, Sendable {
         case displayArea
         case fontWeight
         case loadFactor
+        case hidesInPortrait
     }
 
     init(from decoder: Decoder) throws {
@@ -36,6 +40,7 @@ struct DanmakuSettings: Codable, Equatable, Sendable {
         self.displayArea = try container.decode(DanmakuDisplayArea.self, forKey: .displayArea)
         self.fontWeight = try container.decode(DanmakuFontWeightOption.self, forKey: .fontWeight)
         self.loadFactor = try container.decodeIfPresent(Double.self, forKey: .loadFactor) ?? 1.0
+        self.hidesInPortrait = try container.decodeIfPresent(Bool.self, forKey: .hidesInPortrait) ?? true
     }
 
     static let `default` = DanmakuSettings(
@@ -43,7 +48,8 @@ struct DanmakuSettings: Codable, Equatable, Sendable {
         opacity: 0.92,
         displayArea: .topHalf,
         fontWeight: .semibold,
-        loadFactor: 1.0
+        loadFactor: 1.0,
+        hidesInPortrait: true
     )
 
     var normalized: DanmakuSettings {
@@ -52,8 +58,32 @@ struct DanmakuSettings: Codable, Equatable, Sendable {
             opacity: min(max(opacity, 0.25), 1.0),
             displayArea: displayArea.normalized,
             fontWeight: fontWeight,
-            loadFactor: min(max(loadFactor, 0.35), 1.0)
+            loadFactor: min(max(loadFactor, 0.35), 1.0),
+            hidesInPortrait: hidesInPortrait
         )
+    }
+}
+
+nonisolated struct BiliInlineEmote: Hashable, Sendable {
+    let token: String
+    let url: String
+    let width: Double?
+    let height: Double?
+
+    init(
+        token: String,
+        url: String,
+        width: Double? = nil,
+        height: Double? = nil
+    ) {
+        self.token = token
+        self.url = url
+        self.width = width
+        self.height = height
+    }
+
+    var displayURL: String? {
+        url.normalizedBiliURL()
     }
 }
 
@@ -129,13 +159,35 @@ enum DanmakuFontWeightOption: String, Codable, CaseIterable, Identifiable, Senda
     }
 }
 
-struct DanmakuItem: Identifiable, Hashable, Sendable {
+nonisolated struct DanmakuItem: Identifiable, Hashable, Sendable {
     let id: String
     let time: TimeInterval
     let mode: Int
     let fontSize: Double
     let color: UInt32
     let text: String
+    let senderName: String?
+    let inlineEmotes: [String: BiliInlineEmote]
+
+    init(
+        id: String,
+        time: TimeInterval,
+        mode: Int,
+        fontSize: Double,
+        color: UInt32,
+        text: String,
+        senderName: String? = nil,
+        inlineEmotes: [String: BiliInlineEmote] = [:]
+    ) {
+        self.id = id
+        self.time = time
+        self.mode = mode
+        self.fontSize = fontSize
+        self.color = color
+        self.text = text
+        self.senderName = senderName
+        self.inlineEmotes = inlineEmotes
+    }
 
     nonisolated var isScrolling: Bool {
         mode == 1 || mode == 2 || mode == 3

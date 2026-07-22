@@ -91,6 +91,8 @@ class RenderingEngineVideoPlayerAdapter: VideoPlayerProtocol {
             title: videoURL.lastPathComponent,
             durationHint: nil,
             isLiveStream: false,
+            isLiveHLS: false,
+            liveHLSFormat: nil,
             resumeTime: 0,
             dynamicRange: .sdr,
             cdnPreference: .automatic
@@ -233,11 +235,13 @@ final class CoreVideoPlayerManager {
 
     nonisolated static func selectBestStream(
         from streams: [DashStream],
-        preference: VideoCodecPreference
+        preference: VideoCodecPreference,
+        supportsAV1HardwareDecode: Bool = PlaybackCodecPolicy.canDecodeAV1
     ) -> DashStream? {
         DashStreamDispatcher.selectBestStream(
             from: streams,
-            preference: preference
+            preference: preference,
+            supportsAV1HardwareDecode: supportsAV1HardwareDecode
         )
     }
 }

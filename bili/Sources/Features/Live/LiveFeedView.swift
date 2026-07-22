@@ -132,14 +132,28 @@ private struct LiveFeedRoomList: View {
 private struct LiveFeedRoomLink: View {
     let room: LiveRoom
     @ObservedObject var viewModel: LiveViewModel
+    @Environment(\.openLiveRoomAction) private var openLiveRoom
 
+    @ViewBuilder
     var body: some View {
-        NavigationLink(value: room) {
-            LiveRoomCard(room: room)
-        }
-        .buttonStyle(.plain)
-        .onAppear {
-            Task { await viewModel.loadMoreIfNeeded(current: room) }
+        if let openLiveRoom {
+            Button {
+                openLiveRoom(room)
+            } label: {
+                LiveRoomCard(room: room)
+            }
+            .buttonStyle(.plain)
+            .onAppear {
+                Task { await viewModel.loadMoreIfNeeded(current: room) }
+            }
+        } else {
+            NavigationLink(value: room) {
+                LiveRoomCard(room: room)
+            }
+            .buttonStyle(.plain)
+            .onAppear {
+                Task { await viewModel.loadMoreIfNeeded(current: room) }
+            }
         }
     }
 }

@@ -10,7 +10,7 @@ struct LiveRoomSurfaceCoordinatorView: UIViewControllerRepresentable {
     let playbackSession: PlaybackSession
     let dependencies: AppDependencies
     let usesLandscapeChrome: Bool
-    let controlsAccessory: (Bool) -> AnyView
+    let usesPortraitFullscreen: Bool
     let onRequestFullscreen: (PlayerStateViewModel?) -> Void
     let onExitFullscreen: (PlayerStateViewModel?) -> Void
 
@@ -20,7 +20,7 @@ struct LiveRoomSurfaceCoordinatorView: UIViewControllerRepresentable {
             playbackSession: playbackSession,
             dependencies: dependencies,
             usesLandscapeChrome: usesLandscapeChrome,
-            controlsAccessory: controlsAccessory,
+            usesPortraitFullscreen: usesPortraitFullscreen,
             onRequestFullscreen: onRequestFullscreen,
             onExitFullscreen: onExitFullscreen
         )
@@ -32,7 +32,8 @@ struct LiveRoomSurfaceCoordinatorView: UIViewControllerRepresentable {
     ) {
         viewController.update(
             playbackSession: playbackSession,
-            usesLandscapeChrome: usesLandscapeChrome
+            usesLandscapeChrome: usesLandscapeChrome,
+            usesPortraitFullscreen: usesPortraitFullscreen
         )
     }
 }
@@ -41,12 +42,12 @@ struct LiveRoomSurfaceCoordinatorView: UIViewControllerRepresentable {
 final class LiveRoomSurfaceCoordinatorViewController: UIViewController {
     private let viewModel: LiveRoomViewModel
     private let dependencies: AppDependencies
-    private let controlsAccessory: (Bool) -> AnyView
     private let onRequestFullscreen: (PlayerStateViewModel?) -> Void
     private let onExitFullscreen: (PlayerStateViewModel?) -> Void
     private let playerContainer = UIView()
     private var playbackSession: PlaybackSession
     private var usesLandscapeChrome: Bool
+    private var usesPortraitFullscreen: Bool
 
     private lazy var surfaceController: PlayerSurfaceController = {
         PlayerSurfaceController(
@@ -58,7 +59,6 @@ final class LiveRoomSurfaceCoordinatorViewController: UIViewController {
                     playerViewModel: playerViewModel,
                     viewModel: self.viewModel,
                     dependencies: self.dependencies,
-                    controlsAccessory: self.controlsAccessory,
                     onRequestFullscreen: self.onRequestFullscreen,
                     onExitFullscreen: self.onExitFullscreen
                 )
@@ -71,7 +71,7 @@ final class LiveRoomSurfaceCoordinatorViewController: UIViewController {
         playbackSession: PlaybackSession,
         dependencies: AppDependencies,
         usesLandscapeChrome: Bool,
-        controlsAccessory: @escaping (Bool) -> AnyView,
+        usesPortraitFullscreen: Bool,
         onRequestFullscreen: @escaping (PlayerStateViewModel?) -> Void,
         onExitFullscreen: @escaping (PlayerStateViewModel?) -> Void
     ) {
@@ -79,7 +79,7 @@ final class LiveRoomSurfaceCoordinatorViewController: UIViewController {
         self.playbackSession = playbackSession
         self.dependencies = dependencies
         self.usesLandscapeChrome = usesLandscapeChrome
-        self.controlsAccessory = controlsAccessory
+        self.usesPortraitFullscreen = usesPortraitFullscreen
         self.onRequestFullscreen = onRequestFullscreen
         self.onExitFullscreen = onExitFullscreen
         super.init(nibName: nil, bundle: nil)
@@ -105,10 +105,12 @@ final class LiveRoomSurfaceCoordinatorViewController: UIViewController {
 
     func update(
         playbackSession: PlaybackSession,
-        usesLandscapeChrome: Bool
+        usesLandscapeChrome: Bool,
+        usesPortraitFullscreen: Bool
     ) {
         self.playbackSession = playbackSession
         self.usesLandscapeChrome = usesLandscapeChrome
+        self.usesPortraitFullscreen = usesPortraitFullscreen
         guard isViewLoaded else { return }
         bindSurface()
     }
@@ -119,6 +121,7 @@ final class LiveRoomSurfaceCoordinatorViewController: UIViewController {
             videoAspectRatio: 16.0 / 9.0,
             videoGravity: .resizeAspect,
             usesLandscapeChrome: usesLandscapeChrome,
+            usesPortraitFullscreen: usesPortraitFullscreen,
             isTransitioning: false
         )
         surfaceController.bind(to: playbackSession, layout: layout)
@@ -131,17 +134,35 @@ final class LiveRoomSurfaceHost: UIView, PlayerSurfaceHosting {
     final class State: ObservableObject {
         @Published var playerViewModel: PlayerStateViewModel
         @Published var usesLandscapeChrome = false
+        @Published var isPortraitFullscreen = false
         @Published var isBareSurfaceTransitionActive = false
+        @Published var retainsChromeDuringBareSurfaceTransition = false
         @Published var videoAspectRatio: CGFloat = 16.0 / 9.0
 
         init(playerViewModel: PlayerStateViewModel) {
             self.playerViewModel = playerViewModel
         }
+
+        func setBareSurfaceTransitionActive(_ active: Bool, retainsChromeTree: Bool) {
+            if active {
+                retainsChromeDuringBareSurfaceTransition = retainsChromeTree
+                isBareSurfaceTransitionActive = true
+            } else {
+                isBareSurfaceTransitionActive = false
+                retainsChromeDuringBareSurfaceTransition = false
+            }
+        }
     }
 
     private let state: State
+    private let rotationStabilityState: LiveRotationSurfaceAlignmentState
+    private let danmakuOverlayState: LiveDanmakuOverlayState
     private var videoGravity: AVLayerVideoGravity = .resizeAspect
-    private let hostingController: UIHostingController<LiveRoomSurfaceRoot>
+    // Keep the decoded video layer out of the SwiftUI player tree. The live
+    // overlay may change during rotation, but the surface itself stays owned by UIKit.
+    private let surfaceHostView: UIKitPlayerSurfaceHostView
+    private let overlayHostingController: UIHostingController<LiveRoomSurfaceRoot>
+    private var cancellables = Set<AnyCancellable>()
     private var rotationChromePrewarmGeneration = 0
     private var isRotationChromePrewarming = false
     private var rotationChromePrewarmOriginalLandscape: Bool?
@@ -150,19 +171,29 @@ final class LiveRoomSurfaceHost: UIView, PlayerSurfaceHosting {
         playerViewModel: PlayerStateViewModel,
         viewModel: LiveRoomViewModel,
         dependencies: AppDependencies,
-        controlsAccessory: @escaping (Bool) -> AnyView,
         onRequestFullscreen: @escaping (PlayerStateViewModel?) -> Void,
         onExitFullscreen: @escaping (PlayerStateViewModel?) -> Void,
         onNavigateBack: @escaping () -> Void = {}
     ) {
         let state = State(playerViewModel: playerViewModel)
+        let rotationStabilityState = viewModel.liveRotationSurfaceAlignmentState
+        let danmakuOverlayState = LiveDanmakuOverlayState(
+            store: viewModel.liveDanmakuRenderStore,
+            rotationState: rotationStabilityState
+        )
         self.state = state
-        self.hostingController = UIHostingController(
+        self.rotationStabilityState = rotationStabilityState
+        self.danmakuOverlayState = danmakuOverlayState
+        self.surfaceHostView = UIKitPlayerSurfaceHostView(
+            viewModel: playerViewModel,
+            isPictureInPictureEnabled: dependencies.libraryStore.pictureInPictureEnabled
+        )
+        self.overlayHostingController = UIHostingController(
             rootView: LiveRoomSurfaceRoot(
                 state: state,
+                danmakuOverlayState: danmakuOverlayState,
                 viewModel: viewModel,
                 dependencies: dependencies,
-                controlsAccessory: controlsAccessory,
                 onRequestFullscreen: onRequestFullscreen,
                 onExitFullscreen: onExitFullscreen,
                 onNavigateBack: onNavigateBack
@@ -171,18 +202,35 @@ final class LiveRoomSurfaceHost: UIView, PlayerSurfaceHosting {
         super.init(frame: .zero)
 
         backgroundColor = .black
-        hostingController.view.backgroundColor = .black
+        surfaceHostView.translatesAutoresizingMaskIntoConstraints = false
+        surfaceHostView.isUserInteractionEnabled = false
+        overlayHostingController.view.backgroundColor = .clear
+        overlayHostingController.view.isOpaque = false
         if #available(iOS 16.4, *) {
-            hostingController.safeAreaRegions = []
+            overlayHostingController.safeAreaRegions = []
         }
-        hostingController.view.translatesAutoresizingMaskIntoConstraints = false
-        addSubview(hostingController.view)
+        overlayHostingController.view.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(surfaceHostView)
+        addSubview(overlayHostingController.view)
         NSLayoutConstraint.activate([
-            hostingController.view.leadingAnchor.constraint(equalTo: leadingAnchor),
-            hostingController.view.trailingAnchor.constraint(equalTo: trailingAnchor),
-            hostingController.view.topAnchor.constraint(equalTo: topAnchor),
-            hostingController.view.bottomAnchor.constraint(equalTo: bottomAnchor),
+            surfaceHostView.leadingAnchor.constraint(equalTo: leadingAnchor),
+            surfaceHostView.trailingAnchor.constraint(equalTo: trailingAnchor),
+            surfaceHostView.topAnchor.constraint(equalTo: topAnchor),
+            surfaceHostView.bottomAnchor.constraint(equalTo: bottomAnchor),
+            overlayHostingController.view.leadingAnchor.constraint(equalTo: leadingAnchor),
+            overlayHostingController.view.trailingAnchor.constraint(equalTo: trailingAnchor),
+            overlayHostingController.view.topAnchor.constraint(equalTo: topAnchor),
+            overlayHostingController.view.bottomAnchor.constraint(equalTo: bottomAnchor),
         ])
+
+        dependencies.libraryStore.$pictureInPictureEnabled
+            .removeDuplicates()
+            .receive(on: RunLoop.main)
+            .sink { [weak self] isEnabled in
+                self?.surfaceHostView.setPictureInPictureEnabled(isEnabled)
+            }
+            .store(in: &cancellables)
+
     }
 
     @available(*, unavailable)
@@ -193,20 +241,22 @@ final class LiveRoomSurfaceHost: UIView, PlayerSurfaceHosting {
     var surfaceView: UIView { self }
 
     func attach(to parent: UIViewController) {
-        parent.addChild(hostingController)
-        hostingController.didMove(toParent: parent)
+        surfaceHostView.attach(to: parent)
+        parent.addChild(overlayHostingController)
+        overlayHostingController.didMove(toParent: parent)
     }
 
     func setPlayerViewModel(_ playerViewModel: PlayerStateViewModel) {
         guard state.playerViewModel !== playerViewModel else { return }
         state.playerViewModel = playerViewModel
+        surfaceHostView.setPlayerViewModel(playerViewModel)
         playerViewModel.setVideoGravity(videoGravity)
     }
 
     func setVideoGravity(_ gravity: AVLayerVideoGravity) {
         guard videoGravity != gravity else { return }
         videoGravity = gravity
-        state.playerViewModel.setVideoGravity(gravity)
+        surfaceHostView.setVideoGravity(gravity)
     }
 
     func setVideoAspectRatio(_ aspectRatio: CGFloat) {
@@ -221,10 +271,31 @@ final class LiveRoomSurfaceHost: UIView, PlayerSurfaceHosting {
         state.usesLandscapeChrome = landscape
     }
 
-    func setBareSurfaceTransitionActive(_ active: Bool, retainsChromeTree _: Bool) {
+    func setPortraitFullscreen(_ active: Bool) {
+        guard state.isPortraitFullscreen != active else { return }
+        state.isPortraitFullscreen = active
+    }
+
+    func setBareSurfaceTransitionActive(_ active: Bool, retainsChromeTree: Bool) {
         cancelRotationChromePrewarm()
-        guard state.isBareSurfaceTransitionActive != active else { return }
-        state.isBareSurfaceTransitionActive = active
+        if active {
+            // Keeping an invisible SwiftUI tree in the compositor still costs
+            // a layout/render pass on every rotation frame. Hide it without
+            // removing it so the already-built controls remain reusable.
+            UIView.performWithoutAnimation {
+                overlayHostingController.view.isHidden = true
+                overlayHostingController.view.isUserInteractionEnabled = false
+            }
+        }
+        state.setBareSurfaceTransitionActive(active, retainsChromeTree: retainsChromeTree)
+        danmakuOverlayState.setUpdatesDeferred(active)
+        rotationStabilityState.setBareSurfaceTransitionActive(active)
+        if !active {
+            UIView.performWithoutAnimation {
+                overlayHostingController.view.isHidden = false
+                overlayHostingController.view.isUserInteractionEnabled = true
+            }
+        }
     }
 
     func prewarmRotationChrome() {
@@ -238,7 +309,10 @@ final class LiveRoomSurfaceHost: UIView, PlayerSurfaceHosting {
         rotationChromePrewarmOriginalLandscape = originalLandscape
 
         UIView.performWithoutAnimation {
-            state.isBareSurfaceTransitionActive = true
+            state.setBareSurfaceTransitionActive(
+                true,
+                retainsChromeTree: true
+            )
             state.usesLandscapeChrome = !originalLandscape
         }
         DispatchQueue.main.async { [weak self] in
@@ -257,7 +331,7 @@ final class LiveRoomSurfaceHost: UIView, PlayerSurfaceHosting {
                 else { return }
                 self.layoutRotationChromePrewarm()
                 UIView.performWithoutAnimation {
-                    self.state.isBareSurfaceTransitionActive = false
+                    self.state.setBareSurfaceTransitionActive(false, retainsChromeTree: false)
                 }
                 self.isRotationChromePrewarming = false
                 self.rotationChromePrewarmOriginalLandscape = nil
@@ -275,7 +349,7 @@ final class LiveRoomSurfaceHost: UIView, PlayerSurfaceHosting {
             if let originalLandscape {
                 state.usesLandscapeChrome = originalLandscape
             }
-            state.isBareSurfaceTransitionActive = false
+            state.setBareSurfaceTransitionActive(false, retainsChromeTree: false)
         }
     }
 
@@ -283,77 +357,179 @@ final class LiveRoomSurfaceHost: UIView, PlayerSurfaceHosting {
         UIView.performWithoutAnimation {
             setNeedsLayout()
             layoutIfNeeded()
-            hostingController.view.setNeedsLayout()
-            hostingController.view.layoutIfNeeded()
-            state.playerViewModel.refreshSurfaceLayout()
+            surfaceHostView.refreshLayoutImmediately()
+            guard !state.isBareSurfaceTransitionActive else { return }
+            overlayHostingController.view.setNeedsLayout()
+            overlayHostingController.view.layoutIfNeeded()
         }
     }
 
     private func layoutRotationChromePrewarm() {
-        hostingController.view.setNeedsLayout()
-        hostingController.view.layoutIfNeeded()
+        overlayHostingController.view.setNeedsLayout()
+        overlayHostingController.view.layoutIfNeeded()
     }
 }
 
 private struct LiveRoomSurfaceRoot: View {
     @ObservedObject var state: LiveRoomSurfaceHost.State
+    @ObservedObject var danmakuOverlayState: LiveDanmakuOverlayState
     @ObservedObject var viewModel: LiveRoomViewModel
     let dependencies: AppDependencies
-    let controlsAccessory: (Bool) -> AnyView
     let onRequestFullscreen: (PlayerStateViewModel?) -> Void
     let onExitFullscreen: (PlayerStateViewModel?) -> Void
     let onNavigateBack: () -> Void
 
     var body: some View {
-        let playerViewModel = state.playerViewModel
-        BiliPlayerView(
-            viewModel: playerViewModel,
-            historyVideo: nil,
-            historyCID: nil,
-            options: BiliPlayerViewOptions(
-                presentation: state.usesLandscapeChrome ? .fullScreen : .embedded,
-                showsNavigationChrome: false,
-                showsPlaybackControls: !state.isBareSurfaceTransitionActive,
-                showsStartupLoadingIndicator: !state.isBareSurfaceTransitionActive,
-                pausesOnDisappear: false,
-                surfaceOverlay: AnyView(
-                    LiveDanmakuOverlay(
-                        store: viewModel.liveDanmakuRenderStore,
-                        playerViewModel: playerViewModel,
-                        usesLandscapeChrome: state.usesLandscapeChrome
-                    )
-                ),
-                controlsAccessory: nil,
-                topLeadingControlsAccessory: AnyView(
-                    VideoDetailPlayerSurfaceBackButtonHost {
-                        if state.usesLandscapeChrome {
-                            onExitFullscreen(playerViewModel)
-                        } else {
-                            onNavigateBack()
-                        }
-                    }
-                ),
-                controlLayout: .live,
-                moreControlsContent: AnyView(
-                    LivePlayerMoreControlsContent(viewModel: viewModel)
-                ),
-                replacesStandardMoreControls: true,
-                isDanmakuEnabled: viewModel.isDanmakuEnabled,
-                keepsPlayerSurfaceStable: true,
-                fullscreenMode: state.usesLandscapeChrome ? .landscape(.landscapeRight) : nil,
-                isLayoutTransitioning: state.isBareSurfaceTransitionActive,
-                usesLiveSurfaceDuringLayoutTransition: true,
-                disablesSurfaceImplicitLayoutAnimations: true,
-                showsRotationTransitionSnapshot: false,
-                onRequestFullscreen: {
-                    onRequestFullscreen(playerViewModel)
-                },
-                onExitFullscreen: {
-                    onExitFullscreen(playerViewModel)
-                }
-            )
+        LiveRoomSurfaceOnlyOverlay(
+            playerViewModel: state.playerViewModel,
+            state: state,
+            danmakuOverlayState: danmakuOverlayState,
+            viewModel: viewModel,
+            dependencies: dependencies,
+            onRequestFullscreen: onRequestFullscreen,
+            onExitFullscreen: onExitFullscreen,
+            onNavigateBack: onNavigateBack
         )
-        .id(ObjectIdentifier(playerViewModel))
+        .id(ObjectIdentifier(state.playerViewModel))
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(Color.clear)
+        .ignoresSafeArea()
+        .sheet(isPresented: $viewModel.isShowingLivePlaybackDiagnostics) {
+            LivePlaybackDiagnosticsSheet(viewModel: viewModel)
+        }
+        .sheet(isPresented: $viewModel.isShowingLiveDanmakuSettings) {
+            LiveDanmakuSettingsSheet(viewModel: viewModel)
+        }
+    }
+}
+
+/// The native video surface lives below this view. This root owns only the
+/// SwiftUI interaction, controls, loading chrome and live danmaku layers.
+private struct LiveRoomSurfaceOnlyOverlay: View {
+    @Environment(\.verticalSizeClass) private var verticalSizeClass
+
+    @ObservedObject var playerViewModel: PlayerStateViewModel
+    @ObservedObject var state: LiveRoomSurfaceHost.State
+    @ObservedObject var danmakuOverlayState: LiveDanmakuOverlayState
+    @ObservedObject var viewModel: LiveRoomViewModel
+    @ObservedObject private var libraryStore: LibraryStore
+
+    let dependencies: AppDependencies
+    let onRequestFullscreen: (PlayerStateViewModel?) -> Void
+    let onExitFullscreen: (PlayerStateViewModel?) -> Void
+    let onNavigateBack: () -> Void
+
+    @StateObject private var surfaceState: PlayerSurfaceStateModel
+    @StateObject private var playbackControlsVisibility = PlayerPlaybackControlsVisibilityModel()
+    @StateObject private var rotationTransitionSnapshotModel = PlayerRotationTransitionSnapshotModel()
+    @StateObject private var seekTransitionSnapshotModel = PlayerRotationTransitionSnapshotModel()
+    @StateObject private var speedBoostModel = PlayerSpeedBoostModel()
+    @StateObject private var seekPreviewModel = PlayerSeekPreviewModel()
+    @StateObject private var playbackProgressCoordinator = PlayerPlaybackProgressCoordinator()
+    @StateObject private var progressReporter = PlayerPlaybackProgressReporter()
+    @State private var lastPreparedScrubProgress = -1.0
+
+    init(
+        playerViewModel: PlayerStateViewModel,
+        state: LiveRoomSurfaceHost.State,
+        danmakuOverlayState: LiveDanmakuOverlayState,
+        viewModel: LiveRoomViewModel,
+        dependencies: AppDependencies,
+        onRequestFullscreen: @escaping (PlayerStateViewModel?) -> Void,
+        onExitFullscreen: @escaping (PlayerStateViewModel?) -> Void,
+        onNavigateBack: @escaping () -> Void
+    ) {
+        self.playerViewModel = playerViewModel
+        self.state = state
+        self.danmakuOverlayState = danmakuOverlayState
+        self.viewModel = viewModel
+        self.libraryStore = dependencies.libraryStore
+        self.dependencies = dependencies
+        self.onRequestFullscreen = onRequestFullscreen
+        self.onExitFullscreen = onExitFullscreen
+        self.onNavigateBack = onNavigateBack
+        _surfaceState = StateObject(wrappedValue: PlayerSurfaceStateModel(viewModel: playerViewModel))
+    }
+
+    var body: some View {
+        let context = runtimeContext
+        let renderContext = context.renderContext
+        let renderState = BiliPlayerViewRenderState(
+            context: renderContext,
+            verticalSizeClass: verticalSizeClass
+        )
+        let visibilityActions = renderState.visibilityActions
+        let speedActions = renderState.speedBoostActions
+        let nativeActions = BiliPlayerNativeControlsActionBuilder(
+            viewModel: playerViewModel,
+            configuration: renderContext.configuration,
+            visibilityActions: visibilityActions,
+            seekPreviewModel: renderContext.seekPreviewModel,
+            seekPreviewAPI: renderContext.seekPreviewAPI,
+            seekPreviewContext: renderContext.seekPreviewContext,
+            holdCurrentFrameForSeek: holdCurrentFrameForSeek,
+            prepareUserSeekWarmup: prepareUserSeekWarmupIfNeeded,
+            resetPreparedScrubProgress: { lastPreparedScrubProgress = -1 }
+        ).actions
+        let chromeState = surfaceChromeState(
+            context: renderContext,
+            renderState: renderState
+        )
+
+        ZStack {
+            if keepsChromeMounted {
+                Group {
+                    BiliPlayerSurfaceGestureLayerHost(
+                        content: Color.clear
+                            .frame(maxWidth: .infinity, maxHeight: .infinity),
+                        visibilityActions: visibilityActions,
+                        speedBoostActions: speedActions,
+                        viewModel: playerViewModel,
+                        allowsDoubleTapPlaybackToggle: configuration.allowsDoubleTapPlaybackToggle,
+                        seekPreviewModel: renderContext.seekPreviewModel,
+                        seekPreviewAPI: renderContext.seekPreviewAPI,
+                        seekPreviewContext: renderContext.seekPreviewContext,
+                        holdCurrentFrameForSeek: holdCurrentFrameForSeek,
+                        prepareUserSeekWarmup: prepareUserSeekWarmupIfNeeded,
+                        resetPreparedScrubProgress: { lastPreparedScrubProgress = -1 }
+                    )
+                    .zIndex(1)
+
+                    BiliPlayerSurfaceOverlayLayer(
+                        state: chromeState,
+                        speedBoostModel: renderContext.speedBoostModel,
+                        seekPreviewModel: renderContext.seekPreviewModel
+                    )
+                    .zIndex(2)
+
+                    BiliPlayerControlsOverlayLayer(
+                        state: chromeState,
+                        playbackControls: AnyView(
+                            BiliPlayerNativeControlsHost(
+                                context: renderContext,
+                                renderState: renderState,
+                                actions: nativeActions
+                            )
+                        )
+                    )
+                    .zIndex(3)
+                }
+                .opacity(state.isBareSurfaceTransitionActive ? 0 : 1)
+                .allowsHitTesting(!state.isBareSurfaceTransitionActive)
+            }
+
+            LiveDanmakuOverlay(
+                state: danmakuOverlayState,
+                playerViewModel: playerViewModel,
+                usesLandscapeChrome: state.usesLandscapeChrome,
+                isLayoutTransitioning: state.isBareSurfaceTransitionActive,
+                videoAspectRatio: state.videoAspectRatio
+            )
+            .allowsHitTesting(false)
+            .zIndex(2.5)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(Color.clear)
         .background {
             PlaybackDetailPlayerReadinessProbe(
                 playerViewModel: playerViewModel,
@@ -361,10 +537,183 @@ private struct LiveRoomSurfaceRoot: View {
             )
         }
         .environmentObject(dependencies)
-        .environmentObject(viewModel.libraryStore)
-        .environment(\.appThemeTintColor, viewModel.libraryStore.appTintColor)
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(Color.black)
-        .ignoresSafeArea()
+        .environmentObject(libraryStore)
+        .environment(\.appThemeTintColor, libraryStore.appTintColor)
+        .environment(\.playerNativeControlMetrics, renderState.controlMetrics)
+        .biliPlayerLifecycle(
+            isFullscreenActive: configuration.isFullscreenActive,
+            presentation: configuration.presentation,
+            isLayoutTransitioning: configuration.isLayoutTransitioning,
+            isSecondaryControlsPresented: configuration.isSecondaryControlsPresented,
+            isPictureInPictureEnabled: libraryStore.pictureInPictureEnabled,
+            actions: context.lifecycleActions
+        )
+        .onChange(of: state.isBareSurfaceTransitionActive) { _, isActive in
+            if isActive {
+                playbackControlsVisibility.cancelAutoHide()
+            }
+        }
+        .onChange(of: surfaceState.isUserSeeking) { _, isUserSeeking in
+            updateSeekTransitionSnapshot(isUserSeeking: isUserSeeking)
+        }
+    }
+
+    private var fullscreenMode: PlayerFullscreenMode? {
+        if state.isPortraitFullscreen {
+            return .portrait
+        }
+        if state.usesLandscapeChrome {
+            return .landscape(.landscapeRight)
+        }
+        return nil
+    }
+
+    private var supportsFullscreen: Bool {
+        LiveRoomVideoDetailLayoutPolicy.supportsFullscreen(
+            videoAspectRatio: state.videoAspectRatio
+        )
+    }
+
+    private var keepsChromeMounted: Bool {
+        !state.isBareSurfaceTransitionActive
+            || state.retainsChromeDuringBareSurfaceTransition
+    }
+
+    private var configuration: BiliPlayerViewConfiguration {
+        BiliPlayerViewOptions(
+            presentation: fullscreenMode == nil ? .embedded : .fullScreen,
+            showsNavigationChrome: false,
+            showsPlaybackControls: keepsChromeMounted,
+            allowsDoubleTapPlaybackToggle: true,
+            showsStartupLoadingIndicator: keepsChromeMounted,
+            pausesOnDisappear: false,
+            controlsAccessory: keepsChromeMounted
+                ? AnyView(LivePlayerPiliPodAccessory(viewModel: viewModel))
+                : nil,
+            controlsCenterAccessory: nil,
+            topLeadingControlsAccessory: keepsChromeMounted
+                ? topLeadingControlsAccessory : nil,
+            showsMoreControls: false,
+            controlLayout: .livePiliPod,
+            moreControlsContent: AnyView(
+                LivePlayerMoreControlsContent(viewModel: viewModel)
+            ),
+            replacesStandardMoreControls: true,
+            controlsBottomLift: 0,
+            controlsHorizontalInset: 0,
+            isDanmakuEnabled: viewModel.isDanmakuEnabled,
+            onShowDanmakuSettings: {
+                viewModel.showLiveDanmakuSettings()
+            },
+            keepsPlayerSurfaceStable: true,
+            fullscreenMode: fullscreenMode,
+            isLayoutTransitioning: state.isBareSurfaceTransitionActive,
+            usesLiveSurfaceDuringLayoutTransition: true,
+            disablesSurfaceImplicitLayoutAnimations: true,
+            showsRotationTransitionSnapshot: false,
+            onRequestFullscreen: supportsFullscreen ? {
+                onRequestFullscreen(playerViewModel)
+            } : nil,
+            onExitFullscreen: {
+                onExitFullscreen(playerViewModel)
+            }
+        ).configuration()
+    }
+
+    private var topLeadingControlsAccessory: AnyView? {
+        guard state.usesLandscapeChrome || state.isPortraitFullscreen else { return nil }
+        return AnyView(
+            LivePlayerPiliPodFullscreenBackButton {
+                onExitFullscreen(playerViewModel)
+            }
+        )
+    }
+
+    private var runtimeContext: BiliPlayerViewRuntimeContext {
+        BiliPlayerViewRuntimeContextBuilder(
+            dependencies: dependencies,
+            libraryStore: libraryStore,
+            viewModel: playerViewModel,
+            surfaceState: surfaceState,
+            playbackControlsVisibility: playbackControlsVisibility,
+            rotationTransitionSnapshotModel: rotationTransitionSnapshotModel,
+            seekTransitionSnapshotModel: seekTransitionSnapshotModel,
+            speedBoostModel: speedBoostModel,
+            seekPreviewModel: seekPreviewModel,
+            playbackProgressCoordinator: playbackProgressCoordinator,
+            progressReporter: progressReporter,
+            historyVideo: nil,
+            historyCID: nil,
+            historyDuration: nil,
+            configuration: configuration,
+            isPictureInPictureEnabled: libraryStore.pictureInPictureEnabled,
+            videoGravity: .resizeAspect,
+            holdCurrentFrameForSeek: holdCurrentFrameForSeek,
+            prepareUserSeekWarmup: prepareUserSeekWarmupIfNeeded,
+            resetPreparedScrubProgress: { lastPreparedScrubProgress = -1 }
+        ).context
+    }
+
+    private func surfaceChromeState(
+        context: BiliPlayerViewRenderContext,
+        renderState: BiliPlayerViewRenderState
+    ) -> BiliPlayerSurfaceChromeState {
+        BiliPlayerSurfaceChromeState(
+            presentation: context.configuration.presentation,
+            surfaceOverlay: nil,
+            rotationSnapshot: nil,
+            seekSnapshot: seekTransitionSnapshotModel.snapshot,
+            rotationFallbackCoverURL: nil,
+            rotationSnapshotOpacity: 0,
+            seekSnapshotOpacity: seekTransitionSnapshotModel.opacity,
+            constrainsRotationSnapshotToVideoAspect: false,
+            showsPlayerLoadingChrome: renderState.showsPlayerLoadingChrome,
+            isBuffering: context.surfaceState.isBuffering,
+            isPlaying: context.surfaceState.isPlaying,
+            hasPresentedPlayback: context.surfaceState.hasPresentedPlayback,
+            showsInlineLoadingProgress: renderState.showsInlineLoadingProgress,
+            isUserSeeking: context.surfaceState.isUserSeeking,
+            showsActivePlaybackControls: renderState.showsActivePlaybackControls,
+            playbackControlsOpacity: playbackControlsVisibility.opacity,
+            playbackControlsAllowsHitTesting: playbackControlsVisibility.acceptsHitTesting,
+            topLeadingControlsAccessory: context.configuration.topLeadingControlsAccessory,
+            topTrailingControlsAccessory: nil,
+            isFullscreenActive: context.configuration.isFullscreenActive,
+            controlsBottomLift: context.configuration.controlsBottomLift,
+            controlsHorizontalInset: context.configuration.controlsHorizontalInset,
+            contentInsets: EdgeInsets(),
+            errorMessage: context.surfaceState.errorMessage
+        )
+    }
+
+    private func prepareUserSeekWarmupIfNeeded(_ progress: Double, force: Bool = false) {
+        let clampedProgress = min(max(progress, 0), 1)
+        guard force || abs(clampedProgress - lastPreparedScrubProgress) >= 0.008 else { return }
+        lastPreparedScrubProgress = clampedProgress
+        configuration.onPrepareForUserSeek?(clampedProgress)
+    }
+
+    private func holdCurrentFrameForSeek() {
+        seekTransitionSnapshotModel.hold(
+            hasPresentedPlayback: surfaceState.hasPresentedPlayback,
+            surfaceLayoutGeneration: playerViewModel.surfaceLayoutGeneration
+        ) {
+            playerViewModel.makePlaybackTransitionSnapshot()
+        }
+    }
+
+    private func updateSeekTransitionSnapshot(isUserSeeking: Bool) {
+        if isUserSeeking {
+            holdCurrentFrameForSeek()
+        } else {
+            seekTransitionSnapshotModel.releaseForSeekTransition(
+                isReadyForReveal: {
+                    playerViewModel.isSeekRecoverySnapshotReadyForReveal()
+                },
+                onReleased: {
+                    playerViewModel.finishUserSeekVisualReveal()
+                }
+            )
+        }
     }
 }

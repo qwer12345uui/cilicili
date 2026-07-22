@@ -194,7 +194,51 @@ extension PlaybackEnvironment.NetworkClass {
     }
 }
 
+nonisolated enum AV1HardwareDecodeProbeResult: Equatable, Sendable {
+    case supported
+    case unsupported
+    case simulator
+
+    var isSupported: Bool {
+        self == .supported
+    }
+
+    var settingsStatusTitle: String {
+        switch self {
+        case .supported:
+            return "可用"
+        case .unsupported:
+            return "不支持"
+        case .simulator:
+            return "模拟器"
+        }
+    }
+
+    var detail: String {
+        switch self {
+        case .supported:
+            return "系统已确认此设备支持 AV1 硬解。首选编码中可以选择“优先 AV1”，没有 AV1 视频流时会自动降级。"
+        case .unsupported:
+            return "系统未报告 AV1 硬解能力。为避免软件解码造成耗电、发热或卡顿，应用不会提供 AV1 播放选项。"
+        case .simulator:
+            return "iOS 模拟器不提供可用的 AV1 硬解能力。请在真机上检测。"
+        }
+    }
+}
+
 nonisolated enum PlaybackCodecPolicy {
+    nonisolated static var av1HardwareDecodeProbe: AV1HardwareDecodeProbeResult {
+#if targetEnvironment(simulator)
+        return .simulator
+#else
+        return VTIsHardwareDecodeSupported(kCMVideoCodecType_AV1) ? .supported : .unsupported
+#endif
+    }
+
+    nonisolated static var canDecodeAV1: Bool {
+        av1HardwareDecodeProbe.isSupported
+    }
+
     nonisolated static var canDecodeHEVC: Bool {
 #if targetEnvironment(simulator)
         return true

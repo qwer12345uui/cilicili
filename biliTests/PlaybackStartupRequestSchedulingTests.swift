@@ -112,20 +112,20 @@ final class PlaybackStartupRequestSchedulingTests: XCTestCase {
 
         XCTAssertEqual(
             decision.diagnosticMessage,
-            "startupScheduler=experiment mode=staggered primary=wbi fallback=webpage delay=180ms"
+            "startupScheduler=adaptive mode=staggered primary=wbi fallback=webpage delay=180ms"
         )
     }
 
     func testPerformanceCopyKeepsStartupSchedulerMessage() {
         var session = PlayerPerformanceSession(id: "BVstartupScheduler")
-        session.startupSchedulerMessage = "startupScheduler=experiment mode=race learning"
+        session.startupSchedulerMessage = "startupScheduler=adaptive mode=race learning"
 
         let copy = PlayerPerformanceCopyTextFormatter.performanceCopyText(
             metricsID: session.metricsID,
             session: session
         )
 
-        XCTAssertTrue(copy.contains("startupScheduler:\n  startupScheduler=experiment mode=race learning"))
+        XCTAssertTrue(copy.contains("startupScheduler:\n  startupScheduler=adaptive mode=race learning"))
     }
 
     func testFallbackTrackerKeepsTheTerminalStatus() async {

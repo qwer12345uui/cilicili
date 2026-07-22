@@ -11,13 +11,14 @@ struct VideoDetailDanmakuOverlay: View {
 
     var body: some View {
         let snapshot = state.snapshot
+        let isVisibleInCurrentOrientation = usesLandscapePlaybackChrome || !snapshot.settings.hidesInPortrait
 
         DanmakuOverlayView(
             items: snapshot.items,
             itemsRevision: snapshot.itemsRevision,
             isPlaying: snapshot.isPlaying,
             playbackRate: snapshot.playbackRate,
-            isEnabled: snapshot.isEnabled,
+            isEnabled: snapshot.isEnabled && isVisibleInCurrentOrientation,
             hasPresentedPlayback: snapshot.hasPresentedPlayback,
             isLoadShedding: snapshot.isLoadShedding,
             settings: snapshot.settings,

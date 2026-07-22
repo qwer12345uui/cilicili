@@ -74,6 +74,28 @@ final class ResourceLoadingServicesTests: XCTestCase {
         XCTAssertNil(loginInvalidatedCached)
     }
 
+    func testPlayURLCacheDoesNotReuseDataAcrossCredentialVersions() async throws {
+        let cache = PlayURLCache(capacity: 4, ttl: 60)
+        let key = playURLKey()
+        let firstScope = PlayURLCacheLoginScope(
+            isLoggedIn: true,
+            userMID: 1001,
+            guestModeEnabled: false,
+            credentialVersion: 1
+        )
+        let refreshedScope = PlayURLCacheLoginScope(
+            isLoggedIn: true,
+            userMID: 1001,
+            guestModeEnabled: false,
+            credentialVersion: 2
+        )
+
+        await cache.store(try playablePlayURLData(quality: 80), for: key, scope: firstScope)
+
+        let cachedAfterCredentialRefresh = await cache.value(for: key, scope: refreshedScope)
+        XCTAssertNil(cachedAfterCredentialRefresh)
+    }
+
     func testPlayURLMediaExpirationUsesEarliestMediaURLDeadline() throws {
         let storedAt = Date(timeIntervalSince1970: 1_700_000_000)
         let videoDeadline = Int(storedAt.timeIntervalSince1970 + 600)
@@ -161,6 +183,93 @@ final class ResourceLoadingServicesTests: XCTestCase {
                 isAuthoritativeSource: true
             )
         )
+    }
+
+    func testAdvertisedMissingQualityRequestsAnotherPlaybackResponse() throws {
+        let json = """
+        {
+            "quality": 32,
+            "accept_quality": [112, 80, 32],
+            "accept_description": ["1080P 高码率", "1080P 高清", "480P 标清"],
+            "dash": {
+                "video": [
+                    {
+                        "id": 32,
+                        "baseUrl": "https://example.com/video-32.m4s",
+                        "bandwidth": 320000,
+                        "codecs": "avc1.64001e",
+                        "width": 852,
+                        "height": 480,
+                        "frameRate": "30"
+                    }
+                ],
+                "audio": [
+                    {
+                        "id": 30280,
+                        "baseUrl": "https://example.com/audio.m4s",
+                        "bandwidth": 128000,
+                        "codecs": "mp4a.40.2"
+                    }
+                ]
+            }
+        }
+        """
+        let data = try JSONDecoder().decode(PlayURLData.self, from: Data(json.utf8))
+
+        XCTAssertTrue(data.shouldRefetchForPreferredQuality(112))
+        XCTAssertTrue(data.shouldRefetchForPreferredQuality(80))
+        XCTAssertFalse(data.shouldRefetchForPreferredQuality(32))
+        XCTAssertTrue(data.hasAdvertisedQualityMissingMediaStream)
+        XCTAssertEqual(data.preferredQualityForMissingStreamSupplement(fallback: 116), 112)
+    }
+
+    @MainActor
+    func testSessionStorePreservesCurrentSESSDATAWhenCookiesArePartiallyUpdated() throws {
+        let keychain = KeychainStore(service: "cc.bili.tests.session.\(UUID().uuidString)")
+        let store = SessionStore(keychain: keychain)
+        defer { try? store.logout() }
+
+        try store.saveLoginCookies([
+            "SESSDATA": "old-session",
+            "DedeUserID": "1001",
+            "bili_jct": "csrf"
+        ])
+        try store.saveSESSDATA("fresh-session")
+        try store.saveLoginCookies([
+            "bili_ticket": "ticket",
+            "DedeUserID": "1001"
+        ])
+
+        let header = store.cookieHeader()
+        XCTAssertTrue(store.isLoggedIn)
+        XCTAssertTrue(header.contains("SESSDATA=fresh-session"))
+        XCTAssertFalse(header.contains("SESSDATA=old-session"))
+        XCTAssertEqual(header.components(separatedBy: "SESSDATA=").count - 1, 1)
+        XCTAssertTrue(header.contains("bili_ticket=ticket"))
+    }
+
+    @MainActor
+    func testSessionStoreDropsOldAccountCookiesWhenSESSDATAChanges() throws {
+        let keychain = KeychainStore(service: "cc.bili.tests.session.\(UUID().uuidString)")
+        let store = SessionStore(keychain: keychain)
+        defer { try? store.logout() }
+
+        try store.saveLoginCookies([
+            "SESSDATA": "old-session",
+            "DedeUserID": "1001",
+            "bili_jct": "old-csrf",
+            "bili_ticket": "old-ticket"
+        ])
+        try store.saveLoginCookies([
+            "SESSDATA": "fresh-session",
+            "DedeUserID": "2002"
+        ])
+
+        let header = store.cookieHeader()
+        XCTAssertTrue(header.contains("SESSDATA=fresh-session"))
+        XCTAssertTrue(header.contains("DedeUserID=2002"))
+        XCTAssertFalse(header.contains("old-csrf"))
+        XCTAssertFalse(header.contains("old-ticket"))
     }
 
     func testPlayVariantsExposeAdvertisedLockedQualities() throws {

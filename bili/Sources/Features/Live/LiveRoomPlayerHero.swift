@@ -7,7 +7,6 @@ struct LiveRoomPlayerHero: View {
     let fullscreenMode: PlayerFullscreenMode?
     let playerWidth: CGFloat?
     let playerHeight: CGFloat
-    let controlsAccessory: (Bool) -> AnyView
     let loadingPlaceholder: () -> AnyView
     let onRequestFullscreen: (PlayerStateViewModel?) -> Void
     let onExitFullscreen: (PlayerStateViewModel?) -> Void
@@ -58,7 +57,7 @@ struct LiveRoomPlayerHero: View {
             playbackSession: viewModel.playbackSession,
             dependencies: dependencies,
             usesLandscapeChrome: usesLandscapeChrome,
-            controlsAccessory: controlsAccessory,
+            usesPortraitFullscreen: fullscreenMode == .portrait,
             onRequestFullscreen: onRequestFullscreen,
             onExitFullscreen: onExitFullscreen
         )

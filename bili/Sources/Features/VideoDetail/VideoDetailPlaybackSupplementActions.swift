@@ -11,7 +11,7 @@ extension VideoDetailViewModel {
         cancelPlayURLSupplementTask(advancesGeneration: false)
         let supplementGeneration = advancePlayURLSupplementGeneration()
         let bvid = detail.bvid
-        isSupplementingPlayQualities = false
+        isSupplementingPlayQualities = true
         playURLSupplementTask = Task(priority: .utility) { [weak self] in
             guard let self else { return }
             guard !self.isPlaybackInvalidatedForNavigation,
@@ -41,9 +41,8 @@ extension VideoDetailViewModel {
                       self.selectedCID == cid,
                       self.playURLSupplementGeneration == supplementGeneration
                 else { return }
-                self.isSupplementingPlayQualities = true
                 let supplementStart = CACurrentMediaTime()
-                let supplementalPreferredQuality = self.targetPlaybackPreferredQuality
+                let supplementalPreferredQuality = self.supplementalPlayURLPreferredQuality()
                 self.recordSupplementalPlayURLLoadStarted(preferredQuality: supplementalPreferredQuality)
                 let data = try await self.fetchSupplementalPlayURLData(
                     bvid: bvid,

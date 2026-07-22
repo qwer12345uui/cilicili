@@ -11,11 +11,6 @@ struct LiveRoomCardCover: View {
             .overlay {
                 coverImage
             }
-            .overlay(alignment: .topLeading) {
-                LiveRoomStatusBadge()
-                    .padding(8)
-                    .accessibilityHidden(true)
-            }
     }
 
     private var coverImage: some View {

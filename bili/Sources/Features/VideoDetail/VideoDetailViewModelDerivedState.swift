@@ -7,12 +7,6 @@ extension VideoDetailViewModel {
             : 4_800_000_000
     }
 
-    var initialTargetQualitySupplementTimeoutNanoseconds: UInt64 {
-        PlaybackEnvironment.current.shouldPreferConservativePlayback
-            ? 2_400_000_000
-            : 1_800_000_000
-    }
-
     var hasMoreComments: Bool {
         !commentsEnd
     }

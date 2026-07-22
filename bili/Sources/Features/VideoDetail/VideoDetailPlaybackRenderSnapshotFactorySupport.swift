@@ -40,6 +40,7 @@ extension VideoDetailPlaybackRenderSnapshotFactory {
             playVariants: viewModel.playVariants,
             selectedPlayVariant: selectedPlayVariant,
             pendingPlayVariantID: viewModel.pendingPlayVariantID,
+            isSupplementingPlayQualities: viewModel.isSupplementingPlayQualities,
             isSwitchingPlayQuality: viewModel.isSwitchingPlayQuality
         )
     }

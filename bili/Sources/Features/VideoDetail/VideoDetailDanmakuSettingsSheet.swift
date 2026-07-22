@@ -12,6 +12,7 @@ struct DanmakuSettingsSheet: View {
                 store: store,
                 summary: settingsSummary,
                 displayAreaBinding: displayAreaBinding,
+                hidesDanmakuInPortraitBinding: hidesDanmakuInPortraitBinding,
                 fontScaleBinding: fontScaleBinding,
                 fontWeightBinding: fontWeightBinding,
                 opacityBinding: opacityBinding,

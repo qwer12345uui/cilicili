@@ -23,7 +23,7 @@ struct BiliPlayerControlsOverlayLayer: View {
                 topLeadingControlsAccessory
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
                     .padding(.top, topControlsPadding + topInset)
-                    .padding(.leading, horizontalControlsPadding + leadingInset)
+                    .padding(.leading, horizontalControlsPadding + state.controlsHorizontalInset + leadingInset)
                     .transition(.opacity)
                     .zIndex(8)
             }
@@ -32,7 +32,7 @@ struct BiliPlayerControlsOverlayLayer: View {
                 topTrailingControlsAccessory
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
                     .padding(.top, topControlsPadding + topInset)
-                    .padding(.trailing, horizontalControlsPadding + trailingInset)
+                    .padding(.trailing, horizontalControlsPadding + state.controlsHorizontalInset + trailingInset)
                     .transition(.opacity)
                     .zIndex(8)
             }
@@ -40,8 +40,8 @@ struct BiliPlayerControlsOverlayLayer: View {
             if state.showsActivePlaybackControls {
                 playbackControls
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
-                    .padding(.leading, horizontalControlsPadding + leadingInset)
-                    .padding(.trailing, horizontalControlsPadding + trailingInset)
+                    .padding(.leading, horizontalControlsPadding + state.controlsHorizontalInset + leadingInset)
+                    .padding(.trailing, horizontalControlsPadding + state.controlsHorizontalInset + trailingInset)
                     .padding(.bottom, bottomControlsPadding + state.controlsBottomLift + bottomInset)
                     .transition(.opacity)
                     .zIndex(7)

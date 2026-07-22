@@ -236,6 +236,10 @@ final class VideoDetailShellSurfaceHost: UIView {
 
 extension VideoDetailShellSurfaceHost: PlayerSurfaceHosting {
     var surfaceView: UIView { self }
+
+    func setPortraitFullscreen(_: Bool) {
+        // 视频详情已有独立的竖屏全屏路径，并通过 setLandscape 复用其控件树。
+    }
 }
 
 private struct VideoDetailShellOverlaySnapshot: Equatable {
@@ -474,6 +478,7 @@ private struct SurfaceOnlyPlayerOverlayRoot: View {
                             visibilityActions: visibilityActions,
                             speedBoostActions: speedActions,
                             viewModel: viewModel,
+                            allowsDoubleTapPlaybackToggle: true,
                             seekPreviewModel: renderContext.seekPreviewModel,
                             seekPreviewAPI: renderContext.seekPreviewAPI,
                             seekPreviewContext: renderContext.seekPreviewContext,
@@ -851,6 +856,7 @@ private struct SurfaceOnlyPlayerOverlayRoot: View {
             topTrailingControlsAccessory: nil,
             isFullscreenActive: context.configuration.isFullscreenActive,
             controlsBottomLift: context.configuration.controlsBottomLift,
+            controlsHorizontalInset: context.configuration.controlsHorizontalInset,
             contentInsets: contentInsets,
             errorMessage: context.surfaceState.errorMessage
         )
@@ -1009,10 +1015,16 @@ private struct SurfaceOnlyMoreControlsNavigationContent: View {
                 }
                 .pickerStyle(.navigationLink)
             }
+            .scrollContentBackground(.hidden)
+            .listRowBackground(Color.clear)
+            .listStyle(.plain)
+            .background(Color.clear)
             .foregroundStyle(.primary)
             .navigationTitle("播放设置")
             .navigationBarTitleDisplayMode(.inline)
         }
+        .toolbarBackground(.automatic, for: .navigationBar)
+        .background(Color.clear)
     }
 
     private var decodeTitle: String {
@@ -1636,9 +1648,14 @@ private struct SurfaceOnlyQualityChoicesPage: View {
                 .disabled(item.isDisabled)
             }
         }
+        .scrollContentBackground(.hidden)
+        .listRowBackground(Color.clear)
+        .listStyle(.plain)
+        .background(Color.clear)
         .foregroundStyle(.primary)
         .navigationTitle("清晰度")
         .navigationBarTitleDisplayMode(.inline)
+        .toolbarBackground(.automatic, for: .navigationBar)
     }
 }
 
@@ -1658,13 +1675,19 @@ private struct SurfaceOnlyDanmakuSettingsPage: View {
             store: detailViewModel.danmakuSettingsRenderStore,
             summary: settingsSummary,
             displayAreaBinding: displayAreaBinding,
+            hidesDanmakuInPortraitBinding: hidesDanmakuInPortraitBinding,
             fontScaleBinding: fontScaleBinding,
             fontWeightBinding: fontWeightBinding,
             opacityBinding: opacityBinding,
             toggleDanmaku: toggleDanmaku
         )
+        .scrollContentBackground(.hidden)
+        .listRowBackground(Color.clear)
+        .listStyle(.plain)
+        .background(Color.clear)
         .navigationTitle("弹幕设置")
         .navigationBarTitleDisplayMode(.inline)
+        .toolbarBackground(.automatic, for: .navigationBar)
     }
 
     private var settingsSummary: String {
@@ -1692,6 +1715,17 @@ private struct SurfaceOnlyDanmakuSettingsPage: View {
             set: { newValue in
                 var settings = detailViewModel.danmakuSettingsRenderStore.danmakuSettings
                 settings.fontScale = newValue
+                detailViewModel.updateDanmakuSettings(settings)
+            }
+        )
+    }
+
+    private var hidesDanmakuInPortraitBinding: Binding<Bool> {
+        Binding(
+            get: { detailViewModel.danmakuSettingsRenderStore.danmakuSettings.hidesInPortrait },
+            set: { newValue in
+                var settings = detailViewModel.danmakuSettingsRenderStore.danmakuSettings
+                settings.hidesInPortrait = newValue
                 detailViewModel.updateDanmakuSettings(settings)
             }
         )
@@ -1773,8 +1807,13 @@ private struct SurfaceOnlyRateChoicesPage: View {
                 }
             }
         }
+        .scrollContentBackground(.hidden)
+        .listRowBackground(Color.clear)
+        .listStyle(.plain)
+        .background(Color.clear)
         .foregroundStyle(.primary)
         .navigationTitle("倍速")
         .navigationBarTitleDisplayMode(.inline)
+        .toolbarBackground(.automatic, for: .navigationBar)
     }
 }

@@ -1,5 +1,119 @@
 import SwiftUI
 
+struct LivePlayerLiveEdgeButton: View {
+    @Environment(\.playerNativeControlMetrics) private var metrics
+    @ObservedObject var viewModel: LiveRoomViewModel
+
+    var body: some View {
+        Button {
+            viewModel.refreshLiveToLatest()
+        } label: {
+            Group {
+                if viewModel.isRefreshingLiveEdge {
+                    ProgressView()
+                        .tint(.white)
+                } else {
+                    Image(systemName: "arrow.clockwise")
+                        .font(.system(size: metrics.iconSize, weight: .semibold))
+                }
+            }
+            .frame(width: metrics.controlHeight, height: metrics.controlHeight)
+        }
+        .biliPlayerCompactGlassCircle(metrics: metrics)
+        .accessibilityLabel("刷新到直播最新进度")
+    }
+}
+
+/// PiliPod 布局把刷新和画质直接放在播放按钮之后，保持一眼可见的直播控制行。
+struct LivePlayerPiliPodAccessory: View {
+    @ObservedObject var viewModel: LiveRoomViewModel
+
+    var body: some View {
+        HStack(spacing: 8) {
+            LivePlayerLiveEdgeButton(viewModel: viewModel)
+            LivePlayerPiliPodQualityMenu(viewModel: viewModel)
+        }
+    }
+}
+
+/// PiliPod 在播放层只呈现当前画质文字，不额外放入功能图标，减少直播控制行的视觉噪音。
+private struct LivePlayerPiliPodQualityMenu: View {
+    @Environment(\.playerNativeControlMetrics) private var metrics
+    @ObservedObject var viewModel: LiveRoomViewModel
+
+    var body: some View {
+        if viewModel.hasMultipleQualities || viewModel.currentQualityTitle != nil {
+            Menu {
+                ForEach(viewModel.qualityMenuItems) { item in
+                    Button {
+                        viewModel.selectQuality(qn: item.qn)
+                    } label: {
+                        if item.isSelected {
+                            Label(item.title, systemImage: "checkmark")
+                        } else {
+                            Text(item.title)
+                        }
+                    }
+                }
+            } label: {
+                Text(viewModel.currentQualityTitle ?? "画质")
+                    .font(.caption.weight(.semibold))
+                    .lineLimit(1)
+                    .padding(.horizontal, 10)
+                    .frame(minHeight: metrics.controlHeight)
+            }
+            .biliPlayerClearGlass(interactive: true, in: Capsule())
+            .accessibilityLabel("直播画质：\(viewModel.currentQualityTitle ?? "未选择")")
+        }
+    }
+}
+
+struct LivePlayerPiliPodFullscreenBackButton: View {
+    @Environment(\.playerNativeControlMetrics) private var metrics
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            Image(systemName: "arrow.down.right.and.arrow.up.left")
+                .font(.system(size: metrics.iconSize, weight: .semibold))
+                .foregroundStyle(.white)
+                .frame(width: metrics.controlHeight, height: metrics.controlHeight)
+        }
+        .biliPlayerCompactGlassCircle(metrics: metrics)
+        .accessibilityLabel("退出全屏")
+    }
+}
+
+struct LivePlayerRoomSummaryControl: View {
+    @Environment(\.playerNativeControlMetrics) private var metrics
+    @ObservedObject var viewModel: LiveRoomViewModel
+
+    var body: some View {
+        HStack(spacing: 7) {
+            PlaybackDetailOwnerAvatar(
+                owner: viewModel.anchorOwner,
+                fallbackURLString: viewModel.anchorFace,
+                side: max(metrics.controlHeight - 8, 24),
+                pixelSize: 112
+            )
+
+            Text(viewModel.title)
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.white)
+                .lineLimit(1)
+                .truncationMode(.tail)
+                .frame(maxWidth: 178, alignment: .leading)
+        }
+        .padding(.horizontal, 8)
+        .frame(height: metrics.controlHeight)
+        .fixedSize(horizontal: true, vertical: false)
+        .biliPlayerClearGlass(interactive: false, in: Capsule())
+        .allowsHitTesting(false)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("直播间：\(viewModel.title)")
+    }
+}
+
 struct LivePlayerAccessory: View {
     @ObservedObject var viewModel: LiveRoomViewModel
     let usesCompactLayout: Bool
@@ -77,6 +191,16 @@ struct LivePlayerMoreControlsContent: View {
                 }
             }
 
+            Button {
+                viewModel.showLivePlaybackDiagnostics()
+            } label: {
+                LivePlayerMoreControlsRow(
+                    title: "播放诊断",
+                    systemImage: "waveform.path.ecg.rectangle",
+                    value: nil
+                )
+            }
+
             Menu {
                 Button {
                     viewModel.toggleDanmaku()
@@ -86,6 +210,14 @@ struct LivePlayerMoreControlsContent: View {
                         systemImage: viewModel.isDanmakuEnabled ? "text.bubble.fill" : "text.bubble"
                     )
                 }
+
+                Toggle(
+                    "竖屏时隐藏弹幕",
+                    isOn: Binding(
+                        get: { viewModel.danmakuSettings.hidesInPortrait },
+                        set: { viewModel.setDanmakuHidesInPortrait($0) }
+                    )
+                )
 
                 Button {
                     viewModel.toggleLiveDanmakuDiagnostics()
@@ -170,6 +302,14 @@ private struct LiveCompactSettingsMenu: View {
             Divider()
 
             Button {
+                viewModel.showLivePlaybackDiagnostics()
+            } label: {
+                Label("播放诊断", systemImage: "waveform.path.ecg.rectangle")
+            }
+
+            Divider()
+
+            Button {
                 viewModel.toggleDanmaku()
             } label: {
                 Label(
@@ -177,6 +317,14 @@ private struct LiveCompactSettingsMenu: View {
                     systemImage: viewModel.isDanmakuEnabled ? "text.bubble.fill" : "text.bubble"
                 )
             }
+
+            Toggle(
+                "竖屏时隐藏弹幕",
+                isOn: Binding(
+                    get: { viewModel.danmakuSettings.hidesInPortrait },
+                    set: { viewModel.setDanmakuHidesInPortrait($0) }
+                )
+            )
 
             Button {
                 viewModel.toggleLiveDanmakuDiagnostics()

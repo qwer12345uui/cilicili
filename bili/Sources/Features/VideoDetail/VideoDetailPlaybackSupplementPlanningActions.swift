@@ -21,12 +21,21 @@ extension VideoDetailViewModel {
             cid: cid,
             page: page,
             waitsForFirstFrame: true,
-            startDelay: libraryStore.videoStartupRequestSchedulingExperimentEnabled ? 0.28 : 0.12
+            startDelay: 0.28
         )
     }
 
     private func shouldSupplementPlayQualities(for variants: [PlayVariant]) -> Bool {
-        false
+        guard sessionStore.isLoggedIn,
+              currentPlayURLData?.hasAdvertisedQualityMissingMediaStream == true
+        else { return false }
+        return variants.contains { !$0.isPlayable && $0.videoURL == nil }
+    }
+
+    func supplementalPlayURLPreferredQuality() -> Int? {
+        currentPlayURLData?.preferredQualityForMissingStreamSupplement(
+            fallback: targetPlaybackPreferredQuality
+        ) ?? targetPlaybackPreferredQuality
     }
 
     private func needsSupplementalTargetQuality(_ variants: [PlayVariant]) -> Bool {
@@ -35,6 +44,7 @@ extension VideoDetailViewModel {
               let currentPlayURLData
         else { return false }
         return shouldRefetchForPreferredQuality(currentPlayURLData)
+            || shouldSupplementPlayQualities(for: variants)
     }
 
     private func playVariantsNeedSupplementalFrameRateUpgrade(_ variants: [PlayVariant]) -> Bool {

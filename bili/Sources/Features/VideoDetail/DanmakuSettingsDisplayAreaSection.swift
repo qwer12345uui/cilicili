@@ -15,3 +15,13 @@ struct DanmakuSettingsDisplayAreaSection: View {
         }
     }
 }
+
+struct DanmakuSettingsPortraitVisibilitySection: View {
+    @Binding var hidesDanmakuInPortrait: Bool
+
+    var body: some View {
+        Section("竖屏播放") {
+            Toggle("竖屏时隐藏弹幕", isOn: $hidesDanmakuInPortrait)
+        }
+    }
+}

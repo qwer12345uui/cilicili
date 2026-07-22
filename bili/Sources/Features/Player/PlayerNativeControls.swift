@@ -11,6 +11,7 @@ struct PlayerNativePlaybackControls: View {
     let canToggleFullscreen: Bool
     let isFullscreenActive: Bool
     let controlsAccessory: AnyView?
+    let controlsCenterAccessory: AnyView?
     let actions: PlayerNativePlaybackControlsActions
 
     var body: some View {
@@ -39,6 +40,7 @@ struct PlayerNativePlaybackControls: View {
                     canToggleFullscreen: canToggleFullscreen,
                     isFullscreenActive: isFullscreenActive,
                     controlsAccessory: controlsAccessory,
+                    controlsCenterAccessory: controlsCenterAccessory,
                     actions: actions
                 )
             }

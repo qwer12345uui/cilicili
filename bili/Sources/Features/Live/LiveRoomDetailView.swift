@@ -9,7 +9,8 @@ struct LiveRoomDetailView: View {
     var body: some View {
         PlaybackDetailPageHost(
             hidesSystemChrome: .constant(false),
-            background: .black,
+            background: VideoDetailTheme.background,
+            hidesRootTabBar: false,
             navigationBarVisibility: .hidden,
             hidesBackButton: true,
             statusBarStyle: .lightContent,

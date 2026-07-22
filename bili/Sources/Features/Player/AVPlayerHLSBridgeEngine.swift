@@ -155,6 +155,12 @@ final class AVPlayerHLSBridgeEngine: PlayerRenderingEngine {
         )
     }
 
+    var presentationSize: CGSize {
+        let size = player.currentItem?.presentationSize ?? .zero
+        guard size.width > 0, size.height > 0 else { return .zero }
+        return size
+    }
+
     private var diagnosticVideoVariantDetails: [String] {
         var details = hlsBridge?.videoVariantDetails ?? []
         if let overlaySummary = nativeDolbyVideoOverlay.diagnosticSummary {
@@ -427,6 +433,10 @@ final class AVPlayerHLSBridgeEngine: PlayerRenderingEngine {
         retainedAssets = prepared.assets
         isDirectLiveHLS = prepared.isDirectLiveHLS
         isStartupFastStartActive = !prepared.isDirectLiveHLS
+            || LiveHLSFastStartPolicy.activatesForDirectLiveHLS(
+                isDirectLiveHLS: prepared.isDirectLiveHLS,
+                isLiveStream: source.isLiveStream
+            )
         let item = prepared.item
         configureStartupBuffering(for: item, source: source)
         attachVideoOutput(to: item)
@@ -613,6 +623,46 @@ final class AVPlayerHLSBridgeEngine: PlayerRenderingEngine {
         return displayTarget
     }
 
+    func seekToLiveEdge() -> TimeInterval? {
+        guard !isStopped,
+              let item = player.currentItem,
+              let range = item.seekableTimeRanges.last?.timeRangeValue
+        else { return nil }
+
+        let start = range.start.seconds
+        let duration = range.duration.seconds
+        guard start.isFinite, duration.isFinite, duration > 0 else { return nil }
+
+        // Stop just short of the reported edge so AVPlayer has a playable HLS segment.
+        let playerTarget = max(start + duration - 1.0, start)
+        let displayTarget = displayTime(fromPlayerTime: playerTarget)
+        let seekPlaybackGeneration = playbackGeneration
+        let generation = beginSeekTransaction(targetDisplayTime: displayTarget)
+        if wantsPlayback || isPerformingSeek {
+            publishPlaybackState(.buffering)
+        }
+
+        item.cancelPendingSeeks()
+        player.seek(
+            to: CMTime(seconds: playerTarget, preferredTimescale: 600),
+            toleranceBefore: CMTime(seconds: 0.5, preferredTimescale: 600),
+            toleranceAfter: .zero
+        ) { [weak self] finished in
+            Task { @MainActor [weak self] in
+                guard let self,
+                      self.isCurrentPlaybackGeneration(seekPlaybackGeneration)
+                else { return }
+                self.finishSeekTransaction(
+                    generation: generation,
+                    finished: finished,
+                    shouldResume: self.wantsPlayback
+                )
+            }
+        }
+        nativeDolbyVideoOverlay.seek(to: displayTarget, shouldPlay: wantsPlayback)
+        return displayTarget
+    }
+
     func seek(toProgress progress: Double, duration: TimeInterval?) -> TimeInterval? {
         guard !isStopped, player.currentItem != nil else { return nil }
         let resolvedDuration = resolvedDuration(durationHint: duration)
@@ -787,7 +837,13 @@ final class AVPlayerHLSBridgeEngine: PlayerRenderingEngine {
     private func beginPlayback() {
         guard !isStopped, player.currentItem != nil else { return }
         applyTargetAudioState()
-        if isDirectLiveHLS {
+        if LiveHLSFastStartPolicy.usesImmediatePlayback(
+            isDirectLiveHLS: isDirectLiveHLS,
+            isLiveStream: source?.isLiveStream == true,
+            isStartupFastStartActive: isStartupFastStartActive
+        ) {
+            player.playImmediately(atRate: currentRate)
+        } else if isDirectLiveHLS {
             player.play()
         } else {
             player.playImmediately(atRate: currentRate)
@@ -1059,6 +1115,20 @@ final class AVPlayerHLSBridgeEngine: PlayerRenderingEngine {
     private func seekDirectLiveHLSToLiveEdgeIfNeeded(_ item: AVPlayerItem) {
         guard isCurrentPlayerItem(item) else { return }
         guard isDirectLiveHLS, !didSeekDirectLiveHLS else { return }
+        if LiveHLSFastStartPolicy.defersInitialLiveEdgeSeek(
+            streamFormat: source?.liveHLSFormat
+        ) {
+            didSeekDirectLiveHLS = true
+            if let source {
+                PlayerMetricsLog.record(
+                    .startupBreakdown,
+                    metricsID: source.metricsID,
+                    title: source.title,
+                    message: "directLiveHLSInitialEdgeSeek=deferred format=\(source.liveHLSFormat ?? "-")"
+                )
+            }
+            return
+        }
         guard let range = item.seekableTimeRanges.last?.timeRangeValue else { return }
         let start = range.start.seconds
         let duration = range.duration.seconds
@@ -1305,7 +1375,7 @@ final class AVPlayerHLSBridgeEngine: PlayerRenderingEngine {
         for source: PlayerStreamSource,
         environment: PlaybackEnvironment = .current
     ) -> TimeInterval {
-        if isStartupFastStartActive, currentRate < 1.75, !isDirectLiveHLS {
+        if isStartupFastStartActive, currentRate < 1.75 {
             return environment.startupForwardBufferDuration
         }
         let baseDuration = source.audioURL == nil
@@ -2568,7 +2638,8 @@ final class AVPlayerHLSBridgeEngine: PlayerRenderingEngine {
             throw PlayerEngineError.unsupportedMedia
         }
 
-        let isDirectLiveHLS = videoURL.isLikelyHLSManifest && source.durationHint == nil
+        let isDirectLiveHLS = source.durationHint == nil
+            && (videoURL.isLikelyHLSManifest || (source.isLiveStream && source.isLiveHLS))
         let asset = AVURLAsset(url: videoURL, options: ["AVURLAssetHTTPHeaderFieldsKey": headers])
         let item = AVPlayerItem(asset: asset)
         applyDolbyVisionMetadataPolicy(to: item, source: source)

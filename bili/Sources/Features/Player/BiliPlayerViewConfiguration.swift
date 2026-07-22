@@ -4,15 +4,19 @@ struct BiliPlayerViewConfiguration {
     let presentation: BiliPlayerPresentation
     let showsNavigationChrome: Bool
     let showsPlaybackControls: Bool
+    let allowsDoubleTapPlaybackToggle: Bool
     let showsStartupLoadingIndicator: Bool
     let pausesOnDisappear: Bool
     let surfaceOverlay: AnyView?
     let controlsAccessory: AnyView?
+    let controlsCenterAccessory: AnyView?
     let topLeadingControlsAccessory: AnyView?
+    let showsMoreControls: Bool
     let controlLayout: BiliPlayerControlLayout
     let moreControlsContent: AnyView?
     let replacesStandardMoreControls: Bool
     let controlsBottomLift: CGFloat
+    let controlsHorizontalInset: CGFloat
     let isDanmakuEnabled: Bool
     let onToggleDanmaku: (() -> Void)?
     let onShowDanmakuSettings: (() -> Void)?
@@ -46,15 +50,19 @@ struct BiliPlayerViewConfiguration {
         presentation: BiliPlayerPresentation,
         showsNavigationChrome: Bool,
         showsPlaybackControls: Bool,
+        allowsDoubleTapPlaybackToggle: Bool,
         showsStartupLoadingIndicator: Bool,
         pausesOnDisappear: Bool,
         surfaceOverlay: AnyView?,
         controlsAccessory: AnyView?,
+        controlsCenterAccessory: AnyView?,
         topLeadingControlsAccessory: AnyView?,
+        showsMoreControls: Bool,
         controlLayout: BiliPlayerControlLayout,
         moreControlsContent: AnyView?,
         replacesStandardMoreControls: Bool,
         controlsBottomLift: CGFloat,
+        controlsHorizontalInset: CGFloat,
         isDanmakuEnabled: Bool,
         onToggleDanmaku: (() -> Void)?,
         onShowDanmakuSettings: (() -> Void)?,
@@ -76,15 +84,19 @@ struct BiliPlayerViewConfiguration {
         self.presentation = presentation
         self.showsNavigationChrome = showsNavigationChrome
         self.showsPlaybackControls = showsPlaybackControls
+        self.allowsDoubleTapPlaybackToggle = allowsDoubleTapPlaybackToggle
         self.showsStartupLoadingIndicator = showsStartupLoadingIndicator
         self.pausesOnDisappear = pausesOnDisappear
         self.surfaceOverlay = surfaceOverlay
         self.controlsAccessory = controlsAccessory
+        self.controlsCenterAccessory = controlsCenterAccessory
         self.topLeadingControlsAccessory = topLeadingControlsAccessory
+        self.showsMoreControls = showsMoreControls
         self.controlLayout = controlLayout
         self.moreControlsContent = moreControlsContent
         self.replacesStandardMoreControls = replacesStandardMoreControls
         self.controlsBottomLift = controlsBottomLift
+        self.controlsHorizontalInset = controlsHorizontalInset
         self.isDanmakuEnabled = isDanmakuEnabled
         self.onToggleDanmaku = onToggleDanmaku
         self.onShowDanmakuSettings = onShowDanmakuSettings

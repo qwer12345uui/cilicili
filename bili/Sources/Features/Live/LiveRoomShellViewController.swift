@@ -15,9 +15,11 @@ final class LiveRoomShellViewController: UIViewController {
     private let onNavigateBack: () -> Void
     private let playerContainer = UIView()
     private let contentState: LiveRoomShellContentView.State
+    private let backdropHost: UIHostingController<LiveRoomVisualBackdrop>
     private let contentHost: UIHostingController<LiveRoomShellContentView>
     private let loadingHost: UIHostingController<LiveRoomShellLoadingOverlay>
     private var rotationRecoveryDisplayLink: CADisplayLink?
+    private var deferredLiveRenderReleaseTask: Task<Void, Never>?
     private var pendingRotationPreparation: (() -> Void)?
     private var pendingRotationRecovery: (() -> Void)?
     private var pendingRotationGeneration: Int?
@@ -25,9 +27,18 @@ final class LiveRoomShellViewController: UIViewController {
     private var rotationGeneration = 0
     private var rotationProbeGeneration = 0
     private var isSystemRotationTransitioning = false
+    private var lastRotationSurfaceLayoutSize: CGSize?
     private var isViewActive = false
+    private weak var attachedNavigationController: UINavigationController?
+    private var configuredContentPopID: ObjectIdentifier?
+    private var configuredScrollPanIDs = Set<ObjectIdentifier>()
     private let rotationFrameProbe = VideoRotationFrameProbe()
     private var cancellables = Set<AnyCancellable>()
+    private var activePlayerPresentationSizeCancellable: AnyCancellable?
+    private var actualVideoAspectRatio: CGFloat?
+    private var surfaceVideoAspectRatio: CGFloat = 16.0 / 9.0
+    /// 竖向直播的全屏态：播放器覆盖直播详情，但设备保持竖屏。
+    private var isPortraitFullscreen = false
 
     private lazy var playerSurfaceController: PlayerSurfaceController = {
         PlayerSurfaceController(
@@ -39,15 +50,6 @@ final class LiveRoomShellViewController: UIViewController {
                     playerViewModel: playerViewModel,
                     viewModel: self.viewModel,
                     dependencies: self.dependencies,
-                    controlsAccessory: { [weak self] usesCompactLayout in
-                        guard let self else { return AnyView(EmptyView()) }
-                        return AnyView(
-                            LivePlayerAccessory(
-                                viewModel: self.viewModel,
-                                usesCompactLayout: usesCompactLayout
-                            )
-                        )
-                    },
                     onRequestFullscreen: { [weak self] _ in
                         self?.requestFullscreen()
                     },
@@ -58,6 +60,9 @@ final class LiveRoomShellViewController: UIViewController {
                         self?.handleBackButton()
                     }
                 )
+            },
+            onActivePlayerChange: { [weak self] playerViewModel in
+                self?.observeActivePlayerPresentationSize(playerViewModel)
             }
         )
     }()
@@ -67,15 +72,22 @@ final class LiveRoomShellViewController: UIViewController {
         dependencies: AppDependencies,
         onNavigateBack: @escaping () -> Void
     ) {
-        let contentState = LiveRoomShellContentView.State()
+        let contentState = LiveRoomShellContentView.State(
+            chatStore: viewModel.liveDanmakuRenderStore,
+            rotationState: viewModel.liveRotationSurfaceAlignmentState
+        )
         self.viewModel = viewModel
         self.dependencies = dependencies
         self.onNavigateBack = onNavigateBack
         self.contentState = contentState
+        self.backdropHost = UIHostingController(
+            rootView: LiveRoomVisualBackdrop(viewModel: viewModel)
+        )
         self.contentHost = UIHostingController(
             rootView: LiveRoomShellContentView(
                 viewModel: viewModel,
-                state: contentState
+                state: contentState,
+                onNavigateBack: onNavigateBack
             )
         )
         self.loadingHost = UIHostingController(
@@ -94,7 +106,7 @@ final class LiveRoomShellViewController: UIViewController {
     }
 
     override var prefersStatusBarHidden: Bool {
-        isLandscape
+        hidesSystemChrome
     }
 
     override var preferredStatusBarStyle: UIStatusBarStyle {
@@ -102,21 +114,30 @@ final class LiveRoomShellViewController: UIViewController {
     }
 
     override var prefersHomeIndicatorAutoHidden: Bool {
-        isLandscape
+        hidesSystemChrome
     }
 
     override func viewDidLoad() {
         super.viewDidLoad()
+        applyAppearanceMode(dependencies.libraryStore.appearanceMode)
         view.backgroundColor = .black
         playerContainer.backgroundColor = .black
 
+        backdropHost.view.backgroundColor = .clear
+        backdropHost.view.isOpaque = false
+        backdropHost.view.isUserInteractionEnabled = false
         contentHost.view.backgroundColor = .clear
         loadingHost.view.backgroundColor = .clear
         loadingHost.view.isOpaque = false
         if #available(iOS 16.4, *) {
+            backdropHost.safeAreaRegions = []
             contentHost.safeAreaRegions = []
             loadingHost.safeAreaRegions = []
         }
+
+        addChild(backdropHost)
+        view.addSubview(backdropHost.view)
+        backdropHost.didMove(toParent: self)
 
         addChild(contentHost)
         view.addSubview(contentHost.view)
@@ -134,15 +155,29 @@ final class LiveRoomShellViewController: UIViewController {
             }
             .store(in: &cancellables)
 
+        dependencies.libraryStore.$appearanceMode
+            .removeDuplicates()
+            .receive(on: RunLoop.main)
+            .sink { [weak self] mode in
+                self?.applyAppearanceMode(mode)
+            }
+            .store(in: &cancellables)
+
+        registerForTraitChanges([UITraitUserInterfaceStyle.self]) {
+            (viewController: LiveRoomShellViewController, _) in
+            viewController.setNeedsStatusBarAppearanceUpdate()
+        }
+
         bindPlayerSurface()
     }
 
     override func viewDidAppear(_ animated: Bool) {
         super.viewDidAppear(animated)
         isViewActive = true
-        AppStatusBarCompatibility.applyPlaybackPresentation(isHidden: isLandscape)
+        updatePlaybackSystemChrome()
         updateOrientationLock()
         restoreSystemBackGestures()
+        restoreSystemBackGesturesSoon()
     }
 
     override func viewWillDisappear(_ animated: Bool) {
@@ -150,6 +185,8 @@ final class LiveRoomShellViewController: UIViewController {
         isViewActive = false
         AppStatusBarCompatibility.restoreDefaultPresentation()
         cancelPendingRotationRecovery()
+        cancelActiveRotationPresentationIfNeeded()
+        resumeDeferredLiveRenderUpdates()
         playerSurfaceController.cancelRotationChromePrewarm()
         rotationFrameProbe.cancel()
         AppOrientationLock.restorePortrait(in: view.window?.windowScene)
@@ -159,13 +196,19 @@ final class LiveRoomShellViewController: UIViewController {
         super.viewDidDisappear(animated)
         isViewActive = false
         cancelPendingRotationRecovery()
+        cancelActiveRotationPresentationIfNeeded()
+        resumeDeferredLiveRenderUpdates()
         playerSurfaceController.cancelRotationChromePrewarm()
         AppOrientationLock.restorePortrait(in: view.window?.windowScene)
     }
 
     override func viewDidLayoutSubviews() {
         super.viewDidLayoutSubviews()
-        applyLayout()
+        if isSystemRotationTransitioning {
+            applyRotationSurfaceLayout()
+        } else {
+            applyLayout()
+        }
         restoreSystemBackGestures()
     }
 
@@ -175,11 +218,17 @@ final class LiveRoomShellViewController: UIViewController {
     ) {
         super.viewWillTransition(to: size, with: coordinator)
         let toLandscape = size.width > size.height
-        AppStatusBarCompatibility.applyPlaybackPresentation(isHidden: toLandscape)
+        let targetUsesLandscapeFullscreen = usesLandscapeLiveFullscreen(forLandscape: toLandscape)
+        let targetUsesFullscreenLayout = targetUsesLandscapeFullscreen || isPortraitFullscreen
+        AppStatusBarCompatibility.applyPlaybackPresentation(
+            isHidden: targetUsesFullscreenLayout
+        )
         rotationGeneration &+= 1
         let generation = rotationGeneration
         cancelPendingRotationRecovery()
+        cancelDeferredLiveRenderRelease()
         playerSurfaceController.cancelRotationChromePrewarm()
+        lastRotationSurfaceLayoutSize = nil
         startRotationFrameProbe(
             toLandscape: toLandscape,
             coordinator: coordinator
@@ -190,20 +239,31 @@ final class LiveRoomShellViewController: UIViewController {
             detail: "to=\(toLandscape ? "landscape" : "portrait")"
         )
 
-        // 旋转期间只保留稳定的视频层，避免标题和播放器控件同时参与布局动画。
-        contentHost.view.isHidden = true
-        contentHost.view.isUserInteractionEnabled = false
+        let rotationPolicy = LiveRotationSurfaceStabilityPolicy()
+        let retainsChromeTree = rotationPolicy.retainsChromeTree()
+        // Both directions must keep the live chat host out of the system
+        // transaction. On landscape -> portrait, revealing it here used to
+        // re-layout the blurred background and chat list on rotation frames.
+        contentHost.view.isHidden = rotationPolicy.hidesContentHost(
+            duringTransitionToLandscape: toLandscape
+        )
+        contentHost.view.isUserInteractionEnabled = rotationPolicy.allowsContentHostInteraction(
+            duringTransitionToLandscape: toLandscape
+        )
         isSystemRotationTransitioning = true
-        setBareSurfaceTransitionActive(true)
+        contentState.setChatUpdatesDeferred(true)
+        viewModel.liveDanmakuRenderStore.setRenderedUpdatesDeferred(true)
+        setBareSurfaceTransitionActive(true, retainsChromeTree: retainsChromeTree)
         // 提前切换隐藏的控件树，把首次布局成本移出系统结束帧。
-        playerSurfaceController.setLandscape(toLandscape)
+        playerSurfaceController.setLandscape(targetUsesLandscapeFullscreen)
+        playerSurfaceController.setPortraitFullscreen(isPortraitFullscreen)
         rotationFrameProbe.mark("旋转开始：目标方向控件已预热")
 
         coordinator.animate(alongsideTransition: { [weak self] _ in
             guard let self else { return }
             self.rotationFrameProbe.mark("系统动画布局开始")
-            self.applyLayout(forBoundsSize: size)
-            self.view.layoutIfNeeded()
+            self.applyRotationSurfaceLayout(forBoundsSize: size)
+            self.playerContainer.layoutIfNeeded()
             self.refreshSurfaceLayoutImmediately()
             self.setNeedsStatusBarAppearanceUpdate()
             self.setNeedsUpdateOfHomeIndicatorAutoHidden()
@@ -218,53 +278,206 @@ final class LiveRoomShellViewController: UIViewController {
         view.bounds.width > view.bounds.height
     }
 
+    private var usesLandscapeLiveFullscreen: Bool {
+        usesLandscapeLiveFullscreen(forLandscape: isLandscape)
+    }
+
+    private var isLiveFullscreenActive: Bool {
+        usesLandscapeLiveFullscreen || isPortraitFullscreen
+    }
+
+    private var hidesSystemChrome: Bool {
+        isLiveFullscreenActive
+    }
+
+    private var isPortraitLiveVideo: Bool {
+        LiveRoomVideoDetailLayoutPolicy.supportsPortraitFullscreen(
+            videoAspectRatio: actualVideoAspectRatio
+        )
+    }
+
+    private func usesLandscapeLiveFullscreen(forLandscape landscape: Bool) -> Bool {
+        return LiveRoomVideoDetailLayoutPolicy.usesLandscapeFullscreen(
+            isLandscape: landscape,
+            videoAspectRatio: actualVideoAspectRatio
+        )
+    }
+
     private var performanceContext: PlaybackDetailPerformanceContext {
         .live(roomID: viewModel.roomID, title: viewModel.title)
     }
 
     private func updateOrientationLock() {
         guard isViewActive else { return }
-        AppOrientationLock.update(to: .allButUpsideDown, in: view.window?.windowScene)
+        let scene = view.window?.windowScene
+        if isPortraitLiveVideo {
+            AppOrientationLock.update(to: .portrait, in: scene)
+            if isLandscape {
+                AppOrientationLock.requestGeometryUpdate(to: .portrait, in: scene)
+            }
+        } else {
+            AppOrientationLock.update(to: .allButUpsideDown, in: scene)
+        }
     }
 
-    private func applyLayout(forBoundsSize size: CGSize? = nil) {
+    private func updatePlaybackSystemChrome() {
+        setNeedsStatusBarAppearanceUpdate()
+        setNeedsUpdateOfHomeIndicatorAutoHidden()
+        guard isViewActive else { return }
+        AppStatusBarCompatibility.applyPlaybackPresentation(isHidden: hidesSystemChrome)
+    }
+
+    private func applyAppearanceMode(_ mode: AppAppearanceMode) {
+        let style: UIUserInterfaceStyle
+        switch mode {
+        case .system:
+            style = .unspecified
+        case .light:
+            style = .light
+        case .dark:
+            style = .dark
+        }
+        guard overrideUserInterfaceStyle != style else { return }
+        overrideUserInterfaceStyle = style
+        backdropHost.overrideUserInterfaceStyle = style
+        contentHost.overrideUserInterfaceStyle = style
+        loadingHost.overrideUserInterfaceStyle = style
+        setNeedsStatusBarAppearanceUpdate()
+    }
+
+    private func observeActivePlayerPresentationSize(_ playerViewModel: PlayerStateViewModel?) {
+        activePlayerPresentationSizeCancellable = nil
+        actualVideoAspectRatio = nil
+        applyLiveVideoPresentationSize(.zero)
+
+        guard let playerViewModel else { return }
+        activePlayerPresentationSizeCancellable = playerViewModel.$videoPresentationSize
+            .receive(on: RunLoop.main)
+            .sink { [weak self] size in
+                self?.applyLiveVideoPresentationSize(size)
+            }
+    }
+
+    private func applyLiveVideoPresentationSize(_ size: CGSize) {
+        guard size.width > 0, size.height > 0 else {
+            actualVideoAspectRatio = nil
+            viewModel.liveRotationSurfaceAlignmentState.updatePresentationSize(.zero)
+            surfaceVideoAspectRatio = 16.0 / 9.0
+            if isPortraitFullscreen {
+                setPortraitFullscreen(false)
+            }
+            updateOrientationLock()
+            if isViewLoaded {
+                refreshLivePresentationLayout()
+            }
+            return
+        }
+
+        let nextAspectRatio = size.width / size.height
+        guard nextAspectRatio.isFinite, nextAspectRatio > 0.1 else { return }
+        actualVideoAspectRatio = nextAspectRatio
+        viewModel.liveRotationSurfaceAlignmentState.updatePresentationSize(size)
+        surfaceVideoAspectRatio = nextAspectRatio
+        if isPortraitFullscreen, !isPortraitLiveVideo {
+            setPortraitFullscreen(false)
+        }
+        updateOrientationLock()
+        guard isViewLoaded else { return }
+        refreshLivePresentationLayout()
+    }
+
+    private func refreshLivePresentationLayout() {
+        applyLayout()
+        updatePlaybackSystemChrome()
+    }
+
+    private func applyLayout(
+        forBoundsSize size: CGSize? = nil,
+        publishesContentLayout: Bool = true
+    ) {
         let bounds = CGRect(origin: .zero, size: size ?? view.bounds.size)
         let landscape = bounds.width > bounds.height
-        view.backgroundColor = .black
-        let playerHeight = PlaybackDetailShellLayout.standardPlayerHeight(for: bounds.width)
-        let layout = PlaybackDetailShellLayout(
-            bounds: bounds,
-            safeAreaTop: view.safeAreaInsets.top,
-            playerHeight: playerHeight,
-            contentTopInset: playerHeight,
-            usesFullscreenLayout: landscape
-        )
+        let safeAreaTop = min(max(view.safeAreaInsets.top, 0), bounds.height)
+        let safeAreaBottom = min(max(view.safeAreaInsets.bottom, 0), bounds.height)
+        let usesFullscreenLayout = usesLandscapeLiveFullscreen(forLandscape: landscape)
+            || isPortraitFullscreen
 
-        contentHost.view.frame = layout.contentFrame
-        playerContainer.frame = layout.playerFrame
-        loadingHost.view.frame = playerContainer.bounds
-        if let contentTopInset = layout.contentTopInset {
-            contentState.update(
-                layoutWidth: bounds.width,
-                topInset: contentTopInset
+        backdropHost.view.frame = bounds
+        contentHost.view.frame = bounds
+        if usesFullscreenLayout {
+            playerContainer.frame = bounds
+        } else {
+            playerContainer.frame = liveRoomPlayerFrame(
+                in: bounds,
+                safeAreaTop: safeAreaTop,
+                safeAreaBottom: safeAreaBottom
             )
         }
-        updateSurfaceLayout(usesLandscapeChrome: landscape)
+        if publishesContentLayout {
+            contentState.update(
+                layoutWidth: bounds.width,
+                layoutHeight: bounds.height,
+                topSafeAreaInset: usesFullscreenLayout ? 0 : safeAreaTop,
+                bottomSafeAreaInset: usesFullscreenLayout ? 0 : safeAreaBottom,
+                playerHeight: !usesFullscreenLayout
+                    ? playerContainer.bounds.height
+                    : 0
+            )
+        }
+        loadingHost.view.frame = playerContainer.bounds
+        updateSurfaceLayout(
+            usesLandscapeChrome: usesLandscapeLiveFullscreen(forLandscape: landscape)
+        )
+        if !isSystemRotationTransitioning {
+            contentHost.view.isHidden = usesFullscreenLayout
+            contentHost.view.isUserInteractionEnabled = !usesFullscreenLayout
+        }
+    }
+
+    /// During a system rotation the native video surface needs fresh geometry,
+    /// while the hidden SwiftUI chat hierarchy must not receive layout state.
+    private func applyRotationSurfaceLayout(forBoundsSize size: CGSize? = nil) {
+        let resolvedSize = size ?? view.bounds.size
+        guard lastRotationSurfaceLayoutSize != resolvedSize else { return }
+        lastRotationSurfaceLayoutSize = resolvedSize
+        applyLayout(forBoundsSize: resolvedSize, publishesContentLayout: false)
+    }
+
+    private func liveRoomPlayerFrame(
+        in bounds: CGRect,
+        safeAreaTop: CGFloat,
+        safeAreaBottom: CGFloat
+    ) -> CGRect {
+        let height = LiveRoomPiliPodLayoutPolicy.playerHeight(
+            containerSize: bounds.size,
+            safeAreaTop: safeAreaTop,
+            safeAreaBottom: safeAreaBottom,
+            videoAspectRatio: actualVideoAspectRatio
+        )
+        return CGRect(
+            x: bounds.minX,
+            y: bounds.minY + safeAreaTop + LiveRoomPiliPodLayoutPolicy.headerContentHeight,
+            width: bounds.width,
+            height: height
+        )
     }
 
     private func bindPlayerSurface() {
         playerSurfaceController.bind(
             to: viewModel.playbackSession,
-            layout: currentSurfaceLayout(usesLandscapeChrome: isLandscape)
+            layout: currentSurfaceLayout(
+                usesLandscapeChrome: usesLandscapeLiveFullscreen
+            )
         )
     }
 
     private func currentSurfaceLayout(usesLandscapeChrome: Bool) -> PlayerSurfaceLayout {
         PlayerSurfaceLayout(
             frame: playerContainer.bounds,
-            videoAspectRatio: 16.0 / 9.0,
+            videoAspectRatio: surfaceVideoAspectRatio,
             videoGravity: .resizeAspect,
             usesLandscapeChrome: usesLandscapeChrome,
+            usesPortraitFullscreen: isPortraitFullscreen,
             isTransitioning: isSystemRotationTransitioning
         )
     }
@@ -275,10 +488,10 @@ final class LiveRoomShellViewController: UIViewController {
         )
     }
 
-    private func setBareSurfaceTransitionActive(_ active: Bool) {
+    private func setBareSurfaceTransitionActive(_ active: Bool, retainsChromeTree: Bool = false) {
         playerSurfaceController.setBareSurfaceTransitionActive(
             active,
-            retainsChromeTree: active
+            retainsChromeTree: active && retainsChromeTree
         )
     }
 
@@ -287,19 +500,50 @@ final class LiveRoomShellViewController: UIViewController {
     }
 
     private func requestFullscreen() {
-        let scene = view.window?.windowScene
-        AppOrientationLock.update(to: .allButUpsideDown, in: scene)
-        AppOrientationLock.requestGeometryUpdate(to: .landscapeRight, in: scene)
+        switch LiveRoomVideoDetailLayoutPolicy.fullscreenMode(
+            videoAspectRatio: actualVideoAspectRatio
+        ) {
+        case .portrait:
+            setPortraitFullscreen(true)
+        case .landscape:
+            let scene = view.window?.windowScene
+            AppOrientationLock.update(to: .allButUpsideDown, in: scene)
+            AppOrientationLock.requestGeometryUpdate(to: .landscapeRight, in: scene)
+        case .unavailable:
+            return
+        }
     }
 
     private func requestExitFullscreen() {
-        let scene = view.window?.windowScene
-        AppOrientationLock.update(to: .allButUpsideDown, in: scene)
-        AppOrientationLock.requestGeometryUpdate(to: .portrait, in: scene)
+        if isPortraitFullscreen {
+            setPortraitFullscreen(false)
+        } else if usesLandscapeLiveFullscreen {
+            let scene = view.window?.windowScene
+            AppOrientationLock.update(to: .allButUpsideDown, in: scene)
+            AppOrientationLock.requestGeometryUpdate(to: .portrait, in: scene)
+        }
+    }
+
+    private func setPortraitFullscreen(_ active: Bool) {
+        guard isPortraitFullscreen != active else { return }
+        guard !active || isPortraitLiveVideo else { return }
+
+        isPortraitFullscreen = active
+        playerSurfaceController.setPortraitFullscreen(active)
+        updatePlaybackSystemChrome()
+        UIView.animate(
+            withDuration: PlaybackDetailRotationTiming.portraitFullscreenDuration,
+            delay: 0,
+            options: [.curveEaseInOut]
+        ) {
+            self.applyLayout()
+            self.setNeedsStatusBarAppearanceUpdate()
+            self.setNeedsUpdateOfHomeIndicatorAutoHidden()
+        }
     }
 
     private func handleBackButton() {
-        if isLandscape {
+        if isLiveFullscreenActive {
             requestExitFullscreen()
         } else {
             onNavigateBack()
@@ -328,11 +572,17 @@ final class LiveRoomShellViewController: UIViewController {
 
     private func finishSystemRotation(toLandscape: Bool, generation: Int) {
         rotationFrameProbe.mark("系统完成：保持视频层与已挂载控件树")
+        let targetUsesLandscapeFullscreen = usesLandscapeLiveFullscreen(forLandscape: toLandscape)
+        let targetUsesFullscreenLayout = targetUsesLandscapeFullscreen || isPortraitFullscreen
+        // Keep the chat hierarchy hidden for the two staged recovery frames.
+        // Returning to portrait otherwise makes the chat draw on the exact
+        // frame where the player surface is settling.
         contentHost.view.isHidden = true
         contentHost.view.isUserInteractionEnabled = false
 
         CATransaction.begin()
         CATransaction.setDisableActions(true)
+        lastRotationSurfaceLayoutSize = nil
         applyLayout()
         CATransaction.commit()
         rotationFrameProbe.mark("视频层几何已提交，等待下一帧")
@@ -342,18 +592,26 @@ final class LiveRoomShellViewController: UIViewController {
             preparation: { [weak self] in
                 guard let self, self.rotationGeneration == generation else { return }
                 self.rotationFrameProbe.mark("第一帧：预热已挂载控件状态")
-                self.playerSurfaceController.setLandscape(toLandscape)
+                self.playerSurfaceController.setLandscape(targetUsesLandscapeFullscreen)
+                self.playerSurfaceController.setPortraitFullscreen(self.isPortraitFullscreen)
                 self.rotationFrameProbe.mark("第一帧：控件方向已就绪")
             },
             recovery: { [weak self] in
                 guard let self, self.rotationGeneration == generation else { return }
                 self.rotationFrameProbe.mark("第二帧：恢复内容开始")
                 self.isSystemRotationTransitioning = false
-                self.contentHost.view.isHidden = toLandscape
-                self.contentHost.view.isUserInteractionEnabled = !toLandscape
+                self.updateSurfaceLayout(
+                    usesLandscapeChrome: targetUsesLandscapeFullscreen
+                )
+                let hidesContent = targetUsesFullscreenLayout
+                self.contentHost.view.isHidden = hidesContent
+                self.contentHost.view.isUserInteractionEnabled = !hidesContent
+                self.updatePlaybackSystemChrome()
                 self.rotationFrameProbe.mark("第二帧：内容已恢复")
                 self.setBareSurfaceTransitionActive(false)
-                self.rotationFrameProbe.mark("第二帧：叠层和手势已恢复")
+                self.contentState.setChatUpdatesDeferred(false)
+                self.scheduleDeferredLiveRenderRelease(generation: generation)
+                self.rotationFrameProbe.mark("第二帧：叠层和手势已恢复，弹幕待下一帧合并")
                 PlaybackDetailPerformanceMonitor.shared.mark(
                     .fullscreenLayoutUpdated,
                     context: self.performanceContext,
@@ -427,35 +685,167 @@ final class LiveRoomShellViewController: UIViewController {
         rotationRecoveryNotBefore = nil
     }
 
+    private func scheduleDeferredLiveRenderRelease(generation: Int) {
+        cancelDeferredLiveRenderRelease()
+        deferredLiveRenderReleaseTask = Task { @MainActor [weak self] in
+            await Task.yield()
+            await Task.yield()
+            guard let self,
+                  !Task.isCancelled,
+                  self.rotationGeneration == generation,
+                  !self.isSystemRotationTransitioning
+            else { return }
+            self.viewModel.liveDanmakuRenderStore.setRenderedUpdatesDeferred(false)
+            self.deferredLiveRenderReleaseTask = nil
+            self.rotationFrameProbe.mark("旋转稳定后：恢复直播弹幕合批更新")
+        }
+    }
+
+    private func cancelDeferredLiveRenderRelease() {
+        deferredLiveRenderReleaseTask?.cancel()
+        deferredLiveRenderReleaseTask = nil
+    }
+
+    private func resumeDeferredLiveRenderUpdates() {
+        cancelDeferredLiveRenderRelease()
+        viewModel.liveDanmakuRenderStore.setRenderedUpdatesDeferred(false)
+        contentState.setChatUpdatesDeferred(false)
+    }
+
+    private func cancelActiveRotationPresentationIfNeeded() {
+        guard isSystemRotationTransitioning else { return }
+        isSystemRotationTransitioning = false
+        lastRotationSurfaceLayoutSize = nil
+        setBareSurfaceTransitionActive(false)
+    }
+
     private func restoreSystemBackGestures() {
-        guard let navigationController else { return }
-        navigationController.interactivePopGestureRecognizer?.isEnabled = true
-        navigationController.interactivePopGestureRecognizer?.delegate = self
-        navigationController.interactiveContentPopGestureRecognizer?.isEnabled = true
-        navigationController.interactiveContentPopGestureRecognizer?.delegate = self
+        guard let navigationController = enclosingNavigationController() else { return }
+        attachedNavigationController = navigationController
+
+        if let popGesture = navigationController.interactivePopGestureRecognizer {
+            popGesture.isEnabled = true
+            popGesture.delegate = self
+        }
+
+        if let contentPopGesture = navigationController.interactiveContentPopGestureRecognizer {
+            contentPopGesture.isEnabled = true
+            contentPopGesture.delegate = self
+            prioritizeSystemContentPopGesture(contentPopGesture)
+        }
     }
 
     private func isSystemBackGesture(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
-        guard let navigationController else { return false }
-        return gestureRecognizer === navigationController.interactivePopGestureRecognizer
-            || gestureRecognizer === navigationController.interactiveContentPopGestureRecognizer
+        guard let navigationController = attachedNavigationController ?? enclosingNavigationController() else {
+            return false
+        }
+        if let popGesture = navigationController.interactivePopGestureRecognizer,
+           gestureRecognizer === popGesture {
+            return true
+        }
+        if let contentPopGesture = navigationController.interactiveContentPopGestureRecognizer,
+           gestureRecognizer === contentPopGesture {
+            return true
+        }
+        return false
+    }
+
+    private func restoreSystemBackGesturesSoon() {
+        DispatchQueue.main.async { [weak self] in
+            guard let self, self.parent != nil else { return }
+            self.restoreSystemBackGestures()
+        }
+    }
+
+    private func enclosingNavigationController() -> UINavigationController? {
+        if let navigationController {
+            return navigationController
+        }
+
+        var current = parent
+        while let viewController = current {
+            if let navigationController = viewController as? UINavigationController {
+                return navigationController
+            }
+            if let navigationController = viewController.navigationController {
+                return navigationController
+            }
+            current = viewController.parent
+        }
+
+        var responder: UIResponder? = view
+        while let current = responder {
+            if let viewController = current as? UIViewController,
+               let navigationController = viewController.navigationController {
+                return navigationController
+            }
+            responder = current.next
+        }
+        return nil
+    }
+
+    private func prioritizeSystemContentPopGesture(_ contentPopGesture: UIGestureRecognizer) {
+        let contentPopID = ObjectIdentifier(contentPopGesture)
+        if configuredContentPopID != contentPopID {
+            configuredContentPopID = contentPopID
+            configuredScrollPanIDs.removeAll()
+        }
+
+        for scrollView in scrollViews(in: contentHost.view) {
+            let panGesture = scrollView.panGestureRecognizer
+            let panID = ObjectIdentifier(panGesture)
+            guard configuredScrollPanIDs.insert(panID).inserted else { continue }
+            panGesture.require(toFail: contentPopGesture)
+        }
+    }
+
+    private func scrollViews(in rootView: UIView) -> [UIScrollView] {
+        var result = [UIScrollView]()
+        var stack = rootView.subviews
+        while let view = stack.popLast() {
+            if let scrollView = view as? UIScrollView {
+                result.append(scrollView)
+            }
+            stack.append(contentsOf: view.subviews)
+        }
+        return result
     }
 }
 
 extension LiveRoomShellViewController: UIGestureRecognizerDelegate {
     func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
         guard isSystemBackGesture(gestureRecognizer) else { return true }
-        guard !isLandscape else { return false }
-        return navigationController?.viewControllers.count ?? 0 > 1
+        guard !isLiveFullscreenActive,
+              let navigationController = attachedNavigationController ?? enclosingNavigationController(),
+              navigationController.viewControllers.count > 1,
+              navigationController.transitionCoordinator == nil
+        else {
+            return false
+        }
+
+        guard let panGesture = gestureRecognizer as? UIPanGestureRecognizer else {
+            return true
+        }
+        let velocity = panGesture.velocity(in: navigationController.view)
+        return velocity.x > 0 && abs(velocity.x) > abs(velocity.y)
     }
 
     func gestureRecognizer(
         _ gestureRecognizer: UIGestureRecognizer,
-        shouldReceive touch: UITouch
+        shouldReceive _: UITouch
     ) -> Bool {
         guard isSystemBackGesture(gestureRecognizer) else { return true }
-        guard !isLandscape else { return false }
-        return !playerContainer.frame.contains(touch.location(in: view))
+        return !isLiveFullscreenActive
+    }
+
+    func gestureRecognizer(
+        _ gestureRecognizer: UIGestureRecognizer,
+        shouldRecognizeSimultaneouslyWith otherGestureRecognizer: UIGestureRecognizer
+    ) -> Bool {
+        guard isSystemBackGesture(gestureRecognizer) || isSystemBackGesture(otherGestureRecognizer) else {
+            return true
+        }
+        return !(gestureRecognizer is UITapGestureRecognizer || otherGestureRecognizer is UITapGestureRecognizer)
     }
 }
 

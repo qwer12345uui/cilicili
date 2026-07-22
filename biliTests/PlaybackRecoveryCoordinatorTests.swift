@@ -210,6 +210,36 @@ final class VideoDetailPlaybackQualityMenuBuilderTests: XCTestCase {
         XCTAssertEqual(item?.subtitle, "H.264 兜底")
     }
 
+    func testSupplementingQualityDoesNotShowPrematureLoginLock() {
+        let unavailableVariant = PlayVariant(
+            quality: 80,
+            title: "1080P 高清",
+            videoURL: nil,
+            audioURL: nil,
+            videoStream: nil,
+            audioStream: nil,
+            codec: nil,
+            resolution: nil,
+            frameRate: nil,
+            bandwidth: nil,
+            isHDR: false,
+            badge: nil
+        )
+
+        let item = VideoDetailPlaybackQualityMenuBuilder.makeQualityMenuItems(
+            playVariants: [unavailableVariant],
+            selectedPlayVariant: nil,
+            pendingPlayVariantID: nil,
+            isSupplementingPlayQualities: true,
+            isSwitchingPlayQuality: false
+        ).first
+
+        XCTAssertEqual(item?.title, "1080P 高清")
+        XCTAssertEqual(item?.subtitle, "正在校验可用清晰度")
+        XCTAssertEqual(item?.systemImage, "arrow.triangle.2.circlepath")
+        XCTAssertTrue(item?.isDisabled ?? false)
+    }
+
     private func dashVariant(stream videoStream: DASHStream) throws -> PlayVariant {
         let audioStream = try stream(
             id: 30280,

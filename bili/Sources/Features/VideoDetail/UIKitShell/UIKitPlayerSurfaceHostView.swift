@@ -98,7 +98,12 @@ final class UIKitPlayerSurfaceHostView: UIView {
             hostingController.view.setNeedsLayout()
             hostingController.view.layoutIfNeeded()
             if let surfaceView = hostingController.view.firstVideoSurfaceContainerView {
-                bind(surfaceView, to: viewModel, startsPlayback: false)
+                // The surface is already attached. Rebinding it during a system
+                // rotation repeats player/PiP wiring on the main thread; update
+                // only the drawable geometry and AVPlayer layer instead.
+                surfaceView.configureBoundsRefresh(for: viewModel)
+                surfaceView.invalidateVideoLayout()
+                viewModel.refreshSurfaceLayout()
             } else {
                 viewModel.refreshSurfaceLayout()
             }

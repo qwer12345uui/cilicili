@@ -31,15 +31,13 @@ final class AppDependencies: ObservableObject {
             homeRecommendDiagnosticsStore: homeRecommendDiagnosticsStore
         )
         self.sponsorBlockService = SponsorBlockService()
-        Publishers.CombineLatest(sessionStore.$sessdata, sessionStore.$accessKey)
-            .removeDuplicates { lhs, rhs in
-                lhs.0 == rhs.0 && lhs.1 == rhs.1
-            }
+        sessionStore.$playbackCredentialVersion
             .dropFirst()
             .sink { [weak self] _ in
                 Task {
                     await PlayURLCache.shared.invalidateForLoginStateChange()
                     await VideoPreloadCenter.shared.clearPlayURLCache()
+                    await self?.api.resetPlaybackAuthorizationState()
                     await DynamicFeedWarmCache.shared.clear()
                     await self?.api.resetHomeRecommendState()
                     self?.homeRecommendDiagnosticsStore.reset()

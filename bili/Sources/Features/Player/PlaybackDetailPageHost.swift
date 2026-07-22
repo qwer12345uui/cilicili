@@ -34,6 +34,7 @@ struct PlaybackDetailPageHost<Content: View>: View {
     @Binding var hidesSystemChrome: Bool
     let background: Color
     let hidesRootTabBar: Bool
+    let tabBarRestoreTiming: PlaybackDetailTabBarRestoreTiming
     let navigationBarVisibility: Visibility?
     let hidesBackButton: Bool
     let statusBarStyle: UIStatusBarStyle
@@ -45,6 +46,7 @@ struct PlaybackDetailPageHost<Content: View>: View {
         hidesSystemChrome: Binding<Bool>,
         background: Color = Color(.systemGroupedBackground),
         hidesRootTabBar: Bool = true,
+        tabBarRestoreTiming: PlaybackDetailTabBarRestoreTiming = .alongsideNavigationTransition,
         navigationBarVisibility: Visibility? = nil,
         hidesBackButton: Bool = false,
         statusBarStyle: UIStatusBarStyle = .lightContent,
@@ -55,6 +57,7 @@ struct PlaybackDetailPageHost<Content: View>: View {
         _hidesSystemChrome = hidesSystemChrome
         self.background = background
         self.hidesRootTabBar = hidesRootTabBar
+        self.tabBarRestoreTiming = tabBarRestoreTiming
         self.navigationBarVisibility = navigationBarVisibility
         self.hidesBackButton = hidesBackButton
         self.statusBarStyle = statusBarStyle
@@ -67,6 +70,7 @@ struct PlaybackDetailPageHost<Content: View>: View {
         content()
             .playbackDetailViewChrome(
                 hidesRootTabBar: hidesRootTabBar,
+                tabBarRestoreTiming: tabBarRestoreTiming,
                 navigationBarVisibility: navigationBarVisibility,
                 hidesBackButton: hidesBackButton
             )

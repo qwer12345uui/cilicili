@@ -37,7 +37,13 @@ struct BiliPlayerViewRenderState {
         configuration: BiliPlayerViewConfiguration,
         verticalSizeClass: UserInterfaceSizeClass?
     ) -> PlayerNativeControlMetrics {
-        if configuration.fullscreenMode?.isLandscape == true || verticalSizeClass == .compact {
+        if configuration.fullscreenMode?.isLandscape == true {
+            return .landscape
+        }
+        if configuration.controlLayout.isLive {
+            return .livePortrait
+        }
+        if verticalSizeClass == .compact {
             return .landscape
         }
         return .portrait

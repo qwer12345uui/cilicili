@@ -20,27 +20,37 @@ final class LiveRoomViewModel: ObservableObject {
     @Published var isDanmakuEnabled: Bool
     @Published private(set) var danmakuSettings: DanmakuSettings
     @Published var isLiveDanmakuDiagnosticsEnabled = false
+    @Published var isShowingLivePlaybackDiagnostics = false
+    @Published var isShowingLiveDanmakuSettings = false
+    @Published var isRefreshingLiveEdge = false
+    @Published var slowStartupRouteSwitchStatus = "未运行"
     @Published private(set) var isMutatingAnchorFollow = false
     @Published private(set) var interactionMessage: String?
 
     let seedRoom: LiveRoom
     let liveDanmakuRenderStore: LiveDanmakuRenderStore
+    let liveRotationSurfaceAlignmentState = LiveRotationSurfaceAlignmentState()
     let api: BiliAPIClient
     let libraryStore: LibraryStore
     var streamCandidates: [LiveStreamURLCandidate] = []
     var availableQualities: [LiveStreamQuality] = []
     var currentCandidateIndex = 0
-    var selectedQualityQN: Int?
+    var selectedQualityQN: Int? = LiveStreamQuality.defaultPreferredQN
     private var loadingTask: Task<Void, Never>?
     private var metadataTask: Task<Void, Never>?
+    private var metadataFallbackTask: Task<Void, Never>?
+    var streamHTTPHeaders: [String: String] = [:]
     var qualitySwitchTask: Task<Void, Never>?
+    var liveEdgeRefreshTask: Task<Void, Never>?
     var startupWatchdogTask: Task<Void, Never>?
+    var slowStartupRouteSwitchTask: Task<Void, Never>?
     var playbackStallWatchdogTask: Task<Void, Never>?
     var liveDanmakuService: LiveDanmakuService?
-    var liveDanmakuStartupTask: Task<Void, Never>?
     var liveDanmakuClockTask: Task<Void, Never>?
+    var liveDanmakuHistoryTask: Task<Void, Never>?
     var liveDanmakuStartDate: Date?
     var liveDanmakuDiagnosticsDraft = LiveDanmakuDiagnosticSnapshot(roomID: 0)
+    var liveDanmakuHistoryLoadedRoomID: Int?
     private var cancellables = Set<AnyCancellable>()
     private var loadGeneration = 0
 
@@ -50,6 +60,9 @@ final class LiveRoomViewModel: ObservableObject {
         self.libraryStore = libraryStore
         self.isDanmakuEnabled = libraryStore.danmakuEnabled
         self.danmakuSettings = libraryStore.danmakuSettings
+        self.isLiveDanmakuDiagnosticsEnabled = ProcessInfo.processInfo.arguments.contains(
+            "--live-danmaku-diagnostics"
+        )
         let initialDiagnostics = LiveDanmakuDiagnosticSnapshot(roomID: seedRoom.roomID)
         self.liveDanmakuDiagnosticsDraft = initialDiagnostics
         self.liveDanmakuRenderStore = LiveDanmakuRenderStore(
@@ -77,11 +90,14 @@ final class LiveRoomViewModel: ObservableObject {
     deinit {
         loadingTask?.cancel()
         metadataTask?.cancel()
+        metadataFallbackTask?.cancel()
         qualitySwitchTask?.cancel()
+        liveEdgeRefreshTask?.cancel()
         startupWatchdogTask?.cancel()
+        slowStartupRouteSwitchTask?.cancel()
         playbackStallWatchdogTask?.cancel()
-        liveDanmakuStartupTask?.cancel()
         liveDanmakuClockTask?.cancel()
+        liveDanmakuHistoryTask?.cancel()
         liveDanmakuService?.stop()
     }
 
@@ -97,6 +113,7 @@ final class LiveRoomViewModel: ObservableObject {
     func startLoading() {
         guard playerViewModel == nil else { return }
         guard loadingTask == nil else { return }
+        slowStartupRouteSwitchStatus = "加载中"
         let generation = nextLoadGeneration()
         loadingTask = Task { [weak self] in
             await self?.loadFromNetwork(generation: generation)
@@ -116,8 +133,9 @@ final class LiveRoomViewModel: ObservableObject {
         stopCurrentLoadAndPlayback()
         streamCandidates = []
         availableQualities = []
+        streamHTTPHeaders = [:]
         currentCandidateIndex = 0
-        selectedQualityQN = nil
+        selectedQualityQN = LiveStreamQuality.defaultPreferredQN
         updateStreamMenuItems()
         updateQualityMenuItems()
         streamFallbackMessage = nil
@@ -129,8 +147,9 @@ final class LiveRoomViewModel: ObservableObject {
         stopCurrentLoadAndPlayback()
         streamCandidates = []
         availableQualities = []
+        streamHTTPHeaders = [:]
         currentCandidateIndex = 0
-        selectedQualityQN = nil
+        selectedQualityQN = LiveStreamQuality.defaultPreferredQN
         updateStreamMenuItems()
         updateQualityMenuItems()
         streamFallbackMessage = nil
@@ -141,18 +160,26 @@ final class LiveRoomViewModel: ObservableObject {
 
     private func stopCurrentLoadAndPlayback() {
         loadGeneration += 1
+        isShowingLivePlaybackDiagnostics = false
+        isShowingLiveDanmakuSettings = false
         loadingTask?.cancel()
         metadataTask?.cancel()
+        metadataFallbackTask?.cancel()
         qualitySwitchTask?.cancel()
+        liveEdgeRefreshTask?.cancel()
         startupWatchdogTask?.cancel()
+        slowStartupRouteSwitchTask?.cancel()
         playbackStallWatchdogTask?.cancel()
-        liveDanmakuStartupTask?.cancel()
         loadingTask = nil
         metadataTask = nil
+        metadataFallbackTask = nil
         qualitySwitchTask = nil
+        liveEdgeRefreshTask = nil
+        isRefreshingLiveEdge = false
         startupWatchdogTask = nil
+        slowStartupRouteSwitchTask = nil
         playbackStallWatchdogTask = nil
-        liveDanmakuStartupTask = nil
+        slowStartupRouteSwitchStatus = "未运行"
         playerViewModel?.onPlaybackFailure = nil
         playerViewModel?.stop()
         playerViewModel = nil
@@ -200,18 +227,25 @@ final class LiveRoomViewModel: ObservableObject {
         }
 
         let resolvedRoomID = roomID
-        metadataTask = Task { [weak self] in
-            await self?.loadRoomMetadata(roomID: resolvedRoomID, generation: generation)
-        }
+        let metricsID = livePlaybackMetricsID(roomID: resolvedRoomID)
+        PlayerMetricsLog.record(.routeOpen, metricsID: metricsID, title: title, message: "source=live")
+        PlayerMetricsLog.record(.playURLStart, metricsID: metricsID, title: title, message: "source=liveV2")
 
         do {
-            let streamResult = try await api.fetchLiveStreamInfo(roomID: resolvedRoomID, quality: selectedQualityQN)
+            async let streamResultTask = api.fetchLiveStreamInfo(
+                roomID: resolvedRoomID,
+                quality: selectedQualityQN
+            )
+            async let streamHTTPHeadersTask = api.livePlaybackHTTPHeaders(roomID: resolvedRoomID)
+            let (streamResult, streamHTTPHeaders) = try await (streamResultTask, streamHTTPHeadersTask)
             guard !Task.isCancelled, isCurrentLoad(generation) else { return }
-            let candidates = streamResult.candidates
+            let candidates = LiveStreamStartupHealthMemory.shared
+                .orderedStartupCandidates(streamResult.candidates)
             guard let firstCandidate = candidates.first else {
                 state = .failed("没有获取到可播放的直播流")
                 return
             }
+            self.streamHTTPHeaders = streamHTTPHeaders
             streamCandidates = candidates
             availableQualities = streamResult.playableQualities
             currentCandidateIndex = Self.preferredCandidateIndex(
@@ -220,14 +254,37 @@ final class LiveRoomViewModel: ObservableObject {
                 preferredSource: nil
             )
             selectedQualityQN = candidates[currentCandidateIndex].currentQN ?? selectedQualityQN
+            PlayerMetricsLog.record(
+                .startupScheduler,
+                metricsID: metricsID,
+                title: title,
+                message: "liveCDN=adaptive candidateHost=\(candidates[currentCandidateIndex].url.host ?? "-")"
+            )
             updateStreamMenuItems()
             updateQualityMenuItems()
             let selectedCandidate = streamCandidates.indices.contains(currentCandidateIndex)
                 ? streamCandidates[currentCandidateIndex]
                 : firstCandidate
+            PlayerMetricsLog.record(
+                .playURLLoaded,
+                metricsID: metricsID,
+                title: title,
+                message: "source=liveV2 candidates=\(candidates.count) q=\(selectedCandidate.currentQN ?? 0)"
+            )
             installPlayer(for: selectedCandidate, generation: generation)
             if let playerViewModel {
-                scheduleLiveDanmakuStart(roomID: resolvedRoomID, playerViewModel: playerViewModel, generation: generation)
+                scheduleRoomMetadataLoad(
+                    roomID: resolvedRoomID,
+                    playerViewModel: playerViewModel,
+                    candidate: selectedCandidate,
+                    generation: generation
+                )
+                scheduleLiveDanmakuStart(
+                    roomID: resolvedRoomID,
+                    playerViewModel: playerViewModel,
+                    candidate: selectedCandidate,
+                    generation: generation
+                )
             }
             state = .loaded
         } catch {
@@ -238,6 +295,81 @@ final class LiveRoomViewModel: ObservableObject {
                 state = .failed("没有获取到可播放的直播流：\(error.localizedDescription)")
             }
         }
+    }
+
+    private func scheduleRoomMetadataLoad(
+        roomID: Int,
+        playerViewModel: PlayerStateViewModel,
+        candidate: LiveStreamURLCandidate,
+        generation: Int
+    ) {
+        metadataTask?.cancel()
+        metadataTask = nil
+        metadataFallbackTask?.cancel()
+
+        let defersForTransportStream = LiveStartupAuxiliaryPolicy.defersUntilFirstFrame(
+            streamFormat: candidate.formatName
+        )
+
+        let existingFirstFrameHandler = playerViewModel.onFirstFramePresented
+        playerViewModel.onFirstFramePresented = { [weak self, weak playerViewModel] in
+            existingFirstFrameHandler?()
+            guard let self,
+                  let playerViewModel,
+                  self.isCurrentLoad(generation),
+                  self.playerViewModel === playerViewModel
+            else { return }
+            guard defersForTransportStream else { return }
+            self.startRoomMetadataLoad(roomID: roomID, generation: generation)
+        }
+
+        if defersForTransportStream {
+            PlayerMetricsLog.record(
+                .startupScheduler,
+                metricsID: livePlaybackMetricsID(roomID: roomID),
+                title: title,
+                message: "liveAuxiliary=deferredTSUntilFirstFrame"
+            )
+            if playerViewModel.hasPresentedPlayback {
+                startRoomMetadataLoad(roomID: roomID, generation: generation)
+            }
+            return
+        }
+
+        let metricsID = livePlaybackMetricsID(roomID: roomID)
+        PlayerMetricsLog.record(
+            .startupScheduler,
+            metricsID: metricsID,
+            title: title,
+            message: "liveAuxiliary=parallel metadataDelay=180ms"
+        )
+        metadataFallbackTask = Task { [weak self, weak playerViewModel] in
+            try? await Task.sleep(
+                nanoseconds: LivePlaybackPolicy.auxiliaryLoadDelayNanoseconds
+            )
+            guard !Task.isCancelled,
+                  let self,
+                  let playerViewModel,
+                  self.isCurrentLoad(generation),
+                  self.playerViewModel === playerViewModel
+            else { return }
+            self.startRoomMetadataLoad(roomID: roomID, generation: generation)
+        }
+    }
+
+    private func startRoomMetadataLoad(roomID: Int, generation: Int) {
+        guard isCurrentLoad(generation), metadataTask == nil else { return }
+        metadataFallbackTask?.cancel()
+        metadataFallbackTask = nil
+        metadataTask = Task { [weak self] in
+            await self?.loadRoomMetadata(roomID: roomID, generation: generation)
+            guard let self, self.isCurrentLoad(generation) else { return }
+            self.metadataTask = nil
+        }
+    }
+
+    private func livePlaybackMetricsID(roomID: Int) -> String {
+        "live-\(roomID)"
     }
 
     func toggleFollowAnchor() async {

@@ -23,6 +23,7 @@ struct BiliPlayerSurfaceChromeState {
     let topTrailingControlsAccessory: AnyView?
     let isFullscreenActive: Bool
     let controlsBottomLift: CGFloat
+    let controlsHorizontalInset: CGFloat
     let contentInsets: EdgeInsets
     let errorMessage: String?
 }

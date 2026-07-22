@@ -29,6 +29,21 @@ struct PlayerNativeControlMetrics: Equatable {
         qualityHorizontalPadding: 6
     )
 
+    static let livePortrait = PlayerNativeControlMetrics(
+        controlHeight: 36,
+        progressControlHeight: 26,
+        sliderVisualScale: 0.90,
+        iconSize: 15,
+        timeFont: .caption.monospacedDigit(),
+        stackSpacing: 7,
+        groupSpacing: 7,
+        controlSpacing: 7,
+        sliderHorizontalPadding: 10,
+        timeLabelWidth: 104,
+        qualityButtonMaxWidth: 68,
+        qualityHorizontalPadding: 8
+    )
+
     static let landscape = PlayerNativeControlMetrics(
         controlHeight: 34,
         progressControlHeight: 26,

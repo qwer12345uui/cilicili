@@ -2,6 +2,8 @@ import SwiftUI
 
 struct MinePlaybackPreferenceSection<ProbeSummary: View>: View {
     @ObservedObject var libraryStore: LibraryStore
+    @State private var av1HardwareDecodeProbe = PlaybackCodecPolicy.av1HardwareDecodeProbe
+    @State private var isShowingAV1HardwareDecodeResult = false
     let playbackPreferenceSummary: AnyView
     let playbackCDNProbeRefreshIntervalTitle: String
     let isProbingPlaybackCDN: Bool
@@ -20,6 +22,7 @@ struct MinePlaybackPreferenceSection<ProbeSummary: View>: View {
             playbackHistorySyncThresholdPicker
             preferredVideoQualityPicker
             cellularPreferredVideoQualityPicker
+            av1HardwareDecodeProbeButton
             videoCodecPreferencePicker
             forceHardwareDecodeToggle
             dolbyVisionRenderingPolicyPicker
@@ -34,7 +37,6 @@ struct MinePlaybackPreferenceSection<ProbeSummary: View>: View {
             advancedPlaybackSettingsToggle
             if showsAdvancedPlaybackSettings {
                 playbackStreamSourcePicker
-                videoStartupRequestSchedulingExperimentToggle
                 playbackCDNPicker
                 prefersBackupAudioURLToggle
                 playbackCustomCDNHostEditor
@@ -165,6 +167,25 @@ struct MinePlaybackPreferenceSection<ProbeSummary: View>: View {
         .pickerStyle(.navigationLink)
     }
 
+    private var av1HardwareDecodeProbeButton: some View {
+        Button {
+            av1HardwareDecodeProbe = PlaybackCodecPolicy.av1HardwareDecodeProbe
+            isShowingAV1HardwareDecodeResult = true
+        } label: {
+            HStack(spacing: 8) {
+                Label("检测 AV1 硬解", systemImage: "cpu")
+                Spacer(minLength: 8)
+                Text(av1HardwareDecodeProbe.settingsStatusTitle)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .alert("AV1 硬解检测", isPresented: $isShowingAV1HardwareDecodeResult) {
+            Button("好", role: .cancel) {}
+        } message: {
+            Text(av1HardwareDecodeProbe.detail)
+        }
+    }
+
     private var forceHardwareDecodeToggle: some View {
         Toggle(isOn: Binding(
             get: { libraryStore.forceHardwareDecodeEnabled },
@@ -200,15 +221,6 @@ struct MinePlaybackPreferenceSection<ProbeSummary: View>: View {
             Label("播放取流来源", systemImage: "antenna.radiowaves.left.and.right")
         }
         .pickerStyle(.navigationLink)
-    }
-
-    private var videoStartupRequestSchedulingExperimentToggle: some View {
-        Toggle(isOn: Binding(
-            get: { libraryStore.videoStartupRequestSchedulingExperimentEnabled },
-            set: { libraryStore.setVideoStartupRequestSchedulingExperimentEnabled($0) }
-        )) {
-            Label("视频首帧请求调度实验", systemImage: "bolt.horizontal.circle")
-        }
     }
 
     private var playbackCDNPicker: some View {

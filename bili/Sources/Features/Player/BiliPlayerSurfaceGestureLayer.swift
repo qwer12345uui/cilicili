@@ -5,6 +5,7 @@ struct BiliPlayerSurfaceGestureLayer<Content: View>: View {
     let clock: PlayerPlaybackClock
     let durationHint: TimeInterval?
     let canSeek: Bool
+    let allowsDoubleTapPlaybackToggle: Bool
     let onSingleTap: () -> Void
     let onDoubleTap: () -> Void
     let onBeginSpeedBoost: () -> Bool
@@ -30,11 +31,8 @@ struct BiliPlayerSurfaceGestureLayer<Content: View>: View {
 
     var body: some View {
         GeometryReader { proxy in
-            content
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .contentShape(Rectangle())
-            .simultaneousGesture(tapGesture(size: proxy.size))
-            .simultaneousGesture(
+            tappableContent(size: proxy.size)
+                .simultaneousGesture(
                 LongPressGesture(minimumDuration: 0.28, maximumDistance: 80)
                     .sequenced(before: DragGesture(minimumDistance: 0, coordinateSpace: .local))
                     .onChanged { value in
@@ -55,6 +53,30 @@ struct BiliPlayerSurfaceGestureLayer<Content: View>: View {
             )
             .simultaneousGesture(horizontalSeekGesture(size: proxy.size))
         }
+    }
+
+    @ViewBuilder
+    private func tappableContent(size: CGSize) -> some View {
+        if allowsDoubleTapPlaybackToggle {
+            playerContent
+                .simultaneousGesture(tapGesture(size: size))
+        } else {
+            playerContent
+                .simultaneousGesture(singleTapGesture)
+        }
+    }
+
+    private var playerContent: some View {
+        content
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .contentShape(Rectangle())
+    }
+
+    private var singleTapGesture: some Gesture {
+        SpatialTapGesture(count: 1, coordinateSpace: .local)
+            .onEnded { _ in
+                onSingleTap()
+            }
     }
 
     private func horizontalSeekGesture(size: CGSize) -> some Gesture {

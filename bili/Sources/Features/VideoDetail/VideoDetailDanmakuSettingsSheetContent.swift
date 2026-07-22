@@ -4,6 +4,7 @@ struct DanmakuSettingsSheetContent: View {
     @ObservedObject var store: VideoDetailDanmakuSettingsRenderStore
     let summary: String
     let displayAreaBinding: Binding<DanmakuDisplayArea>
+    let hidesDanmakuInPortraitBinding: Binding<Bool>
     let fontScaleBinding: Binding<Double>
     let fontWeightBinding: Binding<DanmakuFontWeightOption>
     let opacityBinding: Binding<Double>
@@ -18,6 +19,10 @@ struct DanmakuSettingsSheetContent: View {
             )
 
             DanmakuSettingsDisplayAreaSection(displayArea: displayAreaBinding)
+
+            DanmakuSettingsPortraitVisibilitySection(
+                hidesDanmakuInPortrait: hidesDanmakuInPortraitBinding
+            )
 
             DanmakuSettingsTextSection(
                 settings: store.danmakuSettings,

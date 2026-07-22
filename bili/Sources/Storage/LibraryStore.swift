@@ -106,7 +106,6 @@ final class LibraryStore: ObservableObject {
     @Published private(set) var cellularPreferredVideoQuality: Int?
     @Published private(set) var playbackAutoOptimizationMode: PlaybackAutoOptimizationMode
     @Published private(set) var playbackStreamSourcePreference: PlaybackStreamSourcePreference
-    @Published private(set) var videoStartupRequestSchedulingExperimentEnabled: Bool
     @Published private(set) var videoCodecPreference: VideoCodecPreference
     @Published private(set) var forceHardwareDecodeEnabled: Bool
     @Published private(set) var dolbyVisionRenderingPolicy: DolbyVisionRenderingPolicy
@@ -168,7 +167,6 @@ final class LibraryStore: ObservableObject {
     private static let cellularPreferredVideoQualityKey = "cc.bili.playback.cellularPreferredVideoQuality.v1"
     private static let playbackAutoOptimizationModeKey = "cc.bili.playback.autoOptimizationMode.v1"
     private static let playbackStreamSourcePreferenceKey = "cc.bili.playback.streamSourcePreference.v1"
-    private static let videoStartupRequestSchedulingExperimentEnabledKey = PlaybackStartupRequestSchedulingExperiment.storageKey
     private static let videoCodecPreferenceKey = VideoCodecPreference.storageKey
     private static let forceHardwareDecodeKey = PlaybackHardwareDecodePolicy.storageKey
     private static let dolbyVisionRenderingPolicyKey = DolbyVisionRenderingPolicy.storageKey
@@ -210,6 +208,17 @@ final class LibraryStore: ObservableObject {
     private static let videoCoverBottomScrimEnabledKey = VideoCoverBottomScrimSettings.storageKey
     private static let videoCoverDurationBadgesEnabledKey = VideoCoverDurationBadgeSettings.storageKey
     private static let unifiedVideoCoverBorderExperimentEnabledKey = "cc.bili.display.unifiedVideoCoverBorderExperimentEnabled.v1"
+    private static let retiredExperimentKeys = [
+        "cc.bili.playback.startupRequestSchedulingExperimentEnabled.v1",
+        "cc.bili.live.videoDetailLayoutExperimentEnabled.v1",
+        "cc.bili.live.piliPodLayoutExperimentEnabled.v1",
+        "cc.bili.live.parallelStartupExperimentEnabled.v1",
+        "cc.bili.live.adaptiveCDNStartupExperimentEnabled.v1",
+        "cc.bili.live.slowStartupRouteSwitchExperimentEnabled.v1",
+        "cc.bili.live.hlsFastStartExperimentEnabled.v1",
+        "cc.bili.live.danmakuRenderBatchingExperimentEnabled.v1",
+        "cc.bili.live.rotationSurfaceAlignmentExperimentEnabled.v1",
+    ]
     private static let fastScrollImageLoadSuppressionExperimentEnabledKey = "cc.bili.display.fastScrollImageLoadSuppressionExperimentEnabled.v1"
     private static let remoteImageCDNFailoverExperimentEnabledKey = RemoteImageCDNFailoverExperiment.storageKey
     private static let remoteImageDiagnosticsEnabledKey = RemoteImageDiagnosticsSettings.storageKey
@@ -342,9 +351,6 @@ final class LibraryStore: ObservableObject {
         self.playbackStreamSourcePreference = PlaybackStreamSourcePreference(
             rawValue: userDefaults.string(forKey: Self.playbackStreamSourcePreferenceKey) ?? ""
         ) ?? Self.defaultPlaybackStreamSourcePreference
-        self.videoStartupRequestSchedulingExperimentEnabled = userDefaults.object(
-            forKey: Self.videoStartupRequestSchedulingExperimentEnabledKey
-        ) as? Bool ?? PlaybackStartupRequestSchedulingExperiment.defaultIsEnabled
         self.videoCodecPreference = VideoCodecPreference.stored(in: userDefaults)
         self.forceHardwareDecodeEnabled = PlaybackHardwareDecodePolicy.stored(in: userDefaults)
         self.dolbyVisionRenderingPolicy = DolbyVisionRenderingPolicy.stored(in: userDefaults)
@@ -443,6 +449,7 @@ final class LibraryStore: ObservableObject {
         self.unifiedVideoCoverBorderExperimentEnabled = userDefaults.object(
             forKey: Self.unifiedVideoCoverBorderExperimentEnabledKey
         ) as? Bool ?? VideoCoverBorderExperiment.defaultIsEnabled
+        Self.retiredExperimentKeys.forEach(userDefaults.removeObject(forKey:))
         self.fastScrollImageLoadSuppressionExperimentEnabled = userDefaults.object(
             forKey: Self.fastScrollImageLoadSuppressionExperimentEnabledKey
         ) as? Bool ?? FastScrollImageLoadSuppressionExperiment.defaultIsEnabled
@@ -600,17 +607,10 @@ final class LibraryStore: ObservableObject {
         userDefaults.set(preference.rawValue, forKey: Self.playbackStreamSourcePreferenceKey)
     }
 
-    func setVideoStartupRequestSchedulingExperimentEnabled(_ isEnabled: Bool) {
-        videoStartupRequestSchedulingExperimentEnabled = isEnabled
-        userDefaults.set(isEnabled, forKey: Self.videoStartupRequestSchedulingExperimentEnabledKey)
-        Task {
-            await StartupPlayURLRoutePerformanceStore.shared.reset()
-        }
-    }
-
     func setVideoCodecPreference(_ preference: VideoCodecPreference) {
-        videoCodecPreference = preference
-        userDefaults.set(preference.rawValue, forKey: Self.videoCodecPreferenceKey)
+        let resolvedPreference = preference.resolvedForCurrentDevice
+        videoCodecPreference = resolvedPreference
+        userDefaults.set(resolvedPreference.rawValue, forKey: Self.videoCodecPreferenceKey)
         PlayerSettings.shared.reload()
     }
 

@@ -7,12 +7,14 @@ struct LiveDanmakuDiagnosticsHUD: View {
     private var rows: [(title: String, value: String)] {
         var values: [(title: String, value: String)] = [
             ("配置", snapshot.configSummary),
+            ("回填", snapshot.historySummary),
             ("连接", snapshot.connectionSummary),
             ("收包", snapshot.receiveSummary),
             ("弹幕", snapshot.commandSummary)
         ]
         if isExpanded {
             values.append(("覆盖层", snapshot.renderSummary))
+            values.append(("节点", snapshot.endpointSummary))
             values.append(("心跳", "\(snapshot.heartbeatReplyCount)/\(snapshot.heartbeatSentCount)"))
             values.append(("解析", "\(snapshot.inflateSuccessCount) 成功 · \(snapshot.inflateFailureCount) 失败"))
             values.append(("重连", "\(snapshot.reconnectCount) 次"))
@@ -38,6 +40,14 @@ struct LiveDanmakuDiagnosticsHUD: View {
                     .foregroundStyle(.white.opacity(0.58))
                     .lineLimit(1)
                     .minimumScaleFactor(0.72)
+            }
+
+            if isExpanded, let lastEndpointError = snapshot.lastEndpointError {
+                Text("节点失败 \(lastEndpointError)")
+                    .font(.caption2)
+                    .foregroundStyle(.white.opacity(0.58))
+                    .lineLimit(2)
+                    .fixedSize(horizontal: false, vertical: true)
             }
         }
         .padding(10)

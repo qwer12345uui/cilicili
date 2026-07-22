@@ -4,6 +4,10 @@ private struct OpenVideoActionKey: EnvironmentKey {
     static let defaultValue: ((VideoItem) -> Void)? = nil
 }
 
+private struct OpenLiveRoomActionKey: EnvironmentKey {
+    static let defaultValue: ((LiveRoom) -> Void)? = nil
+}
+
 private struct PrewarmVideoRouteActionKey: EnvironmentKey {
     static let defaultValue: ((VideoItem) -> Void)? = nil
 }
@@ -20,6 +24,11 @@ extension EnvironmentValues {
     var openVideoAction: ((VideoItem) -> Void)? {
         get { self[OpenVideoActionKey.self] }
         set { self[OpenVideoActionKey.self] = newValue }
+    }
+
+    var openLiveRoomAction: ((LiveRoom) -> Void)? {
+        get { self[OpenLiveRoomActionKey.self] }
+        set { self[OpenLiveRoomActionKey.self] = newValue }
     }
 
     var prewarmVideoRouteAction: ((VideoItem) -> Void)? {

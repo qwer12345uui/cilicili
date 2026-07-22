@@ -63,55 +63,12 @@ extension VideoDetailViewModel {
               let preferredQuality = targetPlaybackPreferredQuality
         else { return data }
 
-        if libraryStore.videoStartupRequestSchedulingExperimentEnabled {
-            PlayerMetricsLog.record(
-                .qualitySupplement,
-                metricsID: detail.bvid,
-                title: detail.title,
-                message: "initialTargetDeferred preferred=\(preferredQuality)"
-            )
-            return data
-        }
-
-        do {
-            let supplemented = try await fetchPlayURLWithTimeout(
-                timeout: initialTargetQualitySupplementTimeoutNanoseconds
-            ) { [self] in
-                if detail.isPGCEpisode {
-                    return try await api.fetchPgcPlayURL(
-                        bvid: bvid,
-                        cid: cid,
-                        seasonID: detail.pgcSeasonID,
-                        epID: detail.pgcEpisodeID,
-                        preferredQuality: preferredQuality
-                    )
-                }
-                return try await api.fetchPlayURL(
-                    bvid: bvid,
-                    cid: cid,
-                    page: page,
-                    preferredQuality: preferredQuality,
-                    supplementsQualities: true,
-                    preferProgressiveFastStart: false
-                )
-            }
-            guard isCurrentPlaybackContext(bvid: bvid, cid: cid, page: page) else { return data }
-            guard !shouldRefetchForPreferredQuality(supplemented) else { return data }
-            PlayerMetricsLog.record(
-                .qualitySupplement,
-                metricsID: detail.bvid,
-                title: detail.title,
-                message: "initialTargetSupplement q\(data.highestPlayableQuality)->q\(supplemented.highestPlayableQuality) preferred=\(preferredQuality)"
-            )
-            return supplemented
-        } catch {
-            PlayerMetricsLog.record(
-                .qualitySupplement,
-                metricsID: detail.bvid,
-                title: detail.title,
-                message: "initialTargetSupplement failed preferred=\(preferredQuality) error=\(error.localizedDescription)"
-            )
-            return data
-        }
+        PlayerMetricsLog.record(
+            .qualitySupplement,
+            metricsID: detail.bvid,
+            title: detail.title,
+            message: "initialTargetDeferred preferred=\(preferredQuality)"
+        )
+        return data
     }
 }

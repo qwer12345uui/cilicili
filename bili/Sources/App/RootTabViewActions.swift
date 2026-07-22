@@ -21,7 +21,7 @@ extension RootTabView {
         didConsumeStartupLiveRoom = true
         selectedTab = .live
         DispatchQueue.main.async {
-            liveNavigationPath.append(Self.seedLiveRoom(roomID: startLiveRoomID))
+            openLiveRoom(Self.seedLiveRoom(roomID: startLiveRoomID))
         }
     }
 
@@ -89,6 +89,11 @@ extension RootTabView {
     }
 
     func openLiveRoomFromLink(_ room: LiveRoom) {
+        selectedTab = .live
+        openLiveRoom(room)
+    }
+
+    func openLiveRoom(_ room: LiveRoom) {
         AppOrientationLock.restorePortrait()
         if bottomMode == .video {
             ActivePlaybackCoordinator.shared.stopActivePlayback()
@@ -98,10 +103,7 @@ extension RootTabView {
             return
         }
 
-        selectedTab = .live
-        DispatchQueue.main.async {
-            liveNavigationPath.append(room)
-        }
+        openOverlayRoute(room)
     }
 
     func openUserFromLink(_ owner: VideoOwner) {

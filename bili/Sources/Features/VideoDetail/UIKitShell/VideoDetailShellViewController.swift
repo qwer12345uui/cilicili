@@ -530,6 +530,7 @@ final class VideoDetailShellViewController: UIViewController {
             videoAspectRatio: videoAspectRatio,
             videoGravity: .resizeAspect,
             usesLandscapeChrome: usesLandscapeChrome,
+            usesPortraitFullscreen: false,
             isTransitioning: isSystemRotationTransitioning
         )
     }

@@ -38,7 +38,7 @@ extension VideoDetailViewModel {
             cid: cid,
             page: page,
             preferredQuality: preferredQuality,
-            supplementsQualities: !libraryStore.videoStartupRequestSchedulingExperimentEnabled
+            supplementsQualities: sessionStore.isLoggedIn
         )
     }
 

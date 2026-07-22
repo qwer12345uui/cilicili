@@ -5,38 +5,49 @@ struct BiliEmoteText: View {
     @Environment(\.appThemeTintColor) private var appTintColor
 
     let content: CommentContent?
+    let plainText: String?
+    let inlineEmotes: [String: BiliInlineEmote]
     let font: Font
     let textColor: Color
     let emoteSize: CGFloat
     let leadingName: String?
     let leadingNameColor: Color
     let showsLinkButtons: Bool
+    let fillsAvailableWidth: Bool
 
     @Environment(\.lineLimit) private var lineLimit
     @Environment(\.openAppURLAction) private var openAppURL
 
     init(
         content: CommentContent?,
+        plainText: String? = nil,
+        inlineEmotes: [String: BiliInlineEmote] = [:],
         font: Font = .subheadline,
         textColor: Color = .primary,
         emoteSize: CGFloat = 22,
         leadingName: String? = nil,
         leadingNameColor: Color = .pink,
-        showsLinkButtons: Bool = true
+        showsLinkButtons: Bool = true,
+        fillsAvailableWidth: Bool = true
     ) {
         self.content = content
+        self.plainText = plainText
+        self.inlineEmotes = inlineEmotes
         self.font = font
         self.textColor = textColor
         self.emoteSize = emoteSize
         self.leadingName = leadingName
         self.leadingNameColor = leadingNameColor
         self.showsLinkButtons = showsLinkButtons
+        self.fillsAvailableWidth = fillsAvailableWidth
     }
 
     var body: some View {
         BiliAttributedEmoteLabel(
             input: BiliEmoteRenderInput(
                 content: content,
+                inlineEmotes: inlineEmotes,
+                plainText: plainText,
                 baseFont: resolvedUIFont,
                 textColor: UIColor(textColor),
                 accentColor: UIColor(appTintColor),
@@ -49,7 +60,7 @@ struct BiliEmoteText: View {
                 openAppURL?(url)
             }
         )
-        .frame(maxWidth: .infinity, alignment: .leading)
+        .frame(maxWidth: fillsAvailableWidth ? .infinity : nil, alignment: .leading)
     }
 
     private var resolvedUIFont: UIFont {
@@ -84,6 +95,7 @@ struct BiliLinkedText: View {
         BiliAttributedEmoteLabel(
             input: BiliEmoteRenderInput(
                 content: nil,
+                inlineEmotes: [:],
                 plainText: text,
                 baseFont: font,
                 textColor: UIColor(textColor),
@@ -504,6 +516,7 @@ private final class BiliEmoteRenderCacheEntry {
 
 private struct BiliEmoteRenderInput {
     let content: CommentContent?
+    let inlineEmotes: [String: BiliInlineEmote]
     let plainText: String?
     let baseFont: UIFont
     let textColor: UIColor
@@ -515,6 +528,7 @@ private struct BiliEmoteRenderInput {
 
     init(
         content: CommentContent?,
+        inlineEmotes: [String: BiliInlineEmote],
         plainText: String? = nil,
         baseFont: UIFont,
         textColor: UIColor,
@@ -525,6 +539,7 @@ private struct BiliEmoteRenderInput {
         lineLimit: Int?
     ) {
         self.content = content
+        self.inlineEmotes = inlineEmotes
         self.plainText = plainText
         self.baseFont = baseFont
         self.textColor = textColor
@@ -545,8 +560,12 @@ private struct BiliEmoteRenderInput {
     }
 
     var cacheKey: String {
-        let emoteKey = (content?.emotes ?? [:])
+        let commentEmoteKey = (content?.emotes ?? [:])
             .map { "\($0.key)=\($0.value.displayURL ?? "")" }
+            .sorted()
+            .joined(separator: "|")
+        let inlineEmoteKey = inlineEmotes
+            .map { "\($0.key)=\($0.value.displayURL ?? ""):\($0.value.width ?? 0)x\($0.value.height ?? 0)" }
             .sorted()
             .joined(separator: "|")
         let mentionKey = mentions
@@ -555,7 +574,8 @@ private struct BiliEmoteRenderInput {
             .joined(separator: "|")
         return [
             message,
-            emoteKey,
+            commentEmoteKey,
+            inlineEmoteKey,
             mentionKey,
             leadingName ?? "",
             "\(baseFont.pointSize)",
@@ -574,8 +594,13 @@ private struct BiliEmoteRenderInput {
             result.append(attributedText("\(leadingName)：", color: leadingNameColor, font: emphasisFont))
         }
 
-        for span in styledSpans(message.isEmpty ? " " : message) {
-            append(span.text, role: span.role, to: result, missingImageURLs: &missingImageURLs)
+        let message = message.isEmpty ? " " : message
+        if let emote = inlineEmotes[message] {
+            result.append(emoteAttachment(for: message, emote: emote, missingImageURLs: &missingImageURLs))
+        } else {
+            for span in styledSpans(message) {
+                append(span.text, role: span.role, to: result, missingImageURLs: &missingImageURLs)
+            }
         }
 
         result.addAttribute(.paragraphStyle, value: paragraphStyle, range: NSRange(location: 0, length: result.length))
@@ -617,22 +642,63 @@ private struct BiliEmoteRenderInput {
 
         var cursor = text.startIndex
         while cursor < text.endIndex {
-            guard let open = text[cursor...].firstIndex(of: "["),
-                  let close = text[open...].firstIndex(of: "]")
+            guard let tokenRange = nextEmoteTokenRange(in: text, from: cursor)
             else {
                 result.append(attributedText(String(text[cursor...]), role: role))
                 break
             }
 
-            result.append(attributedText(String(text[cursor..<open]), role: role))
+            result.append(attributedText(String(text[cursor..<tokenRange.lowerBound]), role: role))
 
-            let token = String(text[open...close])
-            if let emote = content?.emote(for: token) {
+            let token = String(text[tokenRange])
+            if let emote = emote(for: token) {
                 result.append(emoteAttachment(for: token, emote: emote, missingImageURLs: &missingImageURLs))
             } else {
                 result.append(attributedText(token, role: role))
             }
-            cursor = text.index(after: close)
+            cursor = tokenRange.upperBound
+        }
+    }
+
+    private func nextEmoteTokenRange(
+        in text: String,
+        from start: String.Index
+    ) -> Range<String.Index>? {
+        let bracketTokenRange: Range<String.Index>? = {
+            guard let open = text[start...].firstIndex(of: "["),
+                  let close = text[open...].firstIndex(of: "]")
+            else { return nil }
+            return open..<text.index(after: close)
+        }()
+
+        let inlineTokenRange = inlineEmotes.keys
+            .filter { !$0.isEmpty }
+            .compactMap { token in
+                text.range(of: token, options: .literal, range: start..<text.endIndex)
+            }
+            .min { lhs, rhs in
+                if lhs.lowerBound == rhs.lowerBound {
+                    return text.distance(from: lhs.lowerBound, to: lhs.upperBound)
+                        > text.distance(from: rhs.lowerBound, to: rhs.upperBound)
+                }
+                return lhs.lowerBound < rhs.lowerBound
+            }
+
+        switch (bracketTokenRange, inlineTokenRange) {
+        case let (bracket?, inline?):
+            if bracket.lowerBound == inline.lowerBound {
+                return text.distance(from: bracket.lowerBound, to: bracket.upperBound)
+                    >= text.distance(from: inline.lowerBound, to: inline.upperBound)
+                    ? bracket
+                    : inline
+            }
+            return bracket.lowerBound < inline.lowerBound ? bracket : inline
+        case let (bracket?, nil):
+            return bracket
+        case let (nil, inline?):
+            return inline
+        case (nil, nil):
+            return nil
         }
     }
 
@@ -657,7 +723,7 @@ private struct BiliEmoteRenderInput {
 
     private func emoteAttachment(
         for token: String,
-        emote: CommentEmote,
+        emote: BiliInlineEmote,
         missingImageURLs: inout [URL]
     ) -> NSAttributedString {
         guard let urlString = emote.displayURL, let url = URL(string: urlString) else {
@@ -671,13 +737,32 @@ private struct BiliEmoteRenderInput {
             attachment.image = BiliEmoteImageStore.shared.placeholderImage(size: emoteSize)
             missingImageURLs.append(url)
         }
+        let aspectRatio = CGFloat(
+            max(emote.width ?? Double(emoteSize), 1) / max(emote.height ?? Double(emoteSize), 1)
+        )
+        let attachmentWidth = min(max(emoteSize * aspectRatio, emoteSize * 0.75), emoteSize * 4)
         attachment.bounds = CGRect(
             x: 0,
             y: (baseFont.capHeight - emoteSize) / 2,
-            width: emoteSize,
+            width: attachmentWidth,
             height: emoteSize
         )
         return NSAttributedString(attachment: attachment)
+    }
+
+    private func emote(for token: String) -> BiliInlineEmote? {
+        if let inlineEmote = inlineEmotes[token] {
+            return inlineEmote
+        }
+        guard let commentEmote = content?.emote(for: token),
+              let url = commentEmote.displayURL
+        else { return nil }
+        return BiliInlineEmote(
+            token: token,
+            url: url,
+            width: commentEmote.width.map(Double.init),
+            height: commentEmote.height.map(Double.init)
+        )
     }
 
     private func font(for role: BiliEmoteTextRole) -> UIFont {

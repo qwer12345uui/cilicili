@@ -14,6 +14,7 @@ protocol PlayerSurfaceHosting: AnyObject {
     func setVideoGravity(_ gravity: AVLayerVideoGravity)
     func setVideoAspectRatio(_ aspectRatio: CGFloat)
     func setLandscape(_ landscape: Bool)
+    func setPortraitFullscreen(_ active: Bool)
     func setBareSurfaceTransitionActive(_ active: Bool, retainsChromeTree: Bool)
     func prewarmRotationChrome()
     func cancelRotationChromePrewarm()
@@ -26,5 +27,6 @@ struct PlayerSurfaceLayout {
     var videoAspectRatio: CGFloat
     var videoGravity: AVLayerVideoGravity
     var usesLandscapeChrome: Bool
+    var usesPortraitFullscreen: Bool
     var isTransitioning: Bool
 }

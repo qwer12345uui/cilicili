@@ -1,6 +1,10 @@
 import Foundation
 
 extension LiveRoomViewModel {
+    func showLiveDanmakuSettings() {
+        isShowingLiveDanmakuSettings = true
+    }
+
     func toggleDanmaku() {
         isDanmakuEnabled.toggle()
         libraryStore.setDanmakuEnabled(isDanmakuEnabled)
@@ -12,12 +16,25 @@ extension LiveRoomViewModel {
         }
     }
 
+    func updateDanmakuSettings(_ settings: DanmakuSettings) {
+        let normalizedSettings = settings.normalized
+        guard danmakuSettings != normalizedSettings else { return }
+        libraryStore.setDanmakuSettings(normalizedSettings)
+    }
+
     func toggleLiveDanmakuDiagnostics() {
         isLiveDanmakuDiagnosticsEnabled.toggle()
         refreshLiveDanmakuDiagnosticsRenderState(forcePublish: true)
         if isLiveDanmakuDiagnosticsEnabled {
             resumeLiveDanmakuIfNeeded()
         }
+    }
+
+    func setDanmakuHidesInPortrait(_ hidesInPortrait: Bool) {
+        guard danmakuSettings.hidesInPortrait != hidesInPortrait else { return }
+        var settings = danmakuSettings
+        settings.hidesInPortrait = hidesInPortrait
+        libraryStore.setDanmakuSettings(settings)
     }
 
     func suspendLiveDanmaku() {
@@ -43,6 +60,8 @@ extension LiveRoomViewModel {
 
     func startLiveDanmakuIfNeeded(roomID: Int) {
         guard isDanmakuEnabled, liveDanmakuService == nil else { return }
+        liveDanmakuRenderStore.updateConnectionState(phase: .fetchingConfig, error: nil)
+        prefetchLiveDanmakuHistoryIfNeeded(roomID: roomID)
         liveDanmakuStartDate = Date()
         liveDanmakuRenderStore.updatePlaybackTime(0)
         let service = LiveDanmakuService(
@@ -63,52 +82,59 @@ extension LiveRoomViewModel {
     func scheduleLiveDanmakuStart(
         roomID: Int,
         playerViewModel: PlayerStateViewModel,
+        candidate: LiveStreamURLCandidate,
         generation: Int
     ) {
-        liveDanmakuStartupTask?.cancel()
         guard isDanmakuEnabled else { return }
-        liveDanmakuStartupTask = Task { [weak self, weak playerViewModel] in
-            let pollIntervalNanoseconds: UInt64 = 150_000_000
-            let maximumWaitNanoseconds: UInt64 = 1_800_000_000
-            var waitedNanoseconds: UInt64 = 0
-
-            while !Task.isCancelled, waitedNanoseconds < maximumWaitNanoseconds {
-                let shouldStart = await MainActor.run { () -> Bool in
-                    guard let self,
-                          let playerViewModel,
-                          self.isCurrentLoad(generation),
-                          self.playerViewModel === playerViewModel
-                    else { return false }
-                    return playerViewModel.hasPresentedPlayback || playerViewModel.errorMessage != nil
-                }
-                if shouldStart { break }
-                try? await Task.sleep(nanoseconds: pollIntervalNanoseconds)
-                waitedNanoseconds += pollIntervalNanoseconds
-            }
-
-            guard !Task.isCancelled else { return }
-            await MainActor.run {
+        let defersForTransportStream = LiveStartupAuxiliaryPolicy.defersUntilFirstFrame(
+            streamFormat: candidate.formatName
+        )
+        if defersForTransportStream {
+            let existingFirstFrameHandler = playerViewModel.onFirstFramePresented
+            playerViewModel.onFirstFramePresented = { [weak self, weak playerViewModel] in
+                existingFirstFrameHandler?()
                 guard let self,
                       let playerViewModel,
                       self.isCurrentLoad(generation),
                       self.playerViewModel === playerViewModel
                 else { return }
-                self.liveDanmakuStartupTask = nil
                 self.startLiveDanmakuIfNeeded(roomID: roomID)
             }
+            PlayerMetricsLog.record(
+                .network,
+                metricsID: "live-\(roomID)",
+                title: title,
+                message: "liveDanmakuStartup=deferredTSUntilFirstFrame"
+            )
+            if playerViewModel.hasPresentedPlayback {
+                startLiveDanmakuIfNeeded(roomID: roomID)
+            }
+            return
         }
+        PlayerMetricsLog.record(
+            .network,
+            metricsID: "live-\(roomID)",
+            title: title,
+            message: "liveDanmakuStartup=parallelBeforeFirstFrame"
+        )
+        guard isCurrentLoad(generation), self.playerViewModel === playerViewModel else { return }
+        startLiveDanmakuIfNeeded(roomID: roomID)
     }
 
     func stopLiveDanmaku(clearItems: Bool) {
-        liveDanmakuStartupTask?.cancel()
-        liveDanmakuStartupTask = nil
+        liveDanmakuRenderStore.flushPendingLiveItems()
         liveDanmakuService?.stop()
         liveDanmakuService = nil
         liveDanmakuClockTask?.cancel()
         liveDanmakuClockTask = nil
+        liveDanmakuHistoryTask?.cancel()
+        liveDanmakuHistoryTask = nil
         liveDanmakuStartDate = nil
         liveDanmakuRenderStore.updatePlaybackTime(0)
+        liveDanmakuRenderStore.updateConnectionState(phase: .stopped, error: nil)
+        liveDanmakuRenderStore.resetHistoryState()
         if clearItems {
+            liveDanmakuHistoryLoadedRoomID = nil
             liveDanmakuRenderStore.clearItems()
         }
         refreshLiveDanmakuDiagnosticsRenderState()
@@ -139,8 +165,61 @@ extension LiveRoomViewModel {
         refreshLiveDanmakuDiagnosticsRenderState()
     }
 
+    func prefetchLiveDanmakuHistoryIfNeeded(roomID: Int) {
+        guard liveDanmakuHistoryLoadedRoomID != roomID, liveDanmakuHistoryTask == nil else { return }
+        liveDanmakuRenderStore.updateHistoryLoading(true)
+        let api = self.api
+        liveDanmakuHistoryTask = Task { [weak self, api] in
+            do {
+                let result = try await api.fetchLiveDanmakuHistory(roomID: roomID)
+                guard !Task.isCancelled, let self else { return }
+                self.liveDanmakuHistoryTask = nil
+                self.liveDanmakuRenderStore.updateHistoryLoading(false)
+                self.appendLiveDanmakuHistory(result, roomID: roomID)
+                self.liveDanmakuHistoryLoadedRoomID = roomID
+                self.liveDanmakuDiagnosticsDraft.apply(.historyLoaded(count: result.count))
+                self.refreshLiveDanmakuDiagnosticsRenderState()
+            } catch {
+                guard !Task.isCancelled, let self else { return }
+                self.liveDanmakuHistoryTask = nil
+                self.liveDanmakuRenderStore.recordHistoryFailure(error.localizedDescription)
+                self.liveDanmakuDiagnosticsDraft.apply(
+                    .historyFailed(error: error.localizedDescription)
+                )
+                self.refreshLiveDanmakuDiagnosticsRenderState()
+            }
+        }
+    }
+
+    func appendLiveDanmakuHistory(
+        _ messages: [LiveDanmakuHistoryMessage],
+        roomID: Int
+    ) {
+        guard isDanmakuEnabled else { return }
+        let items = messages.enumerated().compactMap { index, message -> DanmakuItem? in
+            let text = message.text.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !text.isEmpty else { return nil }
+            let senderName = message.nickname?.trimmingCharacters(in: .whitespacesAndNewlines)
+            let timeline = message.timeline?.trimmingCharacters(in: .whitespacesAndNewlines) ?? "unknown"
+            return DanmakuItem(
+                id: "live-history-\(roomID)-\(index)-\(timeline)",
+                time: 0,
+                mode: 1,
+                fontSize: 24,
+                color: 0xE5E7EB,
+                text: text,
+                senderName: senderName?.isEmpty == false ? senderName : nil
+            )
+        }
+        liveDanmakuRenderStore.prependHistoryItems(items, retainingLimit: 240)
+    }
+
     func handleLiveDanmakuDiagnosticEvent(_ event: LiveDanmakuDiagnosticEvent) {
         liveDanmakuDiagnosticsDraft.apply(event)
+        liveDanmakuRenderStore.updateConnectionState(
+            phase: liveDanmakuDiagnosticsDraft.phase,
+            error: liveDanmakuDiagnosticsDraft.lastError
+        )
         applyCurrentRenderStateToDiagnosticsDraft()
         publishLiveDanmakuDiagnosticsIfNeeded()
     }

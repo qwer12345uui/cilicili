@@ -41,6 +41,17 @@ extension DanmakuSettingsSheet {
         )
     }
 
+    var hidesDanmakuInPortraitBinding: Binding<Bool> {
+        Binding(
+            get: { store.danmakuSettings.hidesInPortrait },
+            set: { newValue in
+                var settings = store.danmakuSettings
+                settings.hidesInPortrait = newValue
+                updateDanmakuSettings(settings)
+            }
+        )
+    }
+
     var fontWeightBinding: Binding<DanmakuFontWeightOption> {
         Binding(
             get: { store.danmakuSettings.fontWeight },

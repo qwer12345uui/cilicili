@@ -22,6 +22,7 @@ struct DynamicTopUploaderStripItem: Identifiable, Hashable {
 struct FollowedLiveStrip: View {
     let items: [DynamicTopUploaderStripItem]
     let isLoading: Bool
+    @Environment(\.openLiveRoomAction) private var openLiveRoom
 
     var body: some View {
         if !items.isEmpty || isLoading {
@@ -56,10 +57,19 @@ struct FollowedLiveStrip: View {
     @ViewBuilder
     private func stripItemLink(_ item: DynamicTopUploaderStripItem) -> some View {
         if let liveRoom = item.liveRoom {
-            NavigationLink(value: liveRoom) {
-                FollowedLiveAvatar(item: item)
+            if let openLiveRoom {
+                Button {
+                    openLiveRoom(liveRoom)
+                } label: {
+                    FollowedLiveAvatar(item: item)
+                }
+                .buttonStyle(.plain)
+            } else {
+                NavigationLink(value: liveRoom) {
+                    FollowedLiveAvatar(item: item)
+                }
+                .buttonStyle(.plain)
             }
-            .buttonStyle(.plain)
         } else if item.owner.mid > 0 {
             NavigationLink(value: item.owner) {
                 FollowedLiveAvatar(item: item)

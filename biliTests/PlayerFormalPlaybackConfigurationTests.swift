@@ -7,21 +7,26 @@ final class PlayerFormalPlaybackConfigurationTests: XCTestCase {
         XCTAssertFalse(BiliPlayerControlLayout.live.showsPlaybackToggle)
         XCTAssertFalse(BiliPlayerControlLayout.live.showsTimeLabel)
 
+        XCTAssertFalse(BiliPlayerControlLayout.livePiliPod.showsProgress)
+        XCTAssertTrue(BiliPlayerControlLayout.livePiliPod.showsPlaybackToggle)
+        XCTAssertFalse(BiliPlayerControlLayout.livePiliPod.showsTimeLabel)
+
         XCTAssertTrue(BiliPlayerControlLayout.standard.showsProgress)
         XCTAssertTrue(BiliPlayerControlLayout.standard.showsPlaybackToggle)
         XCTAssertTrue(BiliPlayerControlLayout.standard.showsTimeLabel)
     }
 
     @MainActor
-    func testPlayerSettingsMigratesLegacyAV1CodecPreferenceToAuto() {
+    func testPlayerSettingsRestoresLegacyAV1CodecPreferenceOnlyWhenSupported() {
         let defaults = makeUserDefaults()
         defaults.set("forceAV1", forKey: VideoCodecPreference.storageKey)
 
         let settings = PlayerSettings(userDefaults: defaults)
         settings.reload()
 
-        XCTAssertEqual(settings.videoCodecPreference, .auto)
-        XCTAssertEqual(defaults.string(forKey: VideoCodecPreference.storageKey), VideoCodecPreference.auto.rawValue)
+        let expectedPreference: VideoCodecPreference = PlaybackCodecPolicy.canDecodeAV1 ? .preferAV1 : .auto
+        XCTAssertEqual(settings.videoCodecPreference, expectedPreference)
+        XCTAssertEqual(defaults.string(forKey: VideoCodecPreference.storageKey), expectedPreference.rawValue)
     }
 
     @MainActor
@@ -76,6 +81,27 @@ final class PlayerFormalPlaybackConfigurationTests: XCTestCase {
     }
 
     @MainActor
+    func testLibraryStoreRemovesRetiredPlaybackAndLiveExperimentPreferences() {
+        let defaults = makeUserDefaults()
+        let retiredKeys = [
+            "cc.bili.playback.startupRequestSchedulingExperimentEnabled.v1",
+            "cc.bili.live.videoDetailLayoutExperimentEnabled.v1",
+            "cc.bili.live.piliPodLayoutExperimentEnabled.v1",
+            "cc.bili.live.parallelStartupExperimentEnabled.v1",
+            "cc.bili.live.adaptiveCDNStartupExperimentEnabled.v1",
+            "cc.bili.live.slowStartupRouteSwitchExperimentEnabled.v1",
+            "cc.bili.live.hlsFastStartExperimentEnabled.v1",
+            "cc.bili.live.danmakuRenderBatchingExperimentEnabled.v1",
+            "cc.bili.live.rotationSurfaceAlignmentExperimentEnabled.v1",
+        ]
+        retiredKeys.forEach { defaults.set(true, forKey: $0) }
+
+        _ = LibraryStore(userDefaults: defaults)
+
+        retiredKeys.forEach { XCTAssertNil(defaults.object(forKey: $0)) }
+    }
+
+    @MainActor
     func testLibraryStorePersistsFastScrollImageLoadSuppressionExperiment() {
         let defaults = makeUserDefaults()
         let store = LibraryStore(userDefaults: defaults)
@@ -111,19 +137,6 @@ final class PlayerFormalPlaybackConfigurationTests: XCTestCase {
 
         XCTAssertFalse(
             LibraryStore(userDefaults: defaults).remoteImageDiagnosticsEnabled
-        )
-    }
-
-    @MainActor
-    func testLibraryStorePersistsVideoStartupRequestSchedulingExperiment() {
-        let defaults = makeUserDefaults()
-        let store = LibraryStore(userDefaults: defaults)
-
-        XCTAssertFalse(store.videoStartupRequestSchedulingExperimentEnabled)
-        store.setVideoStartupRequestSchedulingExperimentEnabled(true)
-
-        XCTAssertTrue(
-            LibraryStore(userDefaults: defaults).videoStartupRequestSchedulingExperimentEnabled
         )
     }
 

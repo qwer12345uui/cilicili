@@ -30,6 +30,7 @@ struct BiliPlayerViewContent: View {
             visibilityActions: renderState.visibilityActions,
             speedBoostActions: renderState.speedBoostActions,
             viewModel: context.viewModel,
+            allowsDoubleTapPlaybackToggle: context.configuration.allowsDoubleTapPlaybackToggle,
             seekPreviewModel: context.seekPreviewModel,
             seekPreviewAPI: context.seekPreviewAPI,
             seekPreviewContext: context.seekPreviewContext,
@@ -94,9 +95,12 @@ struct BiliPlayerViewContent: View {
             playbackControlsOpacity: context.playbackControlsVisibility.opacity,
             playbackControlsAllowsHitTesting: context.playbackControlsVisibility.acceptsHitTesting,
             topLeadingControlsAccessory: context.configuration.topLeadingControlsAccessory,
-            topTrailingControlsAccessory: AnyView(moreControlsButton),
+            topTrailingControlsAccessory: context.configuration.showsMoreControls
+                ? AnyView(moreControlsButton)
+                : nil,
             isFullscreenActive: context.configuration.isFullscreenActive,
             controlsBottomLift: context.configuration.controlsBottomLift,
+            controlsHorizontalInset: context.configuration.controlsHorizontalInset,
             contentInsets: EdgeInsets(),
             errorMessage: context.surfaceState.errorMessage
         )

@@ -1711,16 +1711,44 @@ nonisolated struct PlayURLData: Decodable, Sendable {
         }
     }
 
+    nonisolated var advertisedQualities: Set<Int> {
+        Set(
+            (acceptQuality ?? [])
+                + (supportFormats ?? []).compactMap(\.quality)
+                + (dash?.video ?? []).compactMap(\.id)
+                + [quality].compactMap { $0 }
+        )
+    }
+
+    nonisolated var hasAdvertisedQualityMissingMediaStream: Bool {
+        let advertised = advertisedQualities
+        guard !advertised.isEmpty else { return false }
+
+        let streamedQualities = mediaStreamQualities
+        return advertised.contains { !streamedQualities.contains($0) }
+    }
+
+    nonisolated func preferredQualityForMissingStreamSupplement(fallback: Int?) -> Int? {
+        let missingQualities = advertisedQualities.subtracting(mediaStreamQualities)
+        if let fallback, missingQualities.contains(fallback) {
+            return fallback
+        }
+        return missingQualities.max() ?? fallback
+    }
+
+    nonisolated private var mediaStreamQualities: Set<Int> {
+        var streamedQualities = Set((dash?.video ?? []).compactMap(\.id))
+        if durl?.contains(where: { $0.playURL != nil }) == true,
+           let quality {
+            streamedQualities.insert(quality)
+        }
+        return streamedQualities
+    }
+
     nonisolated func shouldRefetchForPreferredQuality(_ quality: Int) -> Bool {
         let playableVariants = playVariants.filter(\.isPlayable)
         guard !playableVariants.isEmpty else { return false }
         guard !hasPlayableQuality(quality) else { return false }
-        let advertisedQualities = Set(
-            (acceptQuality ?? [])
-                + (supportFormats ?? []).compactMap(\.quality)
-                + (dash?.video ?? []).compactMap(\.id)
-                + [self.quality].compactMap { $0 }
-        )
         return advertisedQualities.isEmpty || advertisedQualities.contains(quality)
     }
 
@@ -2551,6 +2579,10 @@ nonisolated struct DASHStream: Decodable, Hashable, Sendable {
     }
 
     nonisolated var isHardwareDecodingCompatibleVideo: Bool {
+        if isAV1VideoCodec {
+            return PlaybackCodecPolicy.canDecodeAV1
+        }
+
         if isHEVCVideoCodec {
             return PlaybackCodecPolicy.canDecodeHEVC
         }
@@ -7122,6 +7154,9 @@ nonisolated struct LiveStreamFetchResult: Equatable, Hashable {
 }
 
 nonisolated struct LiveStreamQuality: Identifiable, Decodable, Equatable, Hashable {
+    // Bilibili Live uses qn 400 for its 1080P blue-ray rendition.
+    static let defaultPreferredQN = 400
+
     let qn: Int
     let description: String?
 
@@ -7247,6 +7282,59 @@ nonisolated struct LiveDanmakuConnectionInfoData: Decodable, Sendable {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         token = container.decodeLossyStringIfPresent(forKey: .token)
         hostList = try container.decodeIfPresent([LiveDanmakuHost].self, forKey: .hostList) ?? []
+    }
+}
+
+nonisolated struct LiveDanmakuHistoryData: Decodable, Sendable {
+    let admin: [LiveDanmakuHistoryMessage]
+    let room: [LiveDanmakuHistoryMessage]
+
+    enum CodingKeys: String, CodingKey {
+        case admin
+        case room
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        admin = try container.decodeIfPresent([LiveDanmakuHistoryMessage].self, forKey: .admin) ?? []
+        room = try container.decodeIfPresent([LiveDanmakuHistoryMessage].self, forKey: .room) ?? []
+    }
+
+    var chronologicalMessages: [LiveDanmakuHistoryMessage] {
+        (admin + room)
+            .filter { !$0.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+            .sorted { ($0.timeline ?? "") < ($1.timeline ?? "") }
+    }
+}
+
+nonisolated struct LiveDanmakuHistoryMessage: Decodable, Hashable, Sendable {
+    let text: String
+    let nickname: String?
+    let timeline: String?
+
+    enum CodingKeys: String, CodingKey {
+        case text
+        case nickname
+        case uname
+        case userName = "user_name"
+        case username
+        case name
+        case timeline
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        text = container.decodeLossyStringIfPresent(forKey: .text) ?? ""
+        nickname = [
+            container.decodeLossyStringIfPresent(forKey: .nickname),
+            container.decodeLossyStringIfPresent(forKey: .uname),
+            container.decodeLossyStringIfPresent(forKey: .userName),
+            container.decodeLossyStringIfPresent(forKey: .username),
+            container.decodeLossyStringIfPresent(forKey: .name)
+        ]
+        .compactMap { $0?.trimmingCharacters(in: .whitespacesAndNewlines) }
+        .first(where: { !$0.isEmpty })
+        timeline = container.decodeLossyStringIfPresent(forKey: .timeline)
     }
 }
 

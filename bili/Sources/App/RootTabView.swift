@@ -58,6 +58,7 @@ struct RootTabView: View {
             }
         }
         .environment(\.openVideoAction, openVideo)
+        .environment(\.openLiveRoomAction, openLiveRoom)
         .environment(\.prewarmVideoRouteAction, beginPlaybackPreload)
         .environment(\.openPgcSeasonRouteAction, openPgcSeasonRoute)
         .environment(\.openVideoOwnerRouteAction, openVideoOwnerRoute)

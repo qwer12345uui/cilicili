@@ -2,9 +2,17 @@ import SwiftUI
 import UIKit
 
 extension View {
-    func hidesRootTabBarOnPush(restoreDelay: UInt64 = 0) -> some View {
+    func hidesRootTabBarOnPush(
+        restoreDelay: UInt64 = 0,
+        restoresAfterTransition: Bool = false
+    ) -> some View {
         toolbar(.hidden, for: .tabBar)
-            .background(NativeBottomBarOnPushHider(restoreDelay: restoreDelay))
+            .background(
+                NativeBottomBarOnPushHider(
+                    restoreDelay: restoreDelay,
+                    restoresAfterTransition: restoresAfterTransition
+                )
+            )
     }
 
     func keepsRootTabBarHiddenDuringPresentation() -> some View {
@@ -212,9 +220,13 @@ private struct NativeBottomBarVisibilityRestorer: UIViewControllerRepresentable 
 
 private struct NativeBottomBarOnPushHider: UIViewControllerRepresentable {
     let restoreDelay: UInt64
+    let restoresAfterTransition: Bool
 
     func makeUIViewController(context _: Context) -> Controller {
-        Controller(restoreDelay: restoreDelay)
+        Controller(
+            restoreDelay: restoreDelay,
+            restoresAfterTransition: restoresAfterTransition
+        )
     }
 
     func updateUIViewController(_ uiViewController: Controller, context _: Context) {
@@ -223,9 +235,11 @@ private struct NativeBottomBarOnPushHider: UIViewControllerRepresentable {
 
     final class Controller: UIViewController {
         private let restoreDelay: UInt64
+        private let restoresAfterTransition: Bool
 
-        init(restoreDelay: UInt64) {
+        init(restoreDelay: UInt64, restoresAfterTransition: Bool) {
             self.restoreDelay = restoreDelay
+            self.restoresAfterTransition = restoresAfterTransition
             super.init(nibName: nil, bundle: nil)
         }
 
@@ -344,6 +358,41 @@ private struct NativeBottomBarOnPushHider: UIViewControllerRepresentable {
             }
 
             let restoreDelay = self.restoreDelay
+            if restoresAfterTransition {
+                // UIKit may begin revealing a pushed controller's tab bar as
+                // soon as the pop transition starts. Keep it hidden for the
+                // entire live-room return transition, then restore it only
+                // after the destination has settled.
+                NativeBottomBarVisibilityCoordinator.hide(
+                    tabBarController: tabBarController,
+                    fallbackTabBar: fallbackTabBar,
+                    animated: false
+                )
+                coordinator.animate(alongsideTransition: { _ in
+                    NativeBottomBarVisibilityCoordinator.hide(
+                        tabBarController: tabBarController,
+                        fallbackTabBar: fallbackTabBar,
+                        animated: false
+                    )
+                }) { context in
+                    if context.isCancelled {
+                        NativeBottomBarVisibilityCoordinator.hide(
+                            tabBarController: tabBarController,
+                            fallbackTabBar: fallbackTabBar,
+                            animated: false
+                        )
+                    } else {
+                        NativeBottomBarVisibilityCoordinator.restore(
+                            tabBarController: tabBarController,
+                            fallbackTabBar: fallbackTabBar,
+                            animated: false,
+                            delay: restoreDelay
+                        )
+                    }
+                }
+                return
+            }
+
             coordinator.animate(alongsideTransition: { _ in
                 NativeBottomBarVisibilityCoordinator.restoreImmediately(
                     tabBarController: tabBarController,

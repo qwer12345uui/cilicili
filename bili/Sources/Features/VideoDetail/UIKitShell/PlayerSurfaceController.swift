@@ -106,6 +106,12 @@ final class PlayerSurfaceController {
                 || previousLayout!.isTransitioning) {
             host.setLandscape(layout.usesLandscapeChrome)
         }
+        if !layout.isTransitioning,
+           (previousLayout == nil
+                || previousLayout!.usesPortraitFullscreen != layout.usesPortraitFullscreen
+                || previousLayout!.isTransitioning) {
+            host.setPortraitFullscreen(layout.usesPortraitFullscreen)
+        }
         appliedLayout = layout
     }
 
@@ -119,6 +125,12 @@ final class PlayerSurfaceController {
         latestLayout?.usesLandscapeChrome = landscape
         appliedLayout?.usesLandscapeChrome = landscape
         host?.setLandscape(landscape)
+    }
+
+    func setPortraitFullscreen(_ active: Bool) {
+        latestLayout?.usesPortraitFullscreen = active
+        appliedLayout?.usesPortraitFullscreen = active
+        host?.setPortraitFullscreen(active)
     }
 
     func setBareSurfaceTransitionActive(_ active: Bool, retainsChromeTree: Bool) {

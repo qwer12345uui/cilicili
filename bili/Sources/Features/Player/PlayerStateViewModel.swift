@@ -348,11 +348,19 @@ final class PlayerStateViewModel: NSObject, ObservableObject {
     @Published private(set) var playbackPhase: PlayerPlaybackPhase = .idle
     @Published private(set) var recoveryAttemptCount = 0
     @Published private(set) var engineDiagnostics: PlayerEngineDiagnostics = .empty
+    @Published private(set) var videoPresentationSize: CGSize = .zero
     @Published private(set) var lastFailureReason: HLSBridgeFailureReason?
     @Published private(set) var isUserSeeking = false
     private(set) var surfaceLayoutGeneration = 0
     var isCurrentPlaybackSurfaceReady: Bool {
         isCurrentPlaybackSurfaceReadyForDisplay
+    }
+
+    var videoAspectRatio: CGFloat? {
+        guard videoPresentationSize.width > 0, videoPresentationSize.height > 0 else {
+            return nil
+        }
+        return videoPresentationSize.width / videoPresentationSize.height
     }
 
     private(set) var lastUserSeekAt: Date?
@@ -472,6 +480,8 @@ final class PlayerStateViewModel: NSObject, ObservableObject {
         referer: String,
         durationHint: TimeInterval? = nil,
         isLiveStream: Bool = false,
+        isLiveHLS: Bool = false,
+        liveHLSFormat: String? = nil,
         resumeTime: TimeInterval = 0,
         startupResumePolicy: PlayerStartupResumePolicy = .deferred,
         dynamicRange: BiliVideoDynamicRange = .sdr,
@@ -497,6 +507,8 @@ final class PlayerStateViewModel: NSObject, ObservableObject {
             title: title,
             durationHint: durationHint,
             isLiveStream: isLiveStream,
+            isLiveHLS: isLiveHLS,
+            liveHLSFormat: liveHLSFormat,
             resumeTime: resumeTime,
             dynamicRange: dynamicRange,
             cdnPreference: cdnPreference
@@ -1917,6 +1929,39 @@ final class PlayerStateViewModel: NSObject, ObservableObject {
             play()
             return wantsAutoplay && errorMessage == nil
         }
+    }
+
+    @discardableResult
+    func jumpToLiveEdge() -> Bool {
+        guard !isTerminated, isLiveStream else { return false }
+        guard engine.hasMedia else {
+            play()
+            return false
+        }
+
+        restoreAudioAfterCancelledNavigation()
+        ActivePlaybackCoordinator.shared.activate(self)
+        wantsAutoplay = true
+        errorMessage = nil
+        lastFailureReason = nil
+        engine.play()
+
+        guard let time = engine.seekToLiveEdge() else {
+            refreshPlaybackState()
+            return false
+        }
+
+        updatePlaybackTime(time, force: true, countsAsNaturalPlayback: false)
+        PlayerMetricsLog.record(
+            .seek,
+            metricsID: metricsID,
+            title: title,
+            message: "liveEdge target=\(String(format: "%.2fs", time))"
+        )
+        invalidatePictureInPicturePlaybackState()
+        syncRemotePlaybackControls()
+        rescheduleTimeObserverIfNeeded(force: true)
+        return true
     }
 
     func seek(to progress: Double) {
@@ -3462,6 +3507,7 @@ final class PlayerStateViewModel: NSObject, ObservableObject {
 
     private func handleEngineFirstFrame(_ time: TimeInterval) {
         guard !isTerminated else { return }
+        syncEnginePresentationSize()
         guard surfaceView != nil else {
             pendingEngineFirstFrameTime = max(time, 0)
             return
@@ -4598,12 +4644,19 @@ final class PlayerStateViewModel: NSObject, ObservableObject {
     }
 
     private func syncEngineDiagnostics(force: Bool = false) {
+        syncEnginePresentationSize()
         if force {
             lastPeriodicEngineDiagnosticsSyncTime = CACurrentMediaTime()
         }
         let diagnostics = engine.diagnostics
         guard force || diagnostics != engineDiagnostics else { return }
         engineDiagnostics = diagnostics
+    }
+
+    private func syncEnginePresentationSize() {
+        let nextSize = engine.presentationSize
+        guard nextSize != videoPresentationSize else { return }
+        videoPresentationSize = nextSize
     }
 
     private func syncEngineDiagnosticsForPeriodicRefresh() {

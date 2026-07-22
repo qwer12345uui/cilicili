@@ -27,11 +27,13 @@ enum VideoDetailPlaybackQualityMenuBuilder {
         playVariants: [PlayVariant],
         selectedPlayVariant: PlayVariant?,
         pendingPlayVariantID: String?,
+        isSupplementingPlayQualities: Bool = false,
         isSwitchingPlayQuality: Bool
     ) -> [VideoDetailPlaybackQualityMenuItem] {
         compactQualityVariants(from: playVariants).map { variant in
             let systemImage: String
-            if isPending(variant, pendingPlayVariantID: pendingPlayVariantID, playVariants: playVariants) {
+            let isResolvingAvailability = isSupplementingPlayQualities && !variant.isPlayable
+            if isResolvingAvailability || isPending(variant, pendingPlayVariantID: pendingPlayVariantID, playVariants: playVariants) {
                 systemImage = "arrow.triangle.2.circlepath"
             } else if selectedPlayVariant?.quality == variant.quality {
                 systemImage = "checkmark"
@@ -40,8 +42,10 @@ enum VideoDetailPlaybackQualityMenuBuilder {
             }
             return VideoDetailPlaybackQualityMenuItem(
                 variant: variant,
-                title: variant.qualityMenuTitle,
-                subtitle: routeSubtitle(for: variant, selectedPlayVariant: selectedPlayVariant),
+                title: isResolvingAvailability ? variant.title : variant.qualityMenuTitle,
+                subtitle: isResolvingAvailability
+                    ? "正在校验可用清晰度"
+                    : routeSubtitle(for: variant, selectedPlayVariant: selectedPlayVariant),
                 systemImage: systemImage,
                 isDisabled: !variant.isPlayable || isSwitchingPlayQuality
             )

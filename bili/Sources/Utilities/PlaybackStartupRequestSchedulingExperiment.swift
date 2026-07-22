@@ -1,8 +1,6 @@
 import Foundation
 
-nonisolated enum PlaybackStartupRequestSchedulingExperiment {
-    static let storageKey = "cc.bili.playback.startupRequestSchedulingExperimentEnabled.v1"
-    static let defaultIsEnabled = false
+nonisolated enum PlaybackStartupRequestSchedulingPolicy {
     static let staggeredFallbackDelayNanoseconds: UInt64 = 180_000_000
     static let wbiFailureThreshold = 2
     static let wbiFailureWindow: TimeInterval = 20
@@ -61,9 +59,9 @@ actor StartupWBIHealthStore {
     private var suppressionReason: String?
 
     init(
-        failureThreshold: Int = PlaybackStartupRequestSchedulingExperiment.wbiFailureThreshold,
-        failureWindow: TimeInterval = PlaybackStartupRequestSchedulingExperiment.wbiFailureWindow,
-        suppressionDuration: TimeInterval = PlaybackStartupRequestSchedulingExperiment.wbiSuppressionDuration
+        failureThreshold: Int = PlaybackStartupRequestSchedulingPolicy.wbiFailureThreshold,
+        failureWindow: TimeInterval = PlaybackStartupRequestSchedulingPolicy.wbiFailureWindow,
+        suppressionDuration: TimeInterval = PlaybackStartupRequestSchedulingPolicy.wbiSuppressionDuration
     ) {
         self.failureThreshold = max(failureThreshold, 1)
         self.failureWindow = max(failureWindow, 0)
@@ -142,10 +140,10 @@ nonisolated struct StartupPlayURLSchedulingDecision: Equatable, Sendable {
 
     var diagnosticMessage: String {
         guard let primaryRoute, let fallbackRoute else {
-            return "startupScheduler=experiment mode=race learning"
+            return "startupScheduler=adaptive mode=race learning"
         }
-        let delayMilliseconds = PlaybackStartupRequestSchedulingExperiment.staggeredFallbackDelayNanoseconds / 1_000_000
-        return "startupScheduler=experiment mode=staggered primary=\(primaryRoute.rawValue) fallback=\(fallbackRoute.rawValue) delay=\(delayMilliseconds)ms"
+        let delayMilliseconds = PlaybackStartupRequestSchedulingPolicy.staggeredFallbackDelayNanoseconds / 1_000_000
+        return "startupScheduler=adaptive mode=staggered primary=\(primaryRoute.rawValue) fallback=\(fallbackRoute.rawValue) delay=\(delayMilliseconds)ms"
     }
 }
 

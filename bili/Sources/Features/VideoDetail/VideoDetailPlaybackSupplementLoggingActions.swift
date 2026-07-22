@@ -2,12 +2,11 @@ import Foundation
 
 extension VideoDetailViewModel {
     func recordSupplementalPlayURLLoadStarted(preferredQuality: Int?) {
-        let mode = libraryStore.videoStartupRequestSchedulingExperimentEnabled ? "targetOnly" : "full"
         PlayerMetricsLog.record(
             .qualitySupplement,
             metricsID: detail.bvid,
             title: detail.title,
-            message: "start preferred=\(preferredQuality ?? 0) mode=\(mode)"
+            message: "start preferred=\(preferredQuality ?? 0) mode=targetOnly"
         )
     }
 

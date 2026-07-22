@@ -210,8 +210,8 @@ private struct UnifiedVideoCoverExperimentBorderModifier<BorderShape: Shape>: Vi
         content.overlay {
             if isEnabled {
                 shape
-                    .stroke(systemSeparatorColor, lineWidth: physicalPixel)
-                    .padding(physicalPixel * 0.5)
+                    .stroke(systemSeparatorColor, lineWidth: opticalLineWidth)
+                    .padding(opticalLineWidth * 0.5)
             }
         }
     }
@@ -226,5 +226,9 @@ private struct UnifiedVideoCoverExperimentBorderModifier<BorderShape: Shape>: Vi
 
     private var physicalPixel: CGFloat {
         1 / max(displayScale, 1)
+    }
+
+    private var opticalLineWidth: CGFloat {
+        max(0.5, physicalPixel)
     }
 }

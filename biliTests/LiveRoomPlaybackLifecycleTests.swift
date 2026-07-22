@@ -63,6 +63,50 @@ final class LiveRoomPlaybackLifecycleTests: XCTestCase {
         replacementPlayer.stop(reason: .navigation)
     }
 
+    func testPlaybackDiagnosticsPresentationResetsWithNavigation() {
+        let defaultsName = "LiveRoomPlaybackDiagnosticsPresentationTests.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: defaultsName)!
+        defer { defaults.removePersistentDomain(forName: defaultsName) }
+        let viewModel = makeViewModel(defaults: defaults, keychainService: defaultsName)
+
+        XCTAssertFalse(viewModel.isShowingLivePlaybackDiagnostics)
+
+        viewModel.showLivePlaybackDiagnostics()
+
+        XCTAssertTrue(viewModel.isShowingLivePlaybackDiagnostics)
+
+        viewModel.stopPlaybackForNavigation()
+
+        XCTAssertFalse(viewModel.isShowingLivePlaybackDiagnostics)
+    }
+
+    func testDanmakuSettingsPresentationAndUpdatesResetWithNavigation() {
+        let defaultsName = "LiveRoomDanmakuSettingsPresentationTests.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: defaultsName)!
+        defer { defaults.removePersistentDomain(forName: defaultsName) }
+        let viewModel = makeViewModel(defaults: defaults, keychainService: defaultsName)
+
+        XCTAssertFalse(viewModel.isShowingLiveDanmakuSettings)
+
+        viewModel.showLiveDanmakuSettings()
+
+        XCTAssertTrue(viewModel.isShowingLiveDanmakuSettings)
+
+        var settings = viewModel.danmakuSettings
+        settings.fontScale = 1.2
+        settings.hidesInPortrait = false
+        viewModel.updateDanmakuSettings(settings)
+
+        XCTAssertEqual(viewModel.danmakuSettings.fontScale, 1.2, accuracy: 0.001)
+        XCTAssertFalse(viewModel.danmakuSettings.hidesInPortrait)
+        XCTAssertEqual(viewModel.liveDanmakuRenderStore.settings.fontScale, 1.2, accuracy: 0.001)
+        XCTAssertFalse(viewModel.liveDanmakuRenderStore.settings.hidesInPortrait)
+
+        viewModel.stopPlaybackForNavigation()
+
+        XCTAssertFalse(viewModel.isShowingLiveDanmakuSettings)
+    }
+
     private func makeViewModel(defaults: UserDefaults, keychainService: String) -> LiveRoomViewModel {
         let libraryStore = LibraryStore(userDefaults: defaults)
         let sessionStore = SessionStore(keychain: KeychainStore(service: keychainService))

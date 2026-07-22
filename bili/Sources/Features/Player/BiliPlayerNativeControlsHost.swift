@@ -13,10 +13,12 @@ struct BiliPlayerNativeControlsHost: View {
             canSeek: context.surfaceState.canSeek,
             isPlaying: context.surfaceState.isPlaying,
             isDanmakuEnabled: context.configuration.isDanmakuEnabled,
-            showsDanmakuButton: false,
+            showsDanmakuButton: context.configuration.controlLayout.isLive
+                && context.configuration.onShowDanmakuSettings != nil,
             canToggleFullscreen: context.configuration.canToggleFullscreen,
             isFullscreenActive: context.configuration.isFullscreenActive,
             controlsAccessory: context.configuration.controlsAccessory,
+            controlsCenterAccessory: context.configuration.controlsCenterAccessory,
             actions: actions ?? nativePlaybackControlsActions
         )
     }

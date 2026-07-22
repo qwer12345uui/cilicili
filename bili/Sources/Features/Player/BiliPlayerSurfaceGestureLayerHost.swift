@@ -5,6 +5,7 @@ struct BiliPlayerSurfaceGestureLayerHost<Content: View>: View {
     let visibilityActions: BiliPlayerPlaybackControlsVisibilityActions
     let speedBoostActions: BiliPlayerSpeedBoostActions
     let viewModel: PlayerStateViewModel
+    let allowsDoubleTapPlaybackToggle: Bool
     @ObservedObject var seekPreviewModel: PlayerSeekPreviewModel
     let seekPreviewAPI: BiliAPIClient?
     let seekPreviewContext: PlayerSeekPreviewContext?
@@ -29,6 +30,7 @@ struct BiliPlayerSurfaceGestureLayerHost<Content: View>: View {
             clock: viewModel.playbackClock,
             durationHint: viewModel.displayDuration,
             canSeek: viewModel.canSeek,
+            allowsDoubleTapPlaybackToggle: allowsDoubleTapPlaybackToggle,
             onSingleTap: gestureActions.singleTap,
             onDoubleTap: gestureActions.doubleTap,
             onBeginSpeedBoost: gestureActions.beginSpeedBoost,

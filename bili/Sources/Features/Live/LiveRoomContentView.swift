@@ -133,9 +133,6 @@ struct LiveRoomContentView: View {
             fullscreenMode: fullscreenMode,
             playerWidth: playerWidth,
             playerHeight: playerHeight,
-            controlsAccessory: { usesCompactLayout in
-                AnyView(livePlayerAccessory(viewModel, usesCompactLayout: usesCompactLayout))
-            },
             loadingPlaceholder: { AnyView(liveLoadingPlaceholder(viewModel)) },
             onRequestFullscreen: enterInlineFullscreenPlayback(playerViewModel:),
             onExitFullscreen: exitInlineFullscreenPlayback(playerViewModel:)

@@ -1930,7 +1930,14 @@ actor VideoPreloadCenter {
 
     private nonisolated static func playURLCodecCachePolicyToken(preferredQuality: Int?) -> String {
         let preference = VideoCodecPreference.stored()
-        let policy = preferredQuality == 126 ? "dolbyAutoStrictNoAV1V3" : "hevcFirstNoAV1V1"
+        let policy: String
+        if preferredQuality == 126 {
+            policy = "dolbyAutoStrictV4"
+        } else if preference == .preferAV1, PlaybackCodecPolicy.canDecodeAV1 {
+            policy = "av1FirstHardwareV1"
+        } else {
+            policy = "hevcFirstV2"
+        }
         return "codec-\(preference.rawValue)-\(policy)"
     }
 

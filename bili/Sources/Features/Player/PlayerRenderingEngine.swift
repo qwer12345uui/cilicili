@@ -26,6 +26,8 @@ struct PlayerStreamSource: Equatable, Sendable {
     let title: String
     let durationHint: TimeInterval?
     let isLiveStream: Bool
+    let isLiveHLS: Bool
+    let liveHLSFormat: String?
     let resumeTime: TimeInterval
     let dynamicRange: BiliVideoDynamicRange
     let cdnPreference: PlaybackCDNPreference
@@ -50,6 +52,8 @@ struct PlayerStreamSource: Equatable, Sendable {
             title: title,
             durationHint: durationHint,
             isLiveStream: isLiveStream,
+            isLiveHLS: isLiveHLS,
+            liveHLSFormat: liveHLSFormat,
             resumeTime: max(resumeTime, 0),
             dynamicRange: dynamicRange,
             cdnPreference: cdnPreference
@@ -412,6 +416,7 @@ protocol PlayerRenderingEngine: AnyObject {
     var isPictureInPictureActive: Bool { get }
     var usesNativePlaybackControls: Bool { get }
     var diagnostics: PlayerEngineDiagnostics { get }
+    var presentationSize: CGSize { get }
     var volume: Float { get }
     var isMuted: Bool { get }
     var onPlaybackStateChange: (@MainActor (PlayerEnginePlaybackState) -> Void)? { get set }
@@ -443,6 +448,7 @@ protocol PlayerRenderingEngine: AnyObject {
     func setTemporaryAudioSuppressed(_ isSuppressed: Bool)
     func setPictureInPictureEnabled(_ isEnabled: Bool)
     func seek(toTime time: TimeInterval) -> TimeInterval?
+    func seekToLiveEdge() -> TimeInterval?
     func seek(toProgress progress: Double, duration: TimeInterval?) -> TimeInterval?
     func seek(by interval: TimeInterval, from currentTime: TimeInterval, duration: TimeInterval?) -> TimeInterval?
     func seekAfterUserScrub(toProgress progress: Double, duration: TimeInterval?) async -> TimeInterval?
@@ -456,6 +462,8 @@ protocol PlayerRenderingEngine: AnyObject {
 }
 
 extension PlayerRenderingEngine {
+    var presentationSize: CGSize { .zero }
+
     func setPictureInPictureEnabled(_: Bool) {}
 
     func stopPictureInPictureIfNeeded() {

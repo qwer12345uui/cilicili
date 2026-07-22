@@ -15,17 +15,36 @@ final class DashStreamDispatcherTests: XCTestCase {
         XCTAssertEqual(selected?.codecs, hevc.codecs)
     }
 
-    func testAV1IsNotSelectedWhenItIsTheOnlyStream() {
+    func testAV1SelectionFollowsHardwareCapability() {
         let h264 = stream(codecs: "avc1.64002a")
         let av1 = stream(codecs: "av01.0.08M.08")
 
-        let selected = CoreVideoPlayerManager.selectBestStream(
+        let unsupportedSelection = CoreVideoPlayerManager.selectBestStream(
             from: [av1],
-            preference: .auto
+            preference: .preferAV1,
+            supportsAV1HardwareDecode: false
+        )
+        XCTAssertNil(unsupportedSelection)
+
+        let supportedSelection = CoreVideoPlayerManager.selectBestStream(
+            from: [h264, av1],
+            preference: .preferAV1,
+            supportsAV1HardwareDecode: true
+        )
+        XCTAssertEqual(supportedSelection?.codecs, av1.codecs)
+    }
+
+    func testPreferAV1FallsBackToHEVCOnlyWhenAV1IsMissing() {
+        let hevc = stream(codecs: "hev1.1.6.L120.90", bandwidth: 12_000)
+        let h264 = stream(codecs: "avc1.64002a", bandwidth: 8_000)
+
+        let selected = CoreVideoPlayerManager.selectBestStream(
+            from: [h264, hevc],
+            preference: .preferAV1,
+            supportsAV1HardwareDecode: true
         )
 
-        XCTAssertNil(selected)
-        XCTAssertEqual(CoreVideoPlayerManager.selectBestStream(from: [h264, av1], preference: .auto)?.codecs, h264.codecs)
+        XCTAssertEqual(selected?.codecs, hevc.codecs)
     }
 
     func testForceHEVCRejectsOtherCodecs() {

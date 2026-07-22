@@ -197,6 +197,9 @@ nonisolated enum HLSVideoRenditionPlanner {
             return videoStream.videoCodecFamily
         }
         let codec = (variant.codec ?? "").lowercased()
+        if codec.contains("av01") {
+            return .av1
+        }
         if codec.contains("hvc1") || codec.contains("hev1") || codec.contains("dvh1") || codec.contains("dvhe") {
             return .hevc
         }
