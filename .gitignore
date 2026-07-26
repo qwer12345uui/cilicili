@@ -69,6 +69,7 @@ Packages/FFmpegKit/Sources/*.xcframework/
 !bili/Assets.xcassets/LaunchScreenLogo.imageset/*.png
 !bili/Assets.xcassets/LaunchSplash.imageset/*.jpg
 !bili/Resources/*.png
+!assets/alipay-support.jpg
 
 # macOS
 .DS_Store
