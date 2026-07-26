@@ -4,9 +4,13 @@ cilicili 是一个使用 SwiftUI 开发的第三方 iOS 客户端实验项目，
 
 > 本项目仅用于学习、研究和个人使用。项目不隶属于哔哩哔哩，也不包含任何账号凭据、签名证书或私有接口密钥。请遵守目标平台服务条款和当地法律法规。
 
-## 开源与支持
+## Support / 支持
 
-cilicili 现作为开源项目维护。如果这个项目对你有帮助，欢迎通过 Star、Fork、Issue、Pull Request 或分享给更多同好来支持项目继续改进。
+CiliCili 的源码可以免费阅读、使用和改造，但开发、调试和持续维护用掉的 AI Token 并不会自己续费。如果这个项目确实帮到了你，欢迎通过 Star、反馈、分享，或自愿赞助来支持它继续慢慢变好；不赞助也完全没关系，每一种支持都很珍贵。
+
+Support is always optional. If CiliCili saves you a little time or makes watching videos more comfortable, a Star, an Issue, a share, or a small contribution all help keep the project moving.
+
+[查看支持方式与支付宝二维码](SUPPORT.md)
 
 官方 Telegram 频道：[@cilicili89](https://t.me/cilicili89)
 
