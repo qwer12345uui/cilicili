@@ -3,6 +3,20 @@ import Foundation
 extension VideoDetailViewModel {
     func prepareHistoryResumeBeforeApplyingPlayURL(_ data: PlayURLData, cid: Int) async -> Bool {
         guard stablePlayerViewModel == nil else { return false }
+        if VideoDetailPlaybackHistorySelectionPolicy.preservesManualPage(
+            manuallySelectedCID: manuallySelectedPageCID,
+            currentCID: cid
+        ) {
+            if pendingPlaybackHistoryResumeTime == nil,
+               let resumeTime = libraryStore.localPlaybackResumeTime(
+                   for: detail,
+                   cid: cid,
+                   duration: resumeDurationHint(for: cid)
+               ) {
+                setPendingPlaybackHistoryResumeTime(resumeTime, cid: cid)
+            }
+            return false
+        }
         if redirectToHistoryCIDIfNeeded(data.lastPlayCID, currentCID: cid) {
             return true
         }
@@ -67,6 +81,10 @@ extension VideoDetailViewModel {
     }
 
     private func prepareCloudHistoryResumeIfNeeded(currentCID: Int) async {
+        guard !VideoDetailPlaybackHistorySelectionPolicy.preservesManualPage(
+            manuallySelectedCID: manuallySelectedPageCID,
+            currentCID: currentCID
+        ) else { return }
         guard !didResolveCloudHistoryResume else { return }
         guard !libraryStore.incognitoModeEnabled,
               let aid = detail.aid
@@ -102,6 +120,7 @@ extension VideoDetailViewModel {
     }
 
     func beginCloudHistoryResumeFetchIfNeeded() {
+        guard manuallySelectedPageCID == nil else { return }
         guard !didResolveCloudHistoryResume,
               pendingPlaybackHistoryResumeTime == nil,
               !libraryStore.incognitoModeEnabled,

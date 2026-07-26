@@ -35,6 +35,7 @@ struct VideoDetailShellContentView: View {
     @Binding var selectedContentTab: VideoDetailContentTab
     let onShowNetworkDiagnostics: () -> Void
     let onShowFavoriteFolders: () -> Void
+    let onShowCoinPicker: () -> Void
     let onReply: (Comment) -> Void
     let onSelectedTabChange: (VideoDetailContentTab) -> Void
     let onScrollOffsetChange: (VideoDetailContentTab, CGFloat) -> Void
@@ -48,6 +49,7 @@ struct VideoDetailShellContentView: View {
             selectedContentTab: $selectedContentTab,
             onShowNetworkDiagnostics: onShowNetworkDiagnostics,
             onShowFavoriteFolders: onShowFavoriteFolders,
+            onShowCoinPicker: onShowCoinPicker,
             onReply: onReply,
             onSelectedTabChange: onSelectedTabChange,
             onScrollOffsetChange: onScrollOffsetChange
@@ -63,6 +65,7 @@ private struct VideoDetailShellContentBody: View {
     @Binding var selectedContentTab: VideoDetailContentTab
     let onShowNetworkDiagnostics: () -> Void
     let onShowFavoriteFolders: () -> Void
+    let onShowCoinPicker: () -> Void
     let onReply: (Comment) -> Void
     let onSelectedTabChange: (VideoDetailContentTab) -> Void
     let onScrollOffsetChange: (VideoDetailContentTab, CGFloat) -> Void
@@ -84,6 +87,7 @@ private struct VideoDetailShellContentBody: View {
                     runtimeSettings: runtimeSettings.snapshot,
                     onShowNetworkDiagnostics: onShowNetworkDiagnostics,
                     onShowFavoriteFolders: onShowFavoriteFolders,
+                    onShowCoinPicker: onShowCoinPicker,
                     onReply: { comment in
                         guard !contentActionsSuppressed else { return }
                         onReply(comment)

@@ -7,12 +7,12 @@ struct DynamicCommentReplyAuthorLine: View {
     var body: some View {
         HStack(alignment: .firstTextBaseline, spacing: 6) {
             Text(display.authorName)
-                .font(.subheadline.weight(.semibold))
+                .appTypography(.commentAuthor, fallback: .subheadline.weight(.semibold))
                 .foregroundStyle(.secondary)
 
             if !display.timeText.isEmpty {
                 Text(display.timeText)
-                    .font(.caption)
+                    .appTypography(.metadata, fallback: .caption)
                     .foregroundStyle(.secondary)
             }
 
@@ -31,7 +31,7 @@ private struct DynamicCommentReplyLikeLabel: View {
 
     var body: some View {
         Label(display.likeText, systemImage: display.isLiked ? "hand.thumbsup.fill" : "hand.thumbsup")
-            .font(.caption)
+            .appTypography(.action, fallback: .caption)
             .foregroundStyle(display.isLiked ? appTintColor : .secondary)
             .labelStyle(.titleAndIcon)
     }
@@ -47,7 +47,8 @@ struct DynamicCommentReplyBody: View {
             font: .subheadline,
             textColor: .primary,
             emoteSize: 22,
-            lineSpacing: 2
+            lineSpacing: 2,
+            typographyRole: .commentBody
         )
 
         DynamicCommentImageGrid(images: display.pictures)

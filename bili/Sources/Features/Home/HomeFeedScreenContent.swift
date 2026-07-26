@@ -2,21 +2,28 @@ import SwiftUI
 
 struct HomeFeedScreenContent: View {
     @EnvironmentObject var dependencies: AppDependencies
+    @EnvironmentObject var libraryStore: LibraryStore
     @StateObject var runtimeSettings = HomeRuntimeSettingsStore()
     @ObservedObject var viewModel: HomeViewModel
     @Binding var detailPath: NavigationPath
     let launchConfiguration: HomeFeedLaunchConfiguration
+    let accountMessageViewModel: AccountMessageCenterViewModel?
+    let onOpenAccountMessages: () -> Void
     @State var viewportState = HomeFeedViewportState()
     @State var actionStore = HomeFeedScreenActionStore()
 
     init(
         viewModel: HomeViewModel,
         detailPath: Binding<NavigationPath>,
-        launchConfiguration: HomeFeedLaunchConfiguration
+        launchConfiguration: HomeFeedLaunchConfiguration,
+        accountMessageViewModel: AccountMessageCenterViewModel?,
+        onOpenAccountMessages: @escaping () -> Void
     ) {
         self.viewModel = viewModel
         _detailPath = detailPath
         self.launchConfiguration = launchConfiguration
+        self.accountMessageViewModel = accountMessageViewModel
+        self.onOpenAccountMessages = onOpenAccountMessages
     }
 
     var body: some View {
@@ -34,7 +41,10 @@ struct HomeFeedScreenContent: View {
         )
         .homeFeedNavigationChrome(
             viewModel: viewModel,
-            modeActions: actionStore.mode
+            modeActions: actionStore.mode,
+            accountMessageViewModel: accountMessageViewModel,
+            isModeSwitcherExperimentEnabled: libraryStore.homeNavigationModeSwitcherExperimentEnabled,
+            onOpenAccountMessages: onOpenAccountMessages
         )
     }
 }

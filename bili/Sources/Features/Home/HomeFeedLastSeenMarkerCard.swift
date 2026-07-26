@@ -32,7 +32,11 @@ struct HomeFeedLastSeenMarkerCard: View {
                 markerAvatar(size: 34, iconSize: 15)
 
                 VStack(alignment: .leading, spacing: 1) {
-                    StableVideoTitleText("上次看到这里", style: .feedHeadline, lineLimit: 1)
+                    StableVideoTitleText(
+                        "上次看到这里",
+                        style: .feedHeadline,
+                        lineLimit: 1
+                    )
 
                     Text("点击刷新推荐")
                         .font(.caption.weight(.medium))
@@ -53,7 +57,10 @@ struct HomeFeedLastSeenMarkerCard: View {
             cover(cornerRadius: 15)
 
             VStack(alignment: .leading, spacing: 4) {
-                StableVideoTitleText("上次看到这里", style: .compactCard)
+                StableVideoTitleText(
+                    "上次看到这里",
+                    style: .compactCard
+                )
                     .frame(minHeight: 36, alignment: .topLeading)
                     .frame(maxWidth: .infinity, alignment: .leading)
 
@@ -86,7 +93,10 @@ struct HomeFeedLastSeenMarkerCard: View {
                 .videoCardBorderedCover()
 
             VStack(alignment: .leading, spacing: 4) {
-                StableVideoTitleText("上次看到这里", style: .compactCard)
+                StableVideoTitleText(
+                    "上次看到这里",
+                    style: .compactCard
+                )
                     .frame(minHeight: 36, alignment: .topLeading)
                     .frame(maxWidth: .infinity, alignment: .leading)
 
@@ -121,7 +131,11 @@ struct HomeFeedLastSeenMarkerCard: View {
             borderedSingleColumnCover(size: coverSize)
 
             VStack(alignment: .leading, spacing: 8) {
-                StableVideoTitleText("上次看到这里", style: .compactCard, lineLimit: 2)
+                StableVideoTitleText(
+                    "上次看到这里",
+                    style: .compactCard,
+                    lineLimit: 2
+                )
                     .frame(minHeight: 38, alignment: .topLeading)
 
                 Spacer(minLength: 0)

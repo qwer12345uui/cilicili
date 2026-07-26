@@ -3970,9 +3970,19 @@ actor RemoteImageCache {
         oldSession.finishTasksAndInvalidate()
     }
 
-    func image(for url: URL, scale: CGFloat = 1, targetPixelSize: Int? = nil) -> UIImage? {
+    func image(
+        for url: URL,
+        scale: CGFloat = 1,
+        targetPixelSize: Int? = nil,
+        decodePolicy: RemoteImageDecodePolicy = .standard
+    ) -> UIImage? {
         for candidateURL in imageCandidateURLs(for: url) {
-            let key = cacheKey(for: candidateURL, scale: scale, targetPixelSize: targetPixelSize)
+            let key = cacheKey(
+                for: candidateURL,
+                scale: scale,
+                targetPixelSize: targetPixelSize,
+                decodePolicy: decodePolicy
+            )
             if let image = cache.object(forKey: key.nsKey) {
                 if RemoteImageDiagnosticsSettings.isRecordingEnabled {
                     hits += 1
@@ -3993,9 +4003,19 @@ actor RemoteImageCache {
         diskRequests.removeAll()
     }
 
-    func clearFailure(for url: URL, scale: CGFloat = 1, targetPixelSize: Int? = nil) {
+    func clearFailure(
+        for url: URL,
+        scale: CGFloat = 1,
+        targetPixelSize: Int? = nil,
+        decodePolicy: RemoteImageDecodePolicy = .standard
+    ) {
         for candidateURL in imageCandidateURLs(for: url) {
-            let key = cacheKey(for: candidateURL, scale: scale, targetPixelSize: targetPixelSize)
+            let key = cacheKey(
+                for: candidateURL,
+                scale: scale,
+                targetPixelSize: targetPixelSize,
+                decodePolicy: decodePolicy
+            )
             failedLoads[key] = nil
         }
     }
@@ -4093,13 +4113,19 @@ actor RemoteImageCache {
         scale: CGFloat,
         targetPixelSize: Int? = nil,
         cachePolicy: RemoteImageCachePolicy = .standard,
-        priority: RemoteImageLoadPriority = .visible
+        priority: RemoteImageLoadPriority = .visible,
+        decodePolicy: RemoteImageDecodePolicy = .standard
     ) async -> UIImage? {
         applyAdaptiveBudgetIfNeeded()
         let candidateURLs = imageCandidateURLs(for: url)
         if cachePolicy == .standard {
             for candidateURL in candidateURLs {
-                if let cached = cachedImage(for: candidateURL, scale: scale, targetPixelSize: targetPixelSize) {
+                if let cached = cachedImage(
+                    for: candidateURL,
+                    scale: scale,
+                    targetPixelSize: targetPixelSize,
+                    decodePolicy: decodePolicy
+                ) {
                     if RemoteImageDiagnosticsSettings.isRecordingEnabled {
                         hits += 1
                     }
@@ -4118,7 +4144,8 @@ actor RemoteImageCache {
                 scale: scale,
                 targetPixelSize: targetPixelSize,
                 cachePolicy: cachePolicy,
-                priority: priority
+                priority: priority,
+                decodePolicy: decodePolicy
             ) {
                 return image
             }
@@ -4132,11 +4159,22 @@ actor RemoteImageCache {
         scale: CGFloat,
         targetPixelSize: Int?,
         cachePolicy: RemoteImageCachePolicy,
-        priority: RemoteImageLoadPriority
+        priority: RemoteImageLoadPriority,
+        decodePolicy: RemoteImageDecodePolicy
     ) async -> UIImage? {
-        let key = cacheKey(for: url, scale: scale, targetPixelSize: targetPixelSize)
+        let key = cacheKey(
+            for: url,
+            scale: scale,
+            targetPixelSize: targetPixelSize,
+            decodePolicy: decodePolicy
+        )
         if cachePolicy == .standard,
-           let cached = cachedImage(for: url, scale: scale, targetPixelSize: targetPixelSize) {
+           let cached = cachedImage(
+               for: url,
+               scale: scale,
+               targetPixelSize: targetPixelSize,
+               decodePolicy: decodePolicy
+           ) {
             if RemoteImageDiagnosticsSettings.isRecordingEnabled {
                 hits += 1
             }
@@ -4165,7 +4203,8 @@ actor RemoteImageCache {
             scale: scale,
             targetPixelSize: targetPixelSize,
             cachePolicy: cachePolicy,
-            priority: priority
+            priority: priority,
+            decodePolicy: decodePolicy
         )
         registerInFlightTask(key)
         inFlight[key] = task
@@ -4211,16 +4250,29 @@ actor RemoteImageCache {
         scale: CGFloat,
         targetPixelSize: Int?,
         cachePolicy: RemoteImageCachePolicy,
-        priority: RemoteImageLoadPriority
+        priority: RemoteImageLoadPriority,
+        decodePolicy: RemoteImageDecodePolicy
     ) -> Task<UIImage?, Never> {
         let session = session
-        let effectiveTargetPixelSize = effectiveTargetPixelSize(targetPixelSize, scale: scale)
+        let effectiveTargetPixelSize = effectiveTargetPixelSize(
+            targetPixelSize,
+            scale: scale,
+            decodePolicy: decodePolicy
+        )
         let request = Self.imageRequest(url: url, cachePolicy: cachePolicy)
         let usesCDNFailover = RemoteImageCDNFailoverExperiment.isEnabled()
             && RemoteImageCDNFailoverPolicy.isEligible(url)
         let retryPolicy: BiliNetworkRetryPolicy = usesCDNFailover ? .imageFailover : .image
         if cachePolicy == .standard {
-            recordDiskRequest(key: cacheKey(for: url, scale: scale, targetPixelSize: targetPixelSize), request: request)
+            recordDiskRequest(
+                key: cacheKey(
+                    for: url,
+                    scale: scale,
+                    targetPixelSize: targetPixelSize,
+                    decodePolicy: decodePolicy
+                ),
+                request: request
+            )
         }
         if RemoteImageDiagnosticsSettings.isRecordingEnabled {
             loadTaskCount += 1
@@ -4278,19 +4330,34 @@ actor RemoteImageCache {
         return request
     }
 
-    private func cacheKey(for url: URL, scale: CGFloat, targetPixelSize: Int?) -> ImageCacheKey {
+    private func cacheKey(
+        for url: URL,
+        scale: CGFloat,
+        targetPixelSize: Int?,
+        decodePolicy: RemoteImageDecodePolicy = .standard
+    ) -> ImageCacheKey {
         ImageCacheKey(
             identity: url.absoluteString.biliImageCacheIdentityURLString(),
-            targetPixelSize: effectiveTargetPixelSize(targetPixelSize, scale: scale)
+            targetPixelSize: effectiveTargetPixelSize(
+                targetPixelSize,
+                scale: scale,
+                decodePolicy: decodePolicy
+            )
         )
     }
 
     private func cachedImage(
         for url: URL,
         scale: CGFloat,
-        targetPixelSize: Int?
+        targetPixelSize: Int?,
+        decodePolicy: RemoteImageDecodePolicy = .standard
     ) -> UIImage? {
-        let key = cacheKey(for: url, scale: scale, targetPixelSize: targetPixelSize)
+        let key = cacheKey(
+            for: url,
+            scale: scale,
+            targetPixelSize: targetPixelSize,
+            decodePolicy: decodePolicy
+        )
         return cache.object(forKey: key.nsKey)
     }
 
@@ -4381,34 +4448,17 @@ actor RemoteImageCache {
         diskRequests[key] = entry
     }
 
-    private func effectiveTargetPixelSize(_ targetPixelSize: Int?, scale: CGFloat) -> Int {
-        let requested = targetPixelSize ?? Int((1200 * max(scale, 1)).rounded(.up))
-        let environment = PlaybackEnvironment.current
-        let defaultMaximumPixelSize: Int
-        if environment.isLowPowerModeEnabled || environment.isThermallyConstrained {
-            defaultMaximumPixelSize = 640
-        } else {
-            switch environment.networkClass {
-            case .wifi, .unknown:
-                defaultMaximumPixelSize = 1280
-            case .cellular, .constrained:
-                defaultMaximumPixelSize = 760
-            }
-        }
-        let maximumPixelSize: Int
-        if targetPixelSize == nil {
-            maximumPixelSize = defaultMaximumPixelSize
-        } else if environment.isLowPowerModeEnabled || environment.isThermallyConstrained {
-            maximumPixelSize = 960
-        } else {
-            switch environment.networkClass {
-            case .wifi, .unknown:
-                maximumPixelSize = 2600
-            case .cellular, .constrained:
-                maximumPixelSize = 1024
-            }
-        }
-        return max(96, min(requested, maximumPixelSize))
+    private func effectiveTargetPixelSize(
+        _ targetPixelSize: Int?,
+        scale: CGFloat,
+        decodePolicy: RemoteImageDecodePolicy = .standard
+    ) -> Int {
+        RemoteImageDecodeSizing.effectiveTargetPixelSize(
+            targetPixelSize,
+            scale: scale,
+            policy: decodePolicy,
+            environment: PlaybackEnvironment.current
+        )
     }
 
     private func registerInFlightTask(_ key: ImageCacheKey) {

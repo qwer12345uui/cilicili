@@ -16,17 +16,23 @@ struct CommentReplyRootView: View {
             VStack(alignment: .leading, spacing: 6) {
                 HStack(alignment: .firstTextBaseline, spacing: 6) {
                     Text(display.authorName)
-                        .font(.subheadline.weight(.semibold))
+                        .appTypography(.commentAuthor, fallback: .subheadline.weight(.semibold))
                         .foregroundStyle(.secondary)
 
                     if !display.timeText.isEmpty {
                         Text(display.timeText)
-                            .font(.caption)
+                            .appTypography(.metadata, fallback: .caption)
                             .foregroundStyle(.secondary)
                     }
                 }
 
-                BiliEmoteText(content: comment.content, font: .subheadline, textColor: .primary, emoteSize: 22)
+                BiliEmoteText(
+                    content: comment.content,
+                    font: .subheadline,
+                    textColor: .primary,
+                    emoteSize: 22,
+                    typographyRole: .commentBody
+                )
                     .lineSpacing(1)
                     .fixedSize(horizontal: false, vertical: true)
 

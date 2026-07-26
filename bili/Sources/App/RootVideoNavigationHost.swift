@@ -26,6 +26,16 @@ struct RootVideoNavigationHost: View {
                     )
                     .id(video.id)
                 }
+                .navigationDestination(for: VideoCommentRoute.self) { route in
+                    VideoDetailView(
+                        seedVideo: route.video,
+                        hidesRootTabBar: false,
+                        initialCommentAnchor: route.anchor,
+                        onRequestClose: onRequestClose,
+                        onPopOne: onPopOne
+                    )
+                    .id(route)
+                }
                 .navigationDestination(for: PgcSeasonRoute.self) { route in
                     PgcSeasonPlaybackRouteView(
                         route: route,

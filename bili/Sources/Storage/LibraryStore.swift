@@ -145,6 +145,7 @@ final class LibraryStore: ObservableObject {
     @Published private(set) var videoCoverBottomScrimEnabled: Bool
     @Published private(set) var showsVideoCoverDurationBadges: Bool
     @Published private(set) var unifiedVideoCoverBorderExperimentEnabled: Bool
+    @Published private(set) var homeNavigationModeSwitcherExperimentEnabled: Bool
     @Published private(set) var fastScrollImageLoadSuppressionExperimentEnabled: Bool
     @Published private(set) var remoteImageCDNFailoverExperimentEnabled: Bool
     @Published private(set) var remoteImageDiagnosticsEnabled: Bool
@@ -208,6 +209,7 @@ final class LibraryStore: ObservableObject {
     private static let videoCoverBottomScrimEnabledKey = VideoCoverBottomScrimSettings.storageKey
     private static let videoCoverDurationBadgesEnabledKey = VideoCoverDurationBadgeSettings.storageKey
     private static let unifiedVideoCoverBorderExperimentEnabledKey = "cc.bili.display.unifiedVideoCoverBorderExperimentEnabled.v1"
+    private static let homeNavigationModeSwitcherExperimentEnabledKey = HomeNavigationModeSwitcherExperiment.storageKey
     private static let retiredExperimentKeys = [
         "cc.bili.playback.startupRequestSchedulingExperimentEnabled.v1",
         "cc.bili.live.videoDetailLayoutExperimentEnabled.v1",
@@ -218,6 +220,12 @@ final class LibraryStore: ObservableObject {
         "cc.bili.live.hlsFastStartExperimentEnabled.v1",
         "cc.bili.live.danmakuRenderBatchingExperimentEnabled.v1",
         "cc.bili.live.rotationSurfaceAlignmentExperimentEnabled.v1",
+        "cc.bili.display.mineSingleStackNavigationExperimentEnabled.v1",
+        "cc.bili.display.fixedVideoTitleTypographyExperimentEnabled.v1",
+        "cc.bili.display.unifiedAppTypographyExperimentEnabled.v1",
+        "cc.bili.display.highQualityImageViewerExperimentEnabled.v1",
+        "cc.bili.account.messageCenterExperimentEnabled.v1",
+        "cc.bili.display.telegramTopEdgeBlurExperimentEnabled.v1",
     ]
     private static let fastScrollImageLoadSuppressionExperimentEnabledKey = "cc.bili.display.fastScrollImageLoadSuppressionExperimentEnabled.v1"
     private static let remoteImageCDNFailoverExperimentEnabledKey = RemoteImageCDNFailoverExperiment.storageKey
@@ -449,6 +457,9 @@ final class LibraryStore: ObservableObject {
         self.unifiedVideoCoverBorderExperimentEnabled = userDefaults.object(
             forKey: Self.unifiedVideoCoverBorderExperimentEnabledKey
         ) as? Bool ?? VideoCoverBorderExperiment.defaultIsEnabled
+        self.homeNavigationModeSwitcherExperimentEnabled = userDefaults.object(
+            forKey: Self.homeNavigationModeSwitcherExperimentEnabledKey
+        ) as? Bool ?? HomeNavigationModeSwitcherExperiment.defaultIsEnabled
         Self.retiredExperimentKeys.forEach(userDefaults.removeObject(forKey:))
         self.fastScrollImageLoadSuppressionExperimentEnabled = userDefaults.object(
             forKey: Self.fastScrollImageLoadSuppressionExperimentEnabledKey
@@ -1029,6 +1040,11 @@ final class LibraryStore: ObservableObject {
     func setUnifiedVideoCoverBorderExperimentEnabled(_ isEnabled: Bool) {
         unifiedVideoCoverBorderExperimentEnabled = isEnabled
         userDefaults.set(isEnabled, forKey: Self.unifiedVideoCoverBorderExperimentEnabledKey)
+    }
+
+    func setHomeNavigationModeSwitcherExperimentEnabled(_ isEnabled: Bool) {
+        homeNavigationModeSwitcherExperimentEnabled = isEnabled
+        userDefaults.set(isEnabled, forKey: Self.homeNavigationModeSwitcherExperimentEnabledKey)
     }
 
     func setFastScrollImageLoadSuppressionExperimentEnabled(_ isEnabled: Bool) {

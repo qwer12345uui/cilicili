@@ -2,6 +2,7 @@ import SwiftUI
 
 struct HomeFeedScreenBody: View {
     @Environment(\.displayScale) private var displayScale
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @ObservedObject var viewModel: HomeViewModel
     @ObservedObject var runtimeSettings: HomeRuntimeSettingsStore
     @ObservedObject var libraryStore: LibraryStore
@@ -12,9 +13,10 @@ struct HomeFeedScreenBody: View {
     let launchConfiguration: HomeFeedLaunchConfiguration
 
     var body: some View {
-        let layoutMetrics = viewportState.layoutMetrics(for: runtimeSettings.homeFeedLayout)
+        let layout = effectiveLayout
+        let layoutMetrics = viewportState.layoutMetrics(for: layout)
         let imagePrefetchProfile = HomeFeedCoverPrefetchProfile.make(
-            layout: runtimeSettings.homeFeedLayout,
+            layout: layout,
             metrics: layoutMetrics,
             displayScale: displayScale
         )
@@ -24,7 +26,8 @@ struct HomeFeedScreenBody: View {
             runtimeSettings: runtimeSettings,
             viewportState: $viewportState,
             scrollActions: actionStore.scroll,
-            refreshActions: actionStore.refresh
+            refreshActions: actionStore.refresh,
+            layout: layout
         ) {
             HomeFeedContentSection(
                 metrics: layoutMetrics,
@@ -38,7 +41,7 @@ struct HomeFeedScreenBody: View {
         .task(id: imagePrefetchProfile.cacheIdentity) {
             viewModel.updateImagePrefetchProfile(imagePrefetchProfile)
         }
-        .background(runtimeSettings.homeFeedLayout.homeFeedBackground)
+        .background(layout.homeFeedBackground)
         .homeFeedScreenLifecycle(
             viewModel: viewModel,
             runtimeSettings: runtimeSettings,
@@ -46,6 +49,19 @@ struct HomeFeedScreenBody: View {
             detailPath: $detailPath,
             configuration: lifecycleConfiguration
         )
+    }
+
+    private var effectiveLayout: HomeFeedLayout {
+        guard dynamicTypeSize.isAccessibilitySize else {
+            return runtimeSettings.homeFeedLayout
+        }
+
+        switch runtimeSettings.homeFeedLayout {
+        case .doubleColumn, .borderedDoubleColumn:
+            return .singleColumn
+        case .singleColumn, .borderedSingleColumn:
+            return runtimeSettings.homeFeedLayout
+        }
     }
 
     private var lifecycleConfiguration: HomeFeedScreenLifecycleConfiguration {

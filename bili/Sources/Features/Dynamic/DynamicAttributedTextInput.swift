@@ -7,6 +7,7 @@ struct DynamicAttributedTextInput: Equatable {
     let textColor: UIColor
     let emoteSize: CGFloat
     let maxLines: Int?
+    let typographyRole: AppTypography.Role?
     static let feedBodyFont = FeedTypography.bodyUIFont
 
     static func dynamicFeedBody(
@@ -19,7 +20,8 @@ struct DynamicAttributedTextInput: Equatable {
             baseFont: Self.feedBodyFont,
             textColor: .label,
             emoteSize: emoteSize,
-            maxLines: maxLines
+            maxLines: maxLines,
+            typographyRole: .dynamicBody
         )
     }
 
@@ -30,6 +32,7 @@ struct DynamicAttributedTextInput: Equatable {
             && lhs.textColor == rhs.textColor
             && lhs.emoteSize == rhs.emoteSize
             && lhs.maxLines == rhs.maxLines
+            && lhs.typographyRole == rhs.typographyRole
     }
 
     var cacheKey: String {
@@ -53,8 +56,25 @@ struct DynamicAttributedTextInput: Equatable {
             "\(baseFont.pointSize)",
             "\(textColor.dynamicRGBAKey)",
             "\(emoteSize)",
-            "\(maxLines ?? -1)"
+            "\(maxLines ?? -1)",
+            typographyRole?.rawValue ?? ""
         ].joined(separator: "\u{1e}")
+    }
+
+    func resolvingTypography(
+        contentSizeCategory: UIContentSizeCategory
+    ) -> DynamicAttributedTextInput {
+        guard let typographyRole else { return self }
+
+        let resolvedFont = typographyRole.uiFont(contentSizeCategory: contentSizeCategory)
+        return DynamicAttributedTextInput(
+            segments: segments,
+            baseFont: resolvedFont,
+            textColor: textColor,
+            emoteSize: emoteSize * resolvedFont.pointSize / typographyRole.pointSize,
+            maxLines: maxLines,
+            typographyRole: typographyRole
+        )
     }
 
     var nativePlainText: String? {

@@ -74,12 +74,9 @@ struct DynamicOriginalPreview: View {
             VStack(alignment: .leading, spacing: 10) {
                 if let author = item.author {
                     if let authorOwner, authorOwner.mid > 0 {
-                        NavigationLink {
-                            UploaderView(owner: authorOwner)
-                        } label: {
+                        VideoOwnerRouteLink(owner: authorOwner) {
                             DynamicOriginalAuthorIdentity(author: author)
                         }
-                        .buttonStyle(.plain)
                     } else {
                         DynamicOriginalAuthorIdentity(author: author)
                     }

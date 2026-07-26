@@ -60,6 +60,11 @@ nonisolated enum BiliFormatters {
             : yearMonthDayFormatter.string(from: date)
     }
 
+    static func accountMessageDateTime(_ date: Date?) -> String? {
+        guard let date else { return nil }
+        return accountMessageDateTimeFormatter.string(from: date)
+    }
+
     private static let monthDayFormatter: DateFormatter = {
         let formatter = DateFormatter()
         formatter.locale = zhCNLocale
@@ -71,6 +76,14 @@ nonisolated enum BiliFormatters {
         let formatter = DateFormatter()
         formatter.locale = zhCNLocale
         formatter.dateFormat = "yyyy年M月d日"
+        return formatter
+    }()
+
+    private static let accountMessageDateTimeFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.calendar = Calendar(identifier: .gregorian)
+        formatter.dateFormat = "yyyy-MM-dd HH:mm"
         return formatter
     }()
 }

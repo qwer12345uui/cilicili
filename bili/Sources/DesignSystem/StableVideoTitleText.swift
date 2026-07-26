@@ -2,11 +2,22 @@ import SwiftUI
 import UIKit
 
 struct StableVideoTitleText: View {
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+
     enum Style {
         case feedStory
         case feedHeadline
         case compactCard
         case related
+
+        var typographyRole: AppTypography.Role {
+            switch self {
+            case .feedStory, .feedHeadline:
+                return .feedVideoTitle
+            case .compactCard, .related:
+                return .compactVideoTitle
+            }
+        }
 
         var uiFont: UIFont {
             switch self {
@@ -29,7 +40,12 @@ struct StableVideoTitleText: View {
     let lineLimit: Int
     let preferredWidth: CGFloat?
 
-    init(_ title: String, style: Style, lineLimit: Int = 2, preferredWidth: CGFloat? = nil) {
+    init(
+        _ title: String,
+        style: Style,
+        lineLimit: Int = 2,
+        preferredWidth: CGFloat? = nil
+    ) {
         self.title = title
         self.style = style
         self.lineLimit = lineLimit
@@ -39,12 +55,19 @@ struct StableVideoTitleText: View {
     var body: some View {
         StableVideoTitleLabel(
             title: title,
-            font: style.uiFont,
+            font: resolvedFont,
             lineLimit: lineLimit,
-            preferredWidth: preferredWidth
+            preferredWidth: preferredWidth,
+            adjustsFontForContentSizeCategory: false
         )
         .frame(maxWidth: .infinity, alignment: .leading)
         .accessibilityLabel(title)
+    }
+
+    private var resolvedFont: UIFont {
+        style.typographyRole.uiFont(
+            contentSizeCategory: dynamicTypeSize.uiContentSizeCategory
+        )
     }
 }
 
@@ -53,6 +76,7 @@ private struct StableVideoTitleLabel: UIViewRepresentable {
     let font: UIFont
     let lineLimit: Int
     let preferredWidth: CGFloat?
+    let adjustsFontForContentSizeCategory: Bool
 
     final class Coordinator {
         var lastSignature: Signature?
@@ -93,6 +117,7 @@ private struct StableVideoTitleLabel: UIViewRepresentable {
         let pointSize: CGFloat
         let lineLimit: Int
         let preferredWidth: CGFloat?
+        let adjustsFontForContentSizeCategory: Bool
     }
 
     func makeCoordinator() -> Coordinator {
@@ -106,7 +131,7 @@ private struct StableVideoTitleLabel: UIViewRepresentable {
         if #available(iOS 14.0, *) {
             label.lineBreakStrategy = titleLineBreakStrategy
         }
-        label.adjustsFontForContentSizeCategory = true
+        label.adjustsFontForContentSizeCategory = adjustsFontForContentSizeCategory
         label.allowsDefaultTighteningForTruncation = true
         label.textAlignment = .natural
         label.setContentCompressionResistancePriority(.required, for: .vertical)
@@ -120,7 +145,8 @@ private struct StableVideoTitleLabel: UIViewRepresentable {
             fontName: font.fontName,
             pointSize: font.pointSize,
             lineLimit: lineLimit,
-            preferredWidth: preferredWidth
+            preferredWidth: preferredWidth,
+            adjustsFontForContentSizeCategory: adjustsFontForContentSizeCategory
         )
         guard context.coordinator.lastSignature != signature else { return }
         context.coordinator.lastSignature = signature
@@ -130,6 +156,7 @@ private struct StableVideoTitleLabel: UIViewRepresentable {
         if #available(iOS 14.0, *) {
             label.lineBreakStrategy = titleLineBreakStrategy
         }
+        label.adjustsFontForContentSizeCategory = adjustsFontForContentSizeCategory
         label.attributedText = attributedTitle
     }
 

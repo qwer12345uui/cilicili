@@ -48,13 +48,13 @@ private struct SearchUserNameLine: View {
     var body: some View {
         HStack(spacing: 6) {
             Text(user.name)
-                .font(.subheadline.weight(.semibold))
+                .appTypography(.author, fallback: .subheadline.weight(.semibold))
                 .foregroundStyle(.primary)
                 .lineLimit(1)
 
             if user.isFollowing == true {
                 Label("已关注", systemImage: "checkmark.circle.fill")
-                    .font(.caption2.weight(.semibold))
+                    .appTypography(.badge, fallback: .caption2.weight(.semibold))
                     .foregroundStyle(.pink)
             }
         }
@@ -67,12 +67,12 @@ private struct SearchUserDescriptionText: View {
     var body: some View {
         if let sign = user.sign, !sign.isEmpty {
             Text(sign)
-                .font(.caption)
+                .appTypography(.settingsSubtitle, fallback: .caption)
                 .foregroundStyle(.secondary)
                 .lineLimit(1)
         } else if let officialDescription = user.officialDescription, !officialDescription.isEmpty {
             Text(officialDescription)
-                .font(.caption)
+                .appTypography(.settingsSubtitle, fallback: .caption)
                 .foregroundStyle(.secondary)
                 .lineLimit(1)
         }
@@ -87,7 +87,7 @@ private struct SearchUserMetadataLine: View {
             SearchMetadataLabel(text: BiliFormatters.compactCount(user.fans), systemImage: "person.2")
             SearchMetadataLabel(text: BiliFormatters.compactCount(user.videos), systemImage: "play.square.stack")
         }
-        .font(.caption2)
+        .appTypography(.tertiaryMetadata, fallback: .caption2)
         .foregroundStyle(.tertiary)
     }
 }

@@ -7,6 +7,7 @@ struct VideoDetailContentPage: View {
     let runtimeSettings: VideoDetailRuntimeSettingsSnapshot
     let onShowNetworkDiagnostics: () -> Void
     let onShowFavoriteFolders: () -> Void
+    let onShowCoinPicker: () -> Void
     let onReply: (Comment) -> Void
 
     var body: some View {
@@ -23,6 +24,7 @@ struct VideoDetailContentPage: View {
                 runtimeSettings: runtimeSettings,
                 onShowNetworkDiagnostics: onShowNetworkDiagnostics,
                 onShowFavoriteFolders: onShowFavoriteFolders,
+                onShowCoinPicker: onShowCoinPicker,
                 onReply: onReply
             )
         }

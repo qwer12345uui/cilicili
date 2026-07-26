@@ -1,8 +1,8 @@
 import SwiftUI
 
 struct BiliGlassSegmentedControl<Option: Identifiable & Hashable>: View {
-    @Environment(\.appThemeTintColor) private var appTintColor
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.colorScheme) private var colorScheme
 
     let options: [Option]
     let selected: Option
@@ -36,10 +36,18 @@ struct BiliGlassSegmentedControl<Option: Identifiable & Hashable>: View {
             ZStack(alignment: .leading) {
                 if !options.isEmpty {
                     selectedCapsule(width: segmentWidth)
-                        .offset(x: 3 + CGFloat(selectedIndex) * (segmentWidth + 2))
+                        .offset(x: 3 + CGFloat(selectedIndex) * segmentWidth)
                 }
 
-                HStack(spacing: 2) {
+                if options.count > 1 {
+                    ForEach(1..<options.count, id: \.self) { boundary in
+                        segmentDivider
+                            .opacity(showsDivider(at: boundary) ? 1 : 0)
+                            .offset(x: 3 + CGFloat(boundary) * segmentWidth)
+                    }
+                }
+
+                HStack(spacing: 0) {
                     ForEach(options) { option in
                         segmentButton(for: option)
                     }
@@ -53,15 +61,40 @@ struct BiliGlassSegmentedControl<Option: Identifiable & Hashable>: View {
     }
 
     private func segmentWidth(in containerWidth: CGFloat) -> CGFloat {
-        let spacing = CGFloat(max(options.count - 1, 0)) * 2
-        let contentWidth = max(containerWidth - 6 - spacing, 0)
+        let contentWidth = max(containerWidth - 6, 0)
         return options.isEmpty ? 0 : contentWidth / CGFloat(options.count)
     }
 
     private func selectedCapsule(width: CGFloat) -> some View {
-        Color.clear
+        Capsule()
+            .fill(selectedFill)
+            .overlay {
+                Capsule()
+                    .strokeBorder(Color.primary.opacity(0.06), lineWidth: 0.5)
+            }
+            .shadow(
+                color: .black.opacity(colorScheme == .dark ? 0.20 : 0.08),
+                radius: 3,
+                x: 0,
+                y: 1
+            )
             .frame(width: width, height: 30)
-            .biliBottomTabGlassEffect(interactive: true, in: Capsule())
+    }
+
+    private var selectedFill: Color {
+        colorScheme == .dark
+            ? Color.white.opacity(0.16)
+            : Color(.systemBackground).opacity(0.96)
+    }
+
+    private var segmentDivider: some View {
+        Rectangle()
+            .fill(Color.primary.opacity(colorScheme == .dark ? 0.16 : 0.12))
+            .frame(width: 0.5, height: 18)
+    }
+
+    private func showsDivider(at boundary: Int) -> Bool {
+        boundary != selectedIndex && boundary != selectedIndex + 1
     }
 
     private func segmentButton(for option: Option) -> some View {
@@ -77,13 +110,12 @@ struct BiliGlassSegmentedControl<Option: Identifiable & Hashable>: View {
                 .font(.caption.weight(.semibold))
                 .lineLimit(1)
                 .minimumScaleFactor(0.78)
-                .foregroundStyle(isSelected ? Color.primary : Color.secondary)
+                .foregroundStyle(Color.primary.opacity(isSelected ? 1 : 0.72))
                 .frame(maxWidth: .infinity)
                 .frame(height: 30)
-                .contentShape(Capsule())
+                .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .tint(isSelected ? appTintColor : .secondary)
         .accessibilityLabel(title(option))
         .accessibilityValue(isSelected ? "已选中" : "")
     }

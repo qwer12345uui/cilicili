@@ -7,7 +7,10 @@ struct LiveRoomMinimalDetailHeader: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            PlaybackDetailTitleText(text: titleText)
+            PlaybackDetailTitleText(
+                text: titleText,
+                typographyRole: .liveRoomTitle
+            )
                 .commentCopyContextMenu(text: titleText, title: "复制标题")
 
             HStack(spacing: 0) {

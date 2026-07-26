@@ -2,11 +2,13 @@ import SwiftUI
 
 struct MineContentView: View {
     @ObservedObject var viewModel: MineViewModel
+    @ObservedObject var accountMessageViewModel: AccountMessageCenterViewModel
     @ObservedObject var sessionStore: SessionStore
     @ObservedObject var libraryStore: LibraryStore
     let onQRCodeLogin: () -> Void
     let onSMSLogin: () -> Void
     let onWebLogin: () -> Void
+    let onOpenRoute: (MineOverlayRoute) -> Void
 
     var body: some View {
         Form {
@@ -18,9 +20,17 @@ struct MineContentView: View {
                 onWebLogin: onWebLogin
             )
 
-            MineAccountLibrarySection(viewModel: viewModel)
+            MineAccountLibrarySection(
+                viewModel: viewModel,
+                accountMessageViewModel: accountMessageViewModel,
+                isLoggedIn: sessionStore.isLoggedIn,
+                onOpenRoute: onOpenRoute
+            )
 
-            MineSettingsSection(libraryStore: libraryStore)
+            MineSettingsSection(
+                libraryStore: libraryStore,
+                onOpenRoute: onOpenRoute
+            )
             MineAboutSection()
         }
         .tint(libraryStore.appTintColor)

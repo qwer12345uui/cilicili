@@ -44,7 +44,7 @@ struct MineDisplaySettingsSection: View {
                     Label("图片质量", systemImage: "photo")
 
                     Text(libraryStore.remoteImageQualityPreference.detail)
-                        .font(.caption)
+                        .appTypography(.settingsSubtitle, fallback: .caption)
                         .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
                 }
@@ -68,7 +68,7 @@ struct MineDisplaySettingsSection: View {
                     Label("统一视频封面描边实验", systemImage: "rectangle.dashed")
 
                     Text("开着后视频封面用 iOS 自适应分隔线做一层更清楚的细描边，保留轻阴影，不给整张图盖玻璃。")
-                        .font(.caption)
+                        .appTypography(.settingsSubtitle, fallback: .caption)
                         .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
                 }
@@ -82,7 +82,7 @@ struct MineDisplaySettingsSection: View {
                     Label("快速滚动图片负载抑制实验", systemImage: "photo.stack")
 
                     Text("开着时猛刷列表会先顾屏幕里的封面，后台预取等停下来再做，滑动更稳；关掉后预取会边滑边跑。")
-                        .font(.caption)
+                        .appTypography(.settingsSubtitle, fallback: .caption)
                         .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
                 }
@@ -96,7 +96,7 @@ struct MineDisplaySettingsSection: View {
                     Label("图片 CDN 自动切换实验", systemImage: "arrow.triangle.branch")
 
                     Text("开着时某个图片节点临时抽风会短暂换别的节点拿图，封面更不容易卡住；关掉后只用原节点。")
-                        .font(.caption)
+                        .appTypography(.settingsSubtitle, fallback: .caption)
                         .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
                 }
@@ -110,7 +110,7 @@ struct MineDisplaySettingsSection: View {
                     Label("记录图片加载诊断", systemImage: "chart.bar.xaxis")
 
                     Text("开着会记缓存、滚动和 CDN 的汇总数字，方便复制给我分析；不记图片、链接、账号或 Cookie。关掉后不再记数，图片照常加载。")
-                        .font(.caption)
+                        .appTypography(.settingsSubtitle, fallback: .caption)
                         .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
                 }
@@ -153,6 +153,20 @@ struct MineDisplaySettingsSection: View {
                 Label("滑动时缩小底部 Tab", systemImage: "arrow.down.right.and.arrow.up.left")
             }
 
+            Toggle(isOn: Binding(
+                get: { libraryStore.homeNavigationModeSwitcherExperimentEnabled },
+                set: { libraryStore.setHomeNavigationModeSwitcherExperimentEnabled($0) }
+            )) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Label("首页推荐/热门胶囊实验", systemImage: "rectangle.split.2x1")
+
+                    Text("开着后推荐和热门系统切换控件会显示在首页顶部正中间，消息按钮保持在右侧；下滑时会一起收起，来回切换不会自动刷新推荐。关掉后恢复原来的更多按钮。")
+                        .appTypography(.settingsSubtitle, fallback: .caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+
             Picker(selection: Binding(
                 get: { libraryStore.scrollEdgeEffectPreference },
                 set: { libraryStore.setScrollEdgeEffectPreference($0) }
@@ -173,7 +187,7 @@ struct MineDisplaySettingsSection: View {
                     Label("强制滑动 120Hz 刷新率", systemImage: "speedometer")
 
                     Text("开启后滑动会强制使用 120Hz，可能会引起耗电增加，请谨慎开启。")
-                        .font(.caption)
+                        .appTypography(.settingsSubtitle, fallback: .caption)
                         .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
                 }
@@ -357,7 +371,7 @@ private struct MineImageCacheControl: View {
             }
 
             Text(summaryDetail)
-                .font(.caption)
+                .appTypography(.settingsSubtitle, fallback: .caption)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
 

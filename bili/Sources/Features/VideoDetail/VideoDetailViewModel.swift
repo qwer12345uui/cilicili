@@ -53,6 +53,7 @@ final class VideoDetailViewModel: ObservableObject {
         }
     }
     var interactionMutationState = VideoDetailInteractionMutationState()
+    var interactionMutationRevision = 0
     @Published var favoriteFolders: [FavoriteFolder] = [] {
         didSet { scheduleRenderStoreSync(.favoriteFolder) }
     }
@@ -117,6 +118,7 @@ final class VideoDetailViewModel: ObservableObject {
     var pendingPlaybackHistoryResumeTime: TimeInterval?
     var pendingPlaybackHistoryResumeCID: Int?
     var didResolveCloudHistoryResume = false
+    var manuallySelectedPageCID: Int?
     var uploaderInteractionLoadState = VideoDetailUploaderInteractionLoadState()
     var lastUserSeekAt: Date?
     var loadTiming = VideoDetailViewModelLoadTimingState()

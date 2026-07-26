@@ -2,11 +2,26 @@ import SwiftUI
 
 struct MineAccountLibrarySection: View {
     @ObservedObject var viewModel: MineViewModel
+    @ObservedObject var accountMessageViewModel: AccountMessageCenterViewModel
+    let isLoggedIn: Bool
+    let onOpenRoute: (MineOverlayRoute) -> Void
 
     var body: some View {
         Section {
-            NavigationLink {
-                AccountLibraryListPage(kind: .history, viewModel: viewModel)
+            if isLoggedIn {
+                MineOverlayNavigationButton {
+                    onOpenRoute(.accountMessages)
+                } label: {
+                    AccountLibraryButtonRow(
+                        title: "账号消息",
+                        systemImage: "bell.badge",
+                        badgeText: accountMessageViewModel.totalUnreadBadgeText
+                    )
+                }
+            }
+
+            MineOverlayNavigationButton {
+                onOpenRoute(.history)
             } label: {
                 AccountLibraryButtonRow(
                     title: "观看记录",
@@ -14,8 +29,8 @@ struct MineAccountLibrarySection: View {
                 )
             }
 
-            NavigationLink {
-                AccountLibraryListPage(kind: .favorites, viewModel: viewModel)
+            MineOverlayNavigationButton {
+                onOpenRoute(.favorites)
             } label: {
                 AccountLibraryButtonRow(
                     title: "账号收藏",

@@ -15,18 +15,40 @@ extension VideoDetailViewModel {
         dialogThreadLoadTokens.removeAll()
     }
 
-    func clearCommentThreadCaches() {
-        replyThreads = [:]
-        replyThreadStates = [:]
-        replyThreadPages = [:]
-        replyThreadHasMore = [:]
+    func clearCommentThreadCaches(preservingRootID: Int? = nil) {
+        if let preservingRootID {
+            let preservedReplies = replyThreads[preservingRootID]
+            let preservedState = replyThreadStates[preservingRootID]
+            let preservedPage = replyThreadPages[preservingRootID]
+            let preservedHasMore = replyThreadHasMore[preservingRootID]
+            replyThreads = preservedReplies.map { [preservingRootID: $0] } ?? [:]
+            replyThreadStates = preservedState.map { [preservingRootID: $0] } ?? [:]
+            replyThreadPages = preservedPage.map { [preservingRootID: $0] } ?? [:]
+            replyThreadHasMore = preservedHasMore.map { [preservingRootID: $0] } ?? [:]
+        } else {
+            replyThreads = [:]
+            replyThreadStates = [:]
+            replyThreadPages = [:]
+            replyThreadHasMore = [:]
+            commentThreadState.deepLinkAnchor = nil
+        }
         dialogThreads = [:]
         dialogThreadStates = [:]
     }
 
     func resetCommentThreadStateForNewComments() {
         clearCommentThreadLoads()
-        clearCommentThreadCaches()
+        guard let anchor = commentThreadState.deepLinkAnchor,
+              anchor.contextKey == commentTarget?.contextKey
+        else {
+            clearCommentThreadCaches()
+            return
+        }
+        clearCommentThreadCaches(preservingRootID: anchor.rootID)
+    }
+
+    func clearDeepLinkCommentThreadAnchor() {
+        commentThreadState.deepLinkAnchor = nil
     }
 
     @discardableResult
@@ -42,7 +64,8 @@ extension VideoDetailViewModel {
         target: VideoDetailCommentTarget
     ) -> Bool {
         replyThreadLoadTokens[commentID] == token
-            && comments.contains { $0.id == commentID }
+            && (comments.contains { $0.id == commentID }
+                || replyThreadStates[commentID] != nil)
             && isCurrentCommentTarget(target)
     }
 
@@ -65,7 +88,8 @@ extension VideoDetailViewModel {
         target: VideoDetailCommentTarget
     ) -> Bool {
         dialogThreadLoadTokens[key] == token
-            && comments.contains { $0.id == rootID }
+            && (comments.contains { $0.id == rootID }
+                || replyThreadStates[rootID] != nil)
             && isCurrentCommentTarget(target)
     }
 

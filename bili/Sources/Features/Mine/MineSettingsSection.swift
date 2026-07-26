@@ -2,11 +2,12 @@ import SwiftUI
 
 struct MineSettingsSection: View {
     @ObservedObject var libraryStore: LibraryStore
+    let onOpenRoute: (MineOverlayRoute) -> Void
 
     var body: some View {
         Section("设置") {
-            NavigationLink {
-                MineInterfaceSettingsView(libraryStore: libraryStore)
+            MineOverlayNavigationButton {
+                onOpenRoute(.interfaceSettings)
             } label: {
                 SettingsNavigationRow(
                     title: "界面显示",
@@ -15,8 +16,8 @@ struct MineSettingsSection: View {
                 )
             }
 
-            NavigationLink {
-                MineHomeAndSearchSettingsView(libraryStore: libraryStore)
+            MineOverlayNavigationButton {
+                onOpenRoute(.homeAndSearchSettings)
             } label: {
                 SettingsNavigationRow(
                     title: "首页与搜索",
@@ -25,8 +26,8 @@ struct MineSettingsSection: View {
                 )
             }
 
-            NavigationLink {
-                MinePlaybackSettingsView(libraryStore: libraryStore)
+            MineOverlayNavigationButton {
+                onOpenRoute(.playbackSettings)
             } label: {
                 SettingsNavigationRow(
                     title: "播放偏好",
@@ -35,8 +36,8 @@ struct MineSettingsSection: View {
                 )
             }
 
-            NavigationLink {
-                MineContentFilterSettingsView(libraryStore: libraryStore)
+            MineOverlayNavigationButton {
+                onOpenRoute(.contentFilterSettings)
             } label: {
                 SettingsNavigationRow(
                     title: "内容过滤",
@@ -45,8 +46,8 @@ struct MineSettingsSection: View {
                 )
             }
 
-            NavigationLink {
-                MinePrivacySettingsView(libraryStore: libraryStore)
+            MineOverlayNavigationButton {
+                onOpenRoute(.privacySettings)
             } label: {
                 SettingsNavigationRow(
                     title: "隐私",
@@ -54,6 +55,7 @@ struct MineSettingsSection: View {
                     systemImage: "hand.raised"
                 )
             }
+
         }
     }
 

@@ -1,7 +1,9 @@
 import Foundation
 
 extension VideoDetailViewModel {
-    func refreshDetailMetadata() async {
+    func refreshDetailMetadata(
+        preserving confirmation: VideoDetailInteractionMutationConfirmation? = nil
+    ) async {
         let bvid = detail.bvid
         let aid = detail.aid
         do {
@@ -19,6 +21,6 @@ extension VideoDetailViewModel {
         guard isCurrentVideoContext(aid: aid, bvid: bvid) else { return }
         await loadUploaderProfile(bvid: bvid, aid: aid)
         guard isCurrentVideoContext(aid: aid, bvid: bvid) else { return }
-        await loadInteractionState(aid: aid, bvid: bvid)
+        await loadInteractionState(aid: aid, bvid: bvid, preserving: confirmation)
     }
 }

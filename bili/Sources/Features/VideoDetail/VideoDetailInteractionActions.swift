@@ -19,7 +19,15 @@ extension VideoDetailViewModel {
                 interactionState.isLiked = targetState
             } catch {
                 guard isCurrentVideoContext(aid: aid, bvid: bvid) else { throw CancellationError() }
-                guard recoverLikeStateMismatchIfNeeded(error, targetState: targetState) else {
+                if recoverLikeStateMismatchIfNeeded(error, targetState: targetState) {
+                    return
+                }
+                guard await recoverAmbiguousLikeMutationIfNeeded(
+                    error,
+                    targetState: targetState,
+                    aid: aid,
+                    bvid: bvid
+                ) else {
                     throw error
                 }
             }

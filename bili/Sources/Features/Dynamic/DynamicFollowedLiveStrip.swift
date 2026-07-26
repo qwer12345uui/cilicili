@@ -71,10 +71,9 @@ struct FollowedLiveStrip: View {
                 .buttonStyle(.plain)
             }
         } else if item.owner.mid > 0 {
-            NavigationLink(value: item.owner) {
+            VideoOwnerRouteLink(owner: item.owner) {
                 FollowedLiveAvatar(item: item)
             }
-            .buttonStyle(.plain)
         } else {
             FollowedLiveAvatar(item: item)
         }

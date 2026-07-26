@@ -8,8 +8,11 @@ struct VideoDetailViewContentResolver: View {
     @ObservedObject var viewModel: VideoDetailViewModel
     @Binding var selectedContentTab: VideoDetailContentTab
     @Binding var replySheetComment: Comment?
+    @Binding var replySheetSecondaryID: Int?
+    @Binding var pendingCommentAnchor: VideoCommentAnchor?
     @Binding var isShowingDanmakuSettings: Bool
     @Binding var isShowingFavoriteFolders: Bool
+    @Binding var isShowingCoinPicker: Bool
     @Binding var isShowingNetworkDiagnostics: Bool
     let onNavigateBack: () -> Void
 
@@ -20,8 +23,10 @@ struct VideoDetailViewContentResolver: View {
             runtimeSettings: runtimeSettings,
             selectedContentTab: $selectedContentTab,
             replySheetComment: $replySheetComment,
+            replySheetSecondaryID: $replySheetSecondaryID,
             isShowingDanmakuSettings: $isShowingDanmakuSettings,
             isShowingFavoriteFolders: $isShowingFavoriteFolders,
+            isShowingCoinPicker: $isShowingCoinPicker,
             isShowingNetworkDiagnostics: $isShowingNetworkDiagnostics,
             onNavigateBack: onNavigateBack
         )
@@ -31,11 +36,48 @@ struct VideoDetailViewContentResolver: View {
             libraryStore: dependencies.libraryStore,
             sheetState: VideoDetailSheetState(
                 replySheetComment: $replySheetComment,
+                replySheetSecondaryID: $replySheetSecondaryID,
                 isShowingFavoriteFolders: $isShowingFavoriteFolders,
+                isShowingCoinPicker: $isShowingCoinPicker,
                 isShowingDanmakuSettings: $isShowingDanmakuSettings,
                 isShowingNetworkDiagnostics: $isShowingNetworkDiagnostics
             )
         )
+        .task(id: commentAnchorTaskID) {
+            await presentPendingCommentIfPossible()
+        }
+    }
+
+    private var commentAnchorTaskID: String {
+        guard let pendingCommentAnchor else { return "none" }
+        return [
+            String(pendingCommentAnchor.rootID),
+            pendingCommentAnchor.secondaryID.map(String.init) ?? "-",
+            viewModel.commentTarget?.contextKey ?? "pending-detail"
+        ].joined(separator: "|")
+    }
+
+    @MainActor
+    private func presentPendingCommentIfPossible() async {
+        guard let pendingCommentAnchor,
+              viewModel.commentTarget != nil
+        else {
+            return
+        }
+
+        let anchor = pendingCommentAnchor
+        let loadedThread = await viewModel.loadCommentRoot(for: anchor)
+        guard !Task.isCancelled,
+              self.pendingCommentAnchor == anchor
+        else {
+            return
+        }
+
+        self.pendingCommentAnchor = nil
+        selectedContentTab = .comments
+        replySheetSecondaryID = loadedThread?.focusedReplyID
+        guard let loadedThread else { return }
+        replySheetComment = loadedThread.rootComment
     }
 }
 

@@ -10,6 +10,7 @@ struct DynamicRichTextView: View {
     let preferredWidth: CGFloat?
     private let textInput: DynamicAttributedTextInput
     @Environment(\.openAppURLAction) private var openAppURL
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     init(
         segments: [DynamicTextSegment],
@@ -31,7 +32,8 @@ struct DynamicRichTextView: View {
             baseFont: font,
             textColor: UIColor(textColor),
             emoteSize: emoteSize,
-            maxLines: maxLines
+            maxLines: maxLines,
+            typographyRole: nil
         )
     }
 
@@ -46,18 +48,20 @@ struct DynamicRichTextView: View {
     }
 
     var body: some View {
-        if let plainText = textInput.nativePlainText {
-            Text(textInput.nativeAttributedPlainText(plainText))
-                .font(textInput.nativeSwiftUIFont)
-                .foregroundStyle(Color(textInput.textColor))
-                .lineLimit(textInput.maxLines)
+        let input = resolvedTextInput
+
+        if let plainText = input.nativePlainText {
+            Text(input.nativeAttributedPlainText(plainText))
+                .font(input.nativeSwiftUIFont)
+                .foregroundStyle(Color(input.textColor))
+                .lineLimit(input.maxLines)
                 .multilineTextAlignment(.leading)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .fixedSize(horizontal: false, vertical: true)
                 .accessibilityLabel(plainText)
         } else {
             DynamicAttributedTextLabel(
-                input: textInput,
+                input: input,
                 preferredWidth: preferredWidth,
                 onURLTap: { url in
                     openAppURL?(url)
@@ -65,5 +69,11 @@ struct DynamicRichTextView: View {
             )
             .frame(maxWidth: .infinity, alignment: .leading)
         }
+    }
+
+    private var resolvedTextInput: DynamicAttributedTextInput {
+        textInput.resolvingTypography(
+            contentSizeCategory: dynamicTypeSize.uiContentSizeCategory
+        )
     }
 }

@@ -84,36 +84,6 @@ struct LivePlayerPiliPodFullscreenBackButton: View {
     }
 }
 
-struct LivePlayerRoomSummaryControl: View {
-    @Environment(\.playerNativeControlMetrics) private var metrics
-    @ObservedObject var viewModel: LiveRoomViewModel
-
-    var body: some View {
-        HStack(spacing: 7) {
-            PlaybackDetailOwnerAvatar(
-                owner: viewModel.anchorOwner,
-                fallbackURLString: viewModel.anchorFace,
-                side: max(metrics.controlHeight - 8, 24),
-                pixelSize: 112
-            )
-
-            Text(viewModel.title)
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(.white)
-                .lineLimit(1)
-                .truncationMode(.tail)
-                .frame(maxWidth: 178, alignment: .leading)
-        }
-        .padding(.horizontal, 8)
-        .frame(height: metrics.controlHeight)
-        .fixedSize(horizontal: true, vertical: false)
-        .biliPlayerClearGlass(interactive: false, in: Capsule())
-        .allowsHitTesting(false)
-        .accessibilityElement(children: .combine)
-        .accessibilityLabel("直播间：\(viewModel.title)")
-    }
-}
-
 struct LivePlayerAccessory: View {
     @ObservedObject var viewModel: LiveRoomViewModel
     let usesCompactLayout: Bool

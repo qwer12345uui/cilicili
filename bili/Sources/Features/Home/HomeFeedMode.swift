@@ -1,8 +1,10 @@
 import Foundation
 
-enum HomeFeedMode: String, CaseIterable, Hashable {
+enum HomeFeedMode: String, CaseIterable, Hashable, Identifiable {
     case recommend
     case popular
+
+    var id: String { rawValue }
 
     var title: String {
         switch self {
@@ -21,4 +23,9 @@ enum HomeFeedMode: String, CaseIterable, Hashable {
             return "chart.line.uptrend.xyaxis"
         }
     }
+}
+
+nonisolated enum HomeNavigationModeSwitcherExperiment {
+    static let storageKey = "cc.bili.home.navigationModeSwitcherExperimentEnabled.v1"
+    static let defaultIsEnabled = true
 }

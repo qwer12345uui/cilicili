@@ -5,18 +5,24 @@ struct MineView: View {
     @EnvironmentObject private var dependencies: AppDependencies
     @EnvironmentObject private var sessionStore: SessionStore
     @EnvironmentObject private var libraryStore: LibraryStore
-    @StateObject private var holder = MineViewModelHolder()
+    @ObservedObject var holder: MineViewModelHolder
+    let onOpenRoute: (MineOverlayRoute) -> Void
     @State private var loginSheet: LoginSheet?
     @State private var hasLoadedAccountSummary = false
 
     var body: some View {
         Group {
-            if let viewModel = holder.viewModel {
-                content(viewModel)
+            if let viewModel = holder.viewModel,
+               let accountMessageViewModel = holder.accountMessageViewModel {
+                content(viewModel, accountMessageViewModel: accountMessageViewModel)
             } else {
                 ProgressView()
                     .task {
-                        holder.configure(api: dependencies.api, sessionStore: sessionStore)
+                        holder.configure(
+                            api: dependencies.api,
+                            sessionStore: sessionStore,
+                            accountMessageService: dependencies.accountMessageService
+                        )
                     }
             }
         }
@@ -24,6 +30,7 @@ struct MineView: View {
         .background(Color(.systemBackground))
         .rootNavigationTitle("我的")
         .nativeTopNavigationChrome()
+        .environment(\.scrollEdgeEffectPreference, libraryStore.scrollEdgeEffectPreference)
         .sheet(item: $loginSheet) { sheet in
             if let viewModel = holder.viewModel {
                 switch sheet {
@@ -44,17 +51,28 @@ struct MineView: View {
     }
 
     @ViewBuilder
-    private func content(_ viewModel: MineViewModel) -> some View {
+    private func content(
+        _ viewModel: MineViewModel,
+        accountMessageViewModel: AccountMessageCenterViewModel
+    ) -> some View {
         MineContentView(
             viewModel: viewModel,
+            accountMessageViewModel: accountMessageViewModel,
             sessionStore: sessionStore,
             libraryStore: libraryStore,
             onQRCodeLogin: { loginSheet = .qrCode },
             onSMSLogin: { loginSheet = .sms },
-            onWebLogin: { loginSheet = .web }
+            onWebLogin: { loginSheet = .web },
+            onOpenRoute: onOpenRoute
         )
         .task {
             await refreshAccountSummaryIfNeeded(viewModel)
+        }
+        .task(id: sessionStore.playbackCredentialVersion) {
+            guard sessionStore.isLoggedIn else {
+                return
+            }
+            await accountMessageViewModel.refreshUnread()
         }
     }
 
@@ -80,10 +98,15 @@ private enum LoginSheet: Identifiable, Hashable {
 @MainActor
 final class MineViewModelHolder: ObservableObject {
     @Published var viewModel: MineViewModel?
+    @Published var accountMessageViewModel: AccountMessageCenterViewModel?
     private var cancellable: AnyCancellable?
     private var lastSnapshot: MineRenderSnapshot?
 
-    func configure(api: BiliAPIClient, sessionStore: SessionStore) {
+    func configure(
+        api: BiliAPIClient,
+        sessionStore: SessionStore,
+        accountMessageService: AccountMessageService
+    ) {
         if viewModel == nil {
             let viewModel = MineViewModel(api: api, sessionStore: sessionStore)
             self.viewModel = viewModel
@@ -97,6 +120,12 @@ final class MineViewModelHolder: ObservableObject {
                     self.objectWillChange.send()
                 }
             }
+        }
+        if accountMessageViewModel == nil {
+            accountMessageViewModel = AccountMessageCenterViewModel(
+                service: accountMessageService,
+                sessionStore: sessionStore
+            )
         }
     }
 }

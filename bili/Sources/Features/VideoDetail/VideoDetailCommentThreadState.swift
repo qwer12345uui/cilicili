@@ -1,5 +1,10 @@
 import Foundation
 
+struct VideoDetailCommentThreadAnchor: Equatable {
+    let contextKey: String
+    let rootID: Int
+}
+
 struct VideoDetailCommentThreadState {
     var replyThreads: [Int: [Comment]] = [:]
     var replyThreadStates: [Int: LoadingState] = [:]
@@ -9,6 +14,7 @@ struct VideoDetailCommentThreadState {
     var dialogThreads: [String: [Comment]] = [:]
     var dialogThreadStates: [String: LoadingState] = [:]
     var dialogThreadLoadTokens: [String: UUID] = [:]
+    var deepLinkAnchor: VideoDetailCommentThreadAnchor?
 }
 
 extension VideoDetailViewModel {

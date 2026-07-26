@@ -3,13 +3,26 @@ import UIKit
 
 struct VideoDetailSystemBackGestureBridge: UIViewControllerRepresentable {
     let onNavigationGestureBegan: (() -> Void)?
+    let allowsSingleControllerNavigation: Bool
+
+    init(
+        onNavigationGestureBegan: (() -> Void)?,
+        allowsSingleControllerNavigation: Bool = false
+    ) {
+        self.onNavigationGestureBegan = onNavigationGestureBegan
+        self.allowsSingleControllerNavigation = allowsSingleControllerNavigation
+    }
 
     func makeUIViewController(context _: Context) -> Controller {
-        Controller(onNavigationGestureBegan: onNavigationGestureBegan)
+        Controller(
+            onNavigationGestureBegan: onNavigationGestureBegan,
+            allowsSingleControllerNavigation: allowsSingleControllerNavigation
+        )
     }
 
     func updateUIViewController(_ uiViewController: Controller, context _: Context) {
         uiViewController.onNavigationGestureBegan = onNavigationGestureBegan
+        uiViewController.allowsSingleControllerNavigation = allowsSingleControllerNavigation
         if onNavigationGestureBegan == nil {
             uiViewController.detachFromSystemBackGestures()
         } else {
@@ -22,9 +35,14 @@ struct VideoDetailSystemBackGestureBridge: UIViewControllerRepresentable {
         var configuredScrollPanIDs = Set<ObjectIdentifier>()
         weak var attachedNavigationController: UINavigationController?
         var onNavigationGestureBegan: (() -> Void)?
+        var allowsSingleControllerNavigation: Bool
 
-        init(onNavigationGestureBegan: (() -> Void)?) {
+        init(
+            onNavigationGestureBegan: (() -> Void)?,
+            allowsSingleControllerNavigation: Bool
+        ) {
             self.onNavigationGestureBegan = onNavigationGestureBegan
+            self.allowsSingleControllerNavigation = allowsSingleControllerNavigation
             super.init(nibName: nil, bundle: nil)
         }
 

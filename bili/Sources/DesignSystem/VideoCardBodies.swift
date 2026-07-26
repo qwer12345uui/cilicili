@@ -175,7 +175,7 @@ struct VideoCardBorderedCompactBody: View, Equatable {
                             .lineLimit(1)
                     }
                 }
-                .font(.system(size: 12))
+                .appTypography(.compactAuthor, fallback: .system(size: 12))
             }
 
             if !leadingMetadataText.isEmpty || !display.publishTimeText.isEmpty {
@@ -193,7 +193,7 @@ struct VideoCardBorderedCompactBody: View, Equatable {
                             .lineLimit(1)
                     }
                 }
-                .font(.system(size: 11))
+                .appTypography(.tertiaryMetadata, fallback: .system(size: 11))
             }
         }
         .foregroundStyle(.secondary)

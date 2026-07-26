@@ -30,12 +30,25 @@ enum BottomTabMode {
 }
 
 extension View {
-    func videoDestinations() -> some View {
+    func videoDestinations(hidesRootTabBar: Bool = true) -> some View {
         navigationDestination(for: VideoItem.self) { video in
-            VideoDetailView(seedVideo: video)
+            VideoDetailView(
+                seedVideo: video,
+                hidesRootTabBar: hidesRootTabBar
+            )
+        }
+        .navigationDestination(for: VideoCommentRoute.self) { route in
+            VideoDetailView(
+                seedVideo: route.video,
+                hidesRootTabBar: hidesRootTabBar,
+                initialCommentAnchor: route.anchor
+            )
         }
         .navigationDestination(for: PgcSeasonRoute.self) { route in
-            PgcSeasonPlaybackRouteView(route: route)
+            PgcSeasonPlaybackRouteView(
+                route: route,
+                hidesRootTabBar: hidesRootTabBar
+            )
         }
         .navigationDestination(for: VideoOwner.self) { owner in
             UploaderView(owner: owner)

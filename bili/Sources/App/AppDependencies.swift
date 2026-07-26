@@ -8,6 +8,7 @@ final class AppDependencies: ObservableObject {
     let libraryStore: LibraryStore
     let homeRecommendDiagnosticsStore: HomeRecommendDiagnosticsStore
     let api: BiliAPIClient
+    let accountMessageService: AccountMessageService
     let sponsorBlockService: SponsorBlockService
     private let networkMetricsRecorder: BiliNetworkMetricsRecorder
     private var sessionCancellables = Set<AnyCancellable>()
@@ -24,12 +25,14 @@ final class AppDependencies: ObservableObject {
         self.libraryStore = libraryStore
         self.homeRecommendDiagnosticsStore = homeRecommendDiagnosticsStore
         self.networkMetricsRecorder = networkMetricsRecorder
-        self.api = BiliAPIClient(
+        let api = BiliAPIClient(
             session: BiliURLSessionFactory.makeAPISession(delegate: networkMetricsRecorder),
             sessionStore: sessionStore,
             libraryStore: libraryStore,
             homeRecommendDiagnosticsStore: homeRecommendDiagnosticsStore
         )
+        self.api = api
+        self.accountMessageService = AccountMessageService(sessionStore: sessionStore, api: api)
         self.sponsorBlockService = SponsorBlockService()
         sessionStore.$playbackCredentialVersion
             .dropFirst()

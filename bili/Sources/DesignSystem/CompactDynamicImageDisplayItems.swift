@@ -44,7 +44,8 @@ enum CompactDynamicImageDisplayItems {
                 fallbackURL: url,
                 viewerURL: url,
                 mediaBadgeText: item.image.mediaBadgeText,
-                liveVideoURL: item.image.normalizedLiveVideoURL.flatMap(URL.init(string:))
+                liveVideoURL: item.image.normalizedLiveVideoURL.flatMap(URL.init(string:)),
+                aspectRatio: item.aspectRatio
             )
         }
     }

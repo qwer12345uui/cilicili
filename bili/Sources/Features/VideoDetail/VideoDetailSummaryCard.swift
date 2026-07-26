@@ -6,6 +6,7 @@ struct VideoDetailSummaryCard: View {
     let showsNetworkDiagnosticsButton: Bool
     let showsVideoInfo: Bool
     let onShowNetworkDiagnostics: () -> Void
+    let onShowCoinPicker: () -> Void
     let renderPack: VideoDetailSummaryCardRenderPack
 
     init(
@@ -14,13 +15,15 @@ struct VideoDetailSummaryCard: View {
         showsNetworkDiagnosticsButton: Bool,
         showsVideoInfo: Bool = true,
         onShowNetworkDiagnostics: @escaping () -> Void,
-        onShowFavoriteFolders: @escaping () -> Void
+        onShowFavoriteFolders: @escaping () -> Void,
+        onShowCoinPicker: @escaping () -> Void
     ) {
         self.viewModel = viewModel
         self.contentWidth = contentWidth
         self.showsNetworkDiagnosticsButton = showsNetworkDiagnosticsButton
         self.showsVideoInfo = showsVideoInfo
         self.onShowNetworkDiagnostics = onShowNetworkDiagnostics
+        self.onShowCoinPicker = onShowCoinPicker
         renderPack = VideoDetailSummaryCardRenderPack(
             viewModel: viewModel,
             showFavoriteFolders: onShowFavoriteFolders
@@ -41,7 +44,7 @@ struct VideoDetailSummaryCard: View {
                 contentWidth: contentWidth,
                 onFollow: renderPack.actions.follow,
                 onLike: renderPack.actions.like,
-                onCoin: renderPack.actions.coin,
+                onCoin: showCoinPicker,
                 onFavorite: renderPack.actions.favorite,
                 onShareTap: renderPack.actions.share
             )
@@ -57,5 +60,10 @@ struct VideoDetailSummaryCard: View {
             )
         }
         .frame(width: contentWidth, alignment: .leading)
+    }
+
+    private func showCoinPicker() {
+        Haptics.medium()
+        onShowCoinPicker()
     }
 }

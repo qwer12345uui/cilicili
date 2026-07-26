@@ -20,7 +20,7 @@ struct SearchArticleResultRow: View {
 
             VStack(alignment: .leading, spacing: 5) {
                 Text(article.title)
-                    .font(.subheadline.weight(.semibold))
+                    .appTypography(.compactVideoTitle, fallback: .subheadline.weight(.semibold))
                     .foregroundStyle(.primary)
                     .lineLimit(2)
 
@@ -47,7 +47,7 @@ private struct SearchArticleMetaLine: View {
                 Text(publishDate)
             }
         }
-        .font(.caption)
+        .appTypography(.metadata, fallback: .caption)
         .foregroundStyle(.secondary)
         .lineLimit(1)
     }
@@ -59,7 +59,7 @@ private struct SearchArticleDescriptionText: View {
     var body: some View {
         if let description = article.description, !description.isEmpty {
             Text(description.removingHTMLTags())
-                .font(.caption)
+                .appTypography(.settingsSubtitle, fallback: .caption)
                 .foregroundStyle(.secondary)
                 .lineLimit(1)
         }
@@ -75,7 +75,7 @@ private struct SearchArticleMetricsLine: View {
             SearchMetadataLabel(text: BiliFormatters.compactCount(article.reply), systemImage: "bubble.left")
             SearchMetadataLabel(text: BiliFormatters.compactCount(article.like), systemImage: "hand.thumbsup")
         }
-        .font(.caption2)
+        .appTypography(.tertiaryMetadata, fallback: .caption2)
         .foregroundStyle(.tertiary)
     }
 }

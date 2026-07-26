@@ -22,7 +22,8 @@ struct HomeFeedVideoCardLabel: View {
             VideoCardBorderedCompactBody(
                 display: display,
                 coverSize: metrics.borderedSingleColumnCoverSize ?? CGSize(width: 140, height: 88),
-                usesGenericAuthorIcon: usesGenericAuthorIcon
+                usesGenericAuthorIcon: usesGenericAuthorIcon,
+                showsRecommendReason: false
             )
             .equatable()
         case .doubleColumn:

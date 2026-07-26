@@ -11,8 +11,10 @@ struct VideoDetailShellRepresentable: UIViewControllerRepresentable {
     @ObservedObject var runtimeSettings: VideoDetailRuntimeSettingsStore
     @Binding var selectedContentTab: VideoDetailContentTab
     @Binding var replySheetComment: Comment?
+    @Binding var replySheetSecondaryID: Int?
     @Binding var isShowingDanmakuSettings: Bool
     @Binding var isShowingFavoriteFolders: Bool
+    @Binding var isShowingCoinPicker: Bool
     @Binding var isShowingNetworkDiagnostics: Bool
     let onNavigateBack: () -> Void
 
@@ -28,11 +30,22 @@ struct VideoDetailShellRepresentable: UIViewControllerRepresentable {
             selectedContentTab: $selectedContentTab,
             onShowNetworkDiagnostics: { isShowingNetworkDiagnostics = true },
             onShowFavoriteFolders: { isShowingFavoriteFolders = true },
+            onShowCoinPicker: { isShowingCoinPicker = true },
             onShowDanmakuSettings: { isShowingDanmakuSettings = true },
-            onReply: { replySheetComment = $0 },
+            onReply: {
+                replySheetSecondaryID = nil
+                replySheetComment = $0
+            },
             onNavigateBack: onNavigateBack
         )
     }
 
     func updateUIViewController(_: VideoDetailShellViewController, context _: Context) {}
+
+    static func dismantleUIViewController(
+        _ uiViewController: VideoDetailShellViewController,
+        coordinator _: Void
+    ) {
+        uiViewController.releaseSystemBackGestureOwnership()
+    }
 }

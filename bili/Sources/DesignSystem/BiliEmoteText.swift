@@ -3,6 +3,7 @@ import UIKit
 
 struct BiliEmoteText: View {
     @Environment(\.appThemeTintColor) private var appTintColor
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     let content: CommentContent?
     let plainText: String?
@@ -14,6 +15,8 @@ struct BiliEmoteText: View {
     let leadingNameColor: Color
     let showsLinkButtons: Bool
     let fillsAvailableWidth: Bool
+    let typographyRole: AppTypography.Role?
+    let leadingNameTypographyRole: AppTypography.Role?
 
     @Environment(\.lineLimit) private var lineLimit
     @Environment(\.openAppURLAction) private var openAppURL
@@ -28,7 +31,9 @@ struct BiliEmoteText: View {
         leadingName: String? = nil,
         leadingNameColor: Color = .pink,
         showsLinkButtons: Bool = true,
-        fillsAvailableWidth: Bool = true
+        fillsAvailableWidth: Bool = true,
+        typographyRole: AppTypography.Role? = nil,
+        leadingNameTypographyRole: AppTypography.Role? = nil
     ) {
         self.content = content
         self.plainText = plainText
@@ -40,6 +45,8 @@ struct BiliEmoteText: View {
         self.leadingNameColor = leadingNameColor
         self.showsLinkButtons = showsLinkButtons
         self.fillsAvailableWidth = fillsAvailableWidth
+        self.typographyRole = typographyRole
+        self.leadingNameTypographyRole = leadingNameTypographyRole
     }
 
     var body: some View {
@@ -53,7 +60,8 @@ struct BiliEmoteText: View {
                 accentColor: UIColor(appTintColor),
                 leadingName: leadingName,
                 leadingNameColor: UIColor(leadingNameColor),
-                emoteSize: emoteSize,
+                leadingNameFont: resolvedLeadingNameUIFont,
+                emoteSize: resolvedEmoteSize,
                 lineLimit: lineLimit
             ),
             onURLTap: { url in
@@ -64,8 +72,29 @@ struct BiliEmoteText: View {
     }
 
     private var resolvedUIFont: UIFont {
+        if let typographyRole {
+            return typographyRole.uiFont(
+                contentSizeCategory: dynamicTypeSize.uiContentSizeCategory
+            )
+        }
         let textStyle: UIFont.TextStyle = emoteSize <= 18 ? .caption1 : .subheadline
         return UIFont.preferredFont(forTextStyle: textStyle)
+    }
+
+    private var resolvedLeadingNameUIFont: UIFont? {
+        guard let leadingNameTypographyRole else {
+            return nil
+        }
+        return leadingNameTypographyRole.uiFont(
+            contentSizeCategory: dynamicTypeSize.uiContentSizeCategory
+        )
+    }
+
+    private var resolvedEmoteSize: CGFloat {
+        guard let typographyRole else {
+            return emoteSize
+        }
+        return emoteSize * resolvedUIFont.pointSize / typographyRole.pointSize
     }
 }
 
@@ -102,6 +131,7 @@ struct BiliLinkedText: View {
                 accentColor: UIColor(appTintColor),
                 leadingName: nil,
                 leadingNameColor: .secondaryLabel,
+                leadingNameFont: nil,
                 emoteSize: font.lineHeight,
                 lineLimit: lineLimit
             ),
@@ -523,6 +553,7 @@ private struct BiliEmoteRenderInput {
     let accentColor: UIColor
     let leadingName: String?
     let leadingNameColor: UIColor
+    let leadingNameFont: UIFont?
     let emoteSize: CGFloat
     let lineLimit: Int?
 
@@ -535,6 +566,7 @@ private struct BiliEmoteRenderInput {
         accentColor: UIColor,
         leadingName: String?,
         leadingNameColor: UIColor,
+        leadingNameFont: UIFont?,
         emoteSize: CGFloat,
         lineLimit: Int?
     ) {
@@ -546,6 +578,7 @@ private struct BiliEmoteRenderInput {
         self.accentColor = accentColor
         self.leadingName = leadingName
         self.leadingNameColor = leadingNameColor
+        self.leadingNameFont = leadingNameFont
         self.emoteSize = emoteSize
         self.lineLimit = lineLimit
     }
@@ -578,7 +611,10 @@ private struct BiliEmoteRenderInput {
             inlineEmoteKey,
             mentionKey,
             leadingName ?? "",
+            baseFont.fontName,
             "\(baseFont.pointSize)",
+            leadingNameFont?.fontName ?? "",
+            "\(leadingNameFont?.pointSize ?? 0)",
             "\(textColor.rgbaCacheKey)",
             "\(leadingNameColor.rgbaCacheKey)",
             "\(emoteSize)",
@@ -591,7 +627,13 @@ private struct BiliEmoteRenderInput {
         var missingImageURLs = [URL]()
 
         if let leadingName, !leadingName.isEmpty {
-            result.append(attributedText("\(leadingName)：", color: leadingNameColor, font: emphasisFont))
+            result.append(
+                attributedText(
+                    "\(leadingName)：",
+                    color: leadingNameColor,
+                    font: leadingNameFont ?? emphasisFont
+                )
+            )
         }
 
         let message = message.isEmpty ? " " : message

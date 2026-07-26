@@ -36,10 +36,10 @@ struct VideoDetailActionStripContainer: View {
             isCoined: interaction.isCoined,
             isFavorited: interaction.isFavorited,
             coinCount: interaction.coinCount,
-            isMutatingLike: store.isMutatingLike,
-            isMutatingCoin: store.isMutatingCoin,
-            isMutatingFavorite: store.isMutatingFavorite,
-            isMutatingFollow: store.isMutatingFollow
+            isMutatingLike: store.isMutatingInteraction,
+            isMutatingCoin: store.isMutatingInteraction,
+            isMutatingFavorite: store.isMutatingInteraction,
+            isMutatingFollow: store.isMutatingInteraction
         )
     }
 

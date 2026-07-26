@@ -93,6 +93,13 @@ struct AccountLibraryButtonRow: View {
 
     let title: String
     let systemImage: String
+    let badgeText: String?
+
+    init(title: String, systemImage: String, badgeText: String? = nil) {
+        self.title = title
+        self.systemImage = systemImage
+        self.badgeText = badgeText
+    }
 
     var body: some View {
         HStack(spacing: 12) {
@@ -102,10 +109,21 @@ struct AccountLibraryButtonRow: View {
                 .frame(width: 28, height: 28)
 
             Text(title)
-                .font(.subheadline)
+                .appTypography(.settingsRow, fallback: .subheadline)
                 .foregroundStyle(.primary)
 
             Spacer(minLength: 8)
+
+            if let badgeText {
+                Text(badgeText)
+                    .appTypography(.badge, fallback: .caption2.weight(.bold))
+                    .foregroundStyle(.white)
+                    .monospacedDigit()
+                    .padding(.horizontal, 6)
+                    .frame(minWidth: 20, minHeight: 20)
+                    .background(.red, in: Capsule())
+                    .accessibilityLabel("\(badgeText) 条未读")
+            }
         }
     }
 }

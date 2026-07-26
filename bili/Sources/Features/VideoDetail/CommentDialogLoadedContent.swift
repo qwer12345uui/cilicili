@@ -14,6 +14,7 @@ struct CommentDialogLoadedContent: View {
                     isFocused: item.id == focusReplyID
                 )
                 .padding(.horizontal, 16)
+                .id(item.id)
 
                 Divider()
                     .padding(.leading, 66)

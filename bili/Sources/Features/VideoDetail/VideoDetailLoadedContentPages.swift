@@ -6,6 +6,7 @@ struct VideoDetailLoadedDetailContentPage: View {
     let runtimeSettings: VideoDetailRuntimeSettingsSnapshot
     let onShowNetworkDiagnostics: () -> Void
     let onShowFavoriteFolders: () -> Void
+    let onShowCoinPicker: () -> Void
 
     var body: some View {
         let renderPack = renderPack
@@ -21,7 +22,8 @@ struct VideoDetailLoadedDetailContentPage: View {
                     showsNetworkDiagnosticsButton: runtimeSettings.showsNetworkDiagnosticsButton,
                     showsVideoInfo: false,
                     onShowNetworkDiagnostics: onShowNetworkDiagnostics,
-                    onShowFavoriteFolders: onShowFavoriteFolders
+                    onShowFavoriteFolders: onShowFavoriteFolders,
+                    onShowCoinPicker: onShowCoinPicker
                 )
             }
             .padding(.horizontal, PlaybackDetailContentMetrics.horizontalPadding)
@@ -31,7 +33,8 @@ struct VideoDetailLoadedDetailContentPage: View {
                 contentWidth: renderPack.contentWidth,
                 showsNetworkDiagnosticsButton: runtimeSettings.showsNetworkDiagnosticsButton,
                 onShowNetworkDiagnostics: onShowNetworkDiagnostics,
-                onShowFavoriteFolders: onShowFavoriteFolders
+                onShowFavoriteFolders: onShowFavoriteFolders,
+                onShowCoinPicker: onShowCoinPicker
             )
             .padding(.horizontal, PlaybackDetailContentMetrics.horizontalPadding)
 

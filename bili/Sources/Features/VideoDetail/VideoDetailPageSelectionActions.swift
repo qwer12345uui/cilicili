@@ -14,6 +14,10 @@ extension VideoDetailViewModel {
         guard !isPlaybackTerminatedForNavigation else { return }
         isPlaybackInvalidatedForNavigation = false
         cancelBackgroundTasks()
+        manuallySelectedPageCID = page.cid
+        pendingPlaybackHistoryResumeTime = nil
+        pendingPlaybackHistoryResumeCID = nil
+        didResolveCloudHistoryResume = true
         selectedCID = page.cid
         resetPlaybackStateForSelectedPage()
         pageLoadingTask?.cancel()

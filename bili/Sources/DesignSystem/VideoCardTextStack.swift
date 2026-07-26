@@ -25,7 +25,7 @@ struct VideoCardTextStack: View {
                 authorIdentityIcon
 
                 Text(display.authorName)
-                    .font(.caption2)
+                    .appTypography(.compactAuthor, fallback: .caption2)
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
             }
@@ -36,7 +36,7 @@ struct VideoCardTextStack: View {
                 }
 
                 Text(display.publishTimeText)
-                    .font(.caption2)
+                    .appTypography(.tertiaryMetadata, fallback: .caption2)
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
                     .minimumScaleFactor(0.85)

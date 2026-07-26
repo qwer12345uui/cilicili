@@ -4,15 +4,18 @@ import SwiftUI
 struct VideoDetailReplySheetHost: View {
     let rootComment: Comment
     @ObservedObject var viewModel: VideoDetailViewModel
+    let initialReplyID: Int?
     let renderPack: VideoDetailReplySheetRenderPack
 
     init(
         rootComment: Comment,
         viewModel: VideoDetailViewModel,
+        initialReplyID: Int? = nil,
         actions: VideoDetailReplySheetActions
     ) {
         self.rootComment = rootComment
         self.viewModel = viewModel
+        self.initialReplyID = initialReplyID
         renderPack = VideoDetailReplySheetRenderPack(
             viewModel: viewModel,
             actions: actions
@@ -23,6 +26,7 @@ struct VideoDetailReplySheetHost: View {
         CommentRepliesSheet(
             rootComment: rootComment,
             store: renderPack.store,
+            initialReplyID: initialReplyID,
             loadReplies: renderPack.actions.loadReplies,
             reloadReplies: renderPack.actions.reloadReplies,
             loadMoreReplies: renderPack.actions.loadMoreReplies,

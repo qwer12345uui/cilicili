@@ -11,7 +11,8 @@ struct ReplyPreviewRow: View {
             emoteSize: 18,
             leadingName: reply.member?.uname ?? "Unknown",
             leadingNameColor: .secondary,
-            showsLinkButtons: false
+            showsLinkButtons: false,
+            typographyRole: .metadata
         )
             .lineLimit(2)
             .fixedSize(horizontal: false, vertical: true)

@@ -10,7 +10,7 @@ struct SearchResultRouteRow: View {
                 SearchVideoResultRow(video: video)
             }
         case .user(let user):
-            SearchOwnerRouteButton(owner: user.owner) {
+            VideoOwnerRouteLink(owner: user.owner) {
                 SearchUserResultRow(user: user)
             }
         case .bangumi(let media):
@@ -48,27 +48,6 @@ private struct SearchInternalMediaRouteRow: View {
             }
         } else {
             SearchMediaResultRow(media: media, kind: kind)
-        }
-    }
-}
-
-private struct SearchOwnerRouteButton<Label: View>: View {
-    let owner: VideoOwner
-    @ViewBuilder let label: () -> Label
-    @Environment(\.openVideoOwnerRouteAction) private var openVideoOwnerRoute
-
-    var body: some View {
-        if let openVideoOwnerRoute {
-            Button {
-                openVideoOwnerRoute(owner)
-            } label: {
-                label()
-            }
-            .buttonStyle(.plain)
-        } else {
-            NavigationLink(value: owner) {
-                label()
-            }
         }
     }
 }

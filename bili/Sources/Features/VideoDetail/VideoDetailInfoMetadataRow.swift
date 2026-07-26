@@ -10,7 +10,7 @@ struct VideoDetailInfoMetadataRow: View {
     var body: some View {
         HStack(alignment: .center, spacing: 8) {
             Text(metadataText)
-                .font(.caption2)
+                .appTypography(.metadata, fallback: .caption2)
                 .foregroundStyle(.secondary)
                 .lineLimit(1)
                 .truncationMode(.tail)

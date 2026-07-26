@@ -7,8 +7,11 @@ struct VideoDetailViewContent: View {
     @ObservedObject var fullscreenCoordinator: VideoDetailFullscreenCoordinator
     @Binding var selectedContentTab: VideoDetailContentTab
     @Binding var replySheetComment: Comment?
+    @Binding var replySheetSecondaryID: Int?
+    @Binding var pendingCommentAnchor: VideoCommentAnchor?
     @Binding var isShowingDanmakuSettings: Bool
     @Binding var isShowingFavoriteFolders: Bool
+    @Binding var isShowingCoinPicker: Bool
     @Binding var isShowingNetworkDiagnostics: Bool
     let onNavigateBack: () -> Void
     let lifecycleActions: VideoDetailViewContentLifecycleActions
@@ -25,8 +28,11 @@ struct VideoDetailViewContent: View {
                 viewModel: viewModel,
                 selectedContentTab: $selectedContentTab,
                 replySheetComment: $replySheetComment,
+                replySheetSecondaryID: $replySheetSecondaryID,
+                pendingCommentAnchor: $pendingCommentAnchor,
                 isShowingDanmakuSettings: $isShowingDanmakuSettings,
                 isShowingFavoriteFolders: $isShowingFavoriteFolders,
+                isShowingCoinPicker: $isShowingCoinPicker,
                 isShowingNetworkDiagnostics: $isShowingNetworkDiagnostics,
                 onNavigateBack: onNavigateBack
             )

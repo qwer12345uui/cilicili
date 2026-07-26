@@ -9,12 +9,9 @@ struct DynamicFeedAuthorHeader: View {
     var body: some View {
         HStack(spacing: 9) {
             if let authorOwner, authorOwner.mid > 0 {
-                NavigationLink {
-                    UploaderView(owner: authorOwner)
-                } label: {
+                VideoOwnerRouteLink(owner: authorOwner) {
                     authorIdentity
                 }
-                .buttonStyle(.plain)
             } else {
                 authorIdentity
             }
@@ -23,7 +20,7 @@ struct DynamicFeedAuthorHeader: View {
 
             if !publishTimeText.isEmpty {
                 Text(publishTimeText)
-                    .font(.caption)
+                    .appTypography(.metadata, fallback: .caption)
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
                     .minimumScaleFactor(0.85)
@@ -42,7 +39,7 @@ struct DynamicFeedAuthorHeader: View {
             .mediaShadow(.subtle)
 
             Text(authorName)
-                .font(.subheadline.weight(.semibold))
+                .appTypography(.author, fallback: .subheadline.weight(.semibold))
                 .foregroundStyle(.primary)
                 .lineLimit(1)
         }

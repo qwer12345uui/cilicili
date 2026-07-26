@@ -7,22 +7,18 @@ struct RootTabView: View {
     @EnvironmentObject var libraryStore: LibraryStore
     @StateObject var runtimeSettings = RootRuntimeSettingsStore()
     @StateObject var homeViewModelHolder = RootHomeViewModelHolder()
+    @StateObject var mineViewModelHolder = MineViewModelHolder()
     @StateObject var searchBottomAccessoryStore = SearchBottomAccessoryStore()
     @State var selectedTab = Self.initialTab.appTab
     @State var bottomMode: BottomTabMode = .root
     @State var rootTabBarRestoreRequestID = 0
     @State var activeVideo: VideoItem?
     @State var videoNavigationPath = NavigationPath()
-    @State var navigationPath = NavigationPath()
-    @State var dynamicNavigationPath = NavigationPath()
-    @State var liveNavigationPath = NavigationPath()
-    @State var mineNavigationPath = NavigationPath()
-    @State var searchNavigationPath = NavigationPath()
+    @State var rootNavigationPath = NavigationPath()
     @State var didConsumeStartupVideo = false
     @State var didConsumeStartupLiveRoom = false
     @State var didConsumeStartupUploader = false
     @State var isClosingVideo = false
-    @State var videoPresentationGeneration = 0
     @State var closeVideoFallbackTask: Task<Void, Never>?
     @State var inAppBrowserItem: InAppBrowserItem?
     @State var recentPlaybackPreloadTimes: [String: Date] = [:]
@@ -33,28 +29,13 @@ struct RootTabView: View {
 
     var body: some View {
         ZStack {
-            TabView(selection: tabSelection) {
-                ForEach(visibleRootTabs) { tab in
-                    Tab(value: tab) {
-                        rootTabContent(for: tab)
-                    } label: {
-                        Label(tab.title, systemImage: tab.systemImage)
-                    }
-                }
-            }
-            .tint(libraryStore.appTintColor)
-            .tabViewBottomAccessory(isEnabled: showsSearchBottomAccessory) {
-                SearchTabBottomAccessory(store: searchBottomAccessoryStore)
-            }
-            .tabBarMinimizeBehavior(rootTabBarMinimizeBehavior)
-            .restoresRootTabBarWhenRequested(requestID: rootTabBarRestoreRequestID)
-            .background(RootTabBarAppearanceInstaller(tintColorHex: libraryStore.appTintColorHex))
+            rootNavigationStack
 
             if bottomMode == .video {
                 videoNavigationHost()
                     .ignoresSafeArea()
                     .transition(.identity)
-                    .zIndex(1)
+                    .zIndex(2)
             }
         }
         .environment(\.openVideoAction, openVideo)
@@ -92,6 +73,9 @@ struct RootTabView: View {
             openStartupUploaderIfNeeded()
             dependencies.scheduleDeferredStartupWorkIfNeeded()
         }
+        .task(id: homeMessageUnreadRefreshTaskID) {
+            await refreshHomeMessageUnreadIfNeeded()
+        }
         .onChange(of: runtimeSettings.visibleRootTabs) { _, tabs in
             repairSelectedTabIfNeeded(visibleTabs: tabs)
         }
@@ -99,9 +83,17 @@ struct RootTabView: View {
             AppIconController.apply(preference)
         }
         .onChange(of: scenePhase) { _, phase in
-            guard phase == .background else { return }
-            Task {
-                await VideoPreloadCenter.shared.cancelMediaWarmups(clearCache: false)
+            switch phase {
+            case .active:
+                Task {
+                    await refreshHomeMessageUnreadIfNeeded()
+                }
+            case .background:
+                Task {
+                    await VideoPreloadCenter.shared.cancelMediaWarmups(clearCache: false)
+                }
+            default:
+                break
             }
         }
         .onReceive(NotificationCenter.default.publisher(for: ProcessInfo.thermalStateDidChangeNotification)) { _ in
@@ -113,6 +105,39 @@ struct RootTabView: View {
         .onReceive(NotificationCenter.default.publisher(for: .biliPlaybackNetworkClassDidChange)) { _ in
             cancelMediaWarmupsIfEnvironmentConstrained()
         }
+    }
+
+    private var rootNavigationStack: some View {
+        NavigationStack(path: $rootNavigationPath) {
+            rootTabBar
+                .navigationDestination(for: MineOverlayRoute.self) { route in
+                    RootMineNavigationDestination(
+                        route: route,
+                        holder: mineViewModelHolder,
+                        libraryStore: libraryStore
+                    )
+                }
+                .videoDestinations(hidesRootTabBar: false)
+        }
+    }
+
+    private var rootTabBar: some View {
+        TabView(selection: tabSelection) {
+            ForEach(visibleRootTabs) { tab in
+                Tab(value: tab) {
+                    rootTabContent(for: tab)
+                } label: {
+                    Label(tab.title, systemImage: tab.systemImage)
+                }
+            }
+        }
+        .tint(libraryStore.appTintColor)
+        .tabViewBottomAccessory(isEnabled: showsSearchBottomAccessory) {
+            SearchTabBottomAccessory(store: searchBottomAccessoryStore)
+        }
+        .tabBarMinimizeBehavior(rootTabBarMinimizeBehavior)
+        .restoresRootTabBarWhenRequested(requestID: rootTabBarRestoreRequestID)
+        .background(RootTabBarAppearanceInstaller(tintColorHex: libraryStore.appTintColorHex))
     }
 
     private var showsSearchBottomAccessory: Bool {
@@ -142,18 +167,21 @@ struct RootTabView: View {
     }
 
     @ViewBuilder
-    private func homePage() -> some View {
+    private func homePage(detailPath: Binding<NavigationPath>) -> some View {
         if let viewModel = homeViewModelHolder.viewModel {
             HomeView(
                 viewModel: viewModel,
-                detailPath: $navigationPath,
+                detailPath: detailPath,
                 launchConfiguration: HomeFeedLaunchConfiguration(
                     autoOpenDetail: shouldAutoOpenDetail,
                     startVideo: startBVID.map(Self.seedVideo),
                     onVideoSelect: openVideo
-                )
+                ),
+                accountMessageViewModel: mineViewModelHolder.accountMessageViewModel,
+                onOpenAccountMessages: {
+                    openMineOverlayRoute(.accountMessages)
+                }
             )
-            .videoDestinations()
         } else {
             ProgressView()
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -173,30 +201,47 @@ struct RootTabView: View {
     private func rootTabContent(for tab: AppTab) -> some View {
         switch tab {
         case .home:
-            NavigationStack(path: $navigationPath) {
-                homePage()
-            }
+            homePage(detailPath: $rootNavigationPath)
         case .dynamic:
-            NavigationStack(path: $dynamicNavigationPath) {
-                DynamicView()
-                    .videoDestinations()
-            }
+            DynamicView()
         case .live:
-            NavigationStack(path: $liveNavigationPath) {
-                LiveView()
-                    .videoDestinations()
-            }
+            LiveView()
         case .mine:
-            NavigationStack(path: $mineNavigationPath) {
-                MineView()
-                    .videoDestinations()
-            }
+            MineView(
+                holder: mineViewModelHolder,
+                onOpenRoute: openMineOverlayRoute
+            )
         case .search:
-            NavigationStack(path: $searchNavigationPath) {
-                SearchView(accessoryStore: searchBottomAccessoryStore)
-                    .videoDestinations()
-            }
+            SearchView(accessoryStore: searchBottomAccessoryStore)
         }
     }
 
+    private var homeMessageUnreadRefreshTaskID: HomeMessageUnreadRefreshTaskID {
+        HomeMessageUnreadRefreshTaskID(
+            homeNavigationExperimentEnabled: libraryStore.homeNavigationModeSwitcherExperimentEnabled,
+            credentialVersion: dependencies.sessionStore.playbackCredentialVersion
+        )
+    }
+
+    private func refreshHomeMessageUnreadIfNeeded() async {
+        guard libraryStore.homeNavigationModeSwitcherExperimentEnabled else {
+            return
+        }
+        mineViewModelHolder.configure(
+            api: dependencies.api,
+            sessionStore: dependencies.sessionStore,
+            accountMessageService: dependencies.accountMessageService
+        )
+        guard dependencies.sessionStore.isLoggedIn,
+              let accountMessageViewModel = mineViewModelHolder.accountMessageViewModel
+        else {
+            return
+        }
+        await accountMessageViewModel.refreshUnread()
+    }
+}
+
+private struct HomeMessageUnreadRefreshTaskID: Hashable {
+    let homeNavigationExperimentEnabled: Bool
+    let credentialVersion: Int
 }

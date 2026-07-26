@@ -30,7 +30,7 @@ struct DynamicFeedTextContent: View {
                         Image(systemName: isExpanded ? "chevron.up" : "chevron.down")
                             .font(.caption2.weight(.bold))
                     }
-                    .font(.footnote.weight(.semibold))
+                    .appTypography(.action, fallback: .footnote.weight(.semibold))
                     .foregroundStyle(appTintColor)
                     .frame(maxWidth: .infinity, minHeight: 30, alignment: .leading)
                     .contentShape(Rectangle())

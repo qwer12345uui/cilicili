@@ -42,7 +42,8 @@ enum AppNavigationChrome {
         appearance.configureWithTransparentBackground()
         appearance.backgroundEffect = nil
         appearance.backgroundColor = .clear
-        appearance.shadowColor = .separator.withAlphaComponent(0.12)
+        appearance.shadowColor = .clear
+        appearance.shadowImage = UIImage()
         appearance.titleTextAttributes = [
             .foregroundColor: UIColor.label
         ]
@@ -82,22 +83,43 @@ enum AppNavigationChrome {
 }
 
 struct VideoNavigationHostTransparency: UIViewControllerRepresentable {
+    enum TopViewBackgroundPolicy: Equatable {
+        case clearAlways
+        case preservePushedDestination
+    }
+
     var suppressesNavigationBar = false
+    var topViewBackgroundPolicy: TopViewBackgroundPolicy = .clearAlways
+    var suppressesTransitionShadow = false
 
     func makeUIViewController(context _: Context) -> Controller {
-        Controller(suppressesNavigationBar: suppressesNavigationBar)
+        Controller(
+            suppressesNavigationBar: suppressesNavigationBar,
+            topViewBackgroundPolicy: topViewBackgroundPolicy,
+            suppressesTransitionShadow: suppressesTransitionShadow
+        )
     }
 
     func updateUIViewController(_ uiViewController: Controller, context _: Context) {
         uiViewController.suppressesNavigationBar = suppressesNavigationBar
+        uiViewController.topViewBackgroundPolicy = topViewBackgroundPolicy
+        uiViewController.suppressesTransitionShadow = suppressesTransitionShadow
         uiViewController.applyTransparency()
     }
 
     final class Controller: UIViewController {
         var suppressesNavigationBar: Bool
+        var topViewBackgroundPolicy: TopViewBackgroundPolicy
+        var suppressesTransitionShadow: Bool
 
-        init(suppressesNavigationBar: Bool) {
+        init(
+            suppressesNavigationBar: Bool,
+            topViewBackgroundPolicy: TopViewBackgroundPolicy,
+            suppressesTransitionShadow: Bool
+        ) {
             self.suppressesNavigationBar = suppressesNavigationBar
+            self.topViewBackgroundPolicy = topViewBackgroundPolicy
+            self.suppressesTransitionShadow = suppressesTransitionShadow
             super.init(nibName: nil, bundle: nil)
         }
 
@@ -134,21 +156,44 @@ struct VideoNavigationHostTransparency: UIViewControllerRepresentable {
 
             navigationController.view.backgroundColor = .clear
             navigationController.view.isOpaque = false
-            navigationController.topViewController?.view.backgroundColor = .clear
-            navigationController.topViewController?.view.isOpaque = false
+            applyTopViewBackground(to: navigationController)
+            suppressTransitionShadowIfNeeded(in: navigationController)
 
             if suppressesNavigationBar {
                 // Keep the navigation bar present for system interactive pop,
                 // but visually suppress it because video detail renders its own chrome.
                 AppNavigationChrome.applyTransparent(to: navigationController.navigationBar)
             } else {
-                AppNavigationChrome.applyStandard(to: navigationController.navigationBar)
+                AppNavigationChrome.applyTopLevel(to: navigationController.navigationBar)
             }
         }
 
         private func applySoon() {
             DispatchQueue.main.async { [weak self] in
                 self?.applyTransparency()
+            }
+        }
+
+        private func applyTopViewBackground(to navigationController: UINavigationController) {
+            let keepsPushedDestinationOpaque = topViewBackgroundPolicy == .preservePushedDestination
+                && navigationController.viewControllers.count > 1
+
+            if keepsPushedDestinationOpaque {
+                navigationController.topViewController?.view.backgroundColor = .systemBackground
+                navigationController.topViewController?.view.isOpaque = true
+            } else {
+                navigationController.topViewController?.view.backgroundColor = .clear
+                navigationController.topViewController?.view.isOpaque = false
+            }
+        }
+
+        private func suppressTransitionShadowIfNeeded(in navigationController: UINavigationController) {
+            guard suppressesTransitionShadow else { return }
+
+            // A transparent root makes UIKit's default pushed-view shadow read as a full-page scrim.
+            navigationController.viewControllers.forEach { viewController in
+                viewController.view.layer.shadowColor = UIColor.clear.cgColor
+                viewController.view.layer.shadowOpacity = 0
             }
         }
 

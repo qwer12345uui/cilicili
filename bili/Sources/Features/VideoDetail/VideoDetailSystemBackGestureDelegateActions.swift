@@ -3,7 +3,7 @@ import UIKit
 extension VideoDetailSystemBackGestureBridge.Controller {
     func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
         guard let navigationController = attachedNavigationController ?? enclosingNavigationController(),
-              navigationController.viewControllers.count > 1,
+              allowsSingleControllerNavigation || navigationController.viewControllers.count > 1,
               navigationController.transitionCoordinator == nil
         else {
             return false

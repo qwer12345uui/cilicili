@@ -9,6 +9,7 @@ struct ZoomyImagePreviewItem: Identifiable, Equatable {
     let viewerURL: URL?
     let mediaBadgeText: String?
     let liveVideoURL: URL?
+    let aspectRatio: CGFloat?
 
     init(
         id: String,
@@ -16,7 +17,8 @@ struct ZoomyImagePreviewItem: Identifiable, Equatable {
         fallbackURL: URL? = nil,
         viewerURL: URL? = nil,
         mediaBadgeText: String? = nil,
-        liveVideoURL: URL? = nil
+        liveVideoURL: URL? = nil,
+        aspectRatio: CGFloat? = nil
     ) {
         self.id = id
         self.thumbnailURL = thumbnailURL
@@ -24,10 +26,21 @@ struct ZoomyImagePreviewItem: Identifiable, Equatable {
         self.viewerURL = viewerURL
         self.mediaBadgeText = mediaBadgeText
         self.liveVideoURL = liveVideoURL
+        self.aspectRatio = aspectRatio
     }
 
     var displayURL: URL? {
         viewerURL ?? fallbackURL ?? thumbnailURL
+    }
+
+    var resolvedAspectRatio: CGFloat? {
+        if let aspectRatio, aspectRatio > 0 {
+            return aspectRatio
+        }
+        guard let ratio = displayURL?.absoluteString.biliImageURLAspectRatio, ratio > 0 else {
+            return nil
+        }
+        return CGFloat(ratio)
     }
 
     var isAnimatedGIF: Bool {
@@ -344,16 +357,22 @@ struct ZoomyRemoteImage<Placeholder: View>: View {
 
     private func startViewerImageLoad() {
         guard let viewerURL = viewerURL ?? fallbackURL ?? url else { return }
-        guard resolvedViewerItems.first(where: { $0.id == resolvedViewerItemID })?.needsOriginalMedia != true else {
+        let viewerItem = resolvedViewerItems.first(where: { $0.id == resolvedViewerItemID })
+        guard viewerItem?.needsOriginalMedia != true else {
             return
         }
+        let targetPixelSize = ZoomyViewerImageSizing.targetPixelSize(
+            baseTargetPixelSize: viewerTargetPixelSize,
+            widthToHeightAspectRatio: viewerItem?.resolvedAspectRatio
+        )
         viewerLoadTask?.cancel()
         viewerLoadTask = Task(priority: .userInitiated) {
             _ = await RemoteImageCache.shared.load(
                 url: viewerURL,
                 scale: 1,
-                targetPixelSize: viewerTargetPixelSize,
-                priority: .visible
+                targetPixelSize: targetPixelSize,
+                priority: .visible,
+                decodePolicy: .highQualityViewer
             )
         }
     }

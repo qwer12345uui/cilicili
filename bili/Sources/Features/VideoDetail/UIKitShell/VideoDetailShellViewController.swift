@@ -22,6 +22,7 @@ final class VideoDetailShellViewController: UIViewController {
     private let onShowDanmakuSettings: () -> Void
     private let onNavigateBack: () -> Void
     private var cancellables = Set<AnyCancellable>()
+    private let systemBackGestureDelegateLease = SystemBackGestureDelegateLease()
 
     private lazy var playerSurfaceController: PlayerSurfaceController = {
         PlayerSurfaceController(
@@ -117,6 +118,7 @@ final class VideoDetailShellViewController: UIViewController {
         selectedContentTab: Binding<VideoDetailContentTab>,
         onShowNetworkDiagnostics: @escaping () -> Void,
         onShowFavoriteFolders: @escaping () -> Void,
+        onShowCoinPicker: @escaping () -> Void,
         onShowDanmakuSettings: @escaping () -> Void,
         onReply: @escaping (Comment) -> Void,
         onNavigateBack: @escaping () -> Void
@@ -138,6 +140,7 @@ final class VideoDetailShellViewController: UIViewController {
                 selectedContentTab: selectedContentTab,
                 onShowNetworkDiagnostics: onShowNetworkDiagnostics,
                 onShowFavoriteFolders: onShowFavoriteFolders,
+                onShowCoinPicker: onShowCoinPicker,
                 onReply: onReply,
                 onSelectedTabChange: { _ in },
                 onScrollOffsetChange: { _, _ in }
@@ -153,6 +156,7 @@ final class VideoDetailShellViewController: UIViewController {
             selectedContentTab: selectedContentTab,
             onShowNetworkDiagnostics: onShowNetworkDiagnostics,
             onShowFavoriteFolders: onShowFavoriteFolders,
+            onShowCoinPicker: onShowCoinPicker,
             onReply: onReply,
             onSelectedTabChange: { [weak self] tab in
                 self?.handleSelectedTabChange(tab)
@@ -252,6 +256,7 @@ final class VideoDetailShellViewController: UIViewController {
     override func viewDidDisappear(_ animated: Bool) {
         super.viewDidDisappear(animated)
         isViewActive = false
+        releaseSystemBackGestureOwnership()
         cancelPendingRotationCompletionRecovery()
         playerSurfaceController.cancelRotationChromePrewarm()
         // 双保险：tab 切换等场景 viewWillDisappear 可能不触发，这里再兜一次。
@@ -826,14 +831,11 @@ final class VideoDetailShellViewController: UIViewController {
     /// delegate 设回自己并启用，否则系统右滑返回失效。
     private func restoreSystemBackGestures() {
         guard let navigationController else { return }
-        if let popGesture = navigationController.interactivePopGestureRecognizer {
-            popGesture.isEnabled = true
-            popGesture.delegate = self
-        }
-        if let contentPopGesture = navigationController.interactiveContentPopGestureRecognizer {
-            contentPopGesture.isEnabled = true
-            contentPopGesture.delegate = self
-        }
+        systemBackGestureDelegateLease.acquire(in: navigationController, owner: self)
+    }
+
+    func releaseSystemBackGestureOwnership() {
+        systemBackGestureDelegateLease.release()
     }
 
     private func isSystemBackGesture(_ gestureRecognizer: UIGestureRecognizer) -> Bool {

@@ -244,6 +244,11 @@ nonisolated final class BiliAPIClient {
         return try await fetchWBIKeys(priority: .userInitiated)
     }
 
+    func signedWBIQuery(_ query: [String: String]) async throws -> [String: String] {
+        let keys = try await fetchWBIKeys(priority: .userInitiated)
+        return WBISigner.sign(query, keys: keys)
+    }
+
     func prewarmStartupResources() async {
         async let keys: Void = prewarmPlaybackSigningKeys()
         async let nav: NavUserInfo? = try? fetchNavUser()
@@ -1585,18 +1590,21 @@ nonisolated final class BiliAPIClient {
             base: baseURL,
             path: "/x/web-interface/archive/has/like",
             query: ["aid": String(aid)],
+            cachePolicy: .reloadIgnoringLocalCacheData,
             priority: .utility
         )
         async let coin: BiliResponse<VideoCoinState> = get(
             base: baseURL,
             path: "/x/web-interface/archive/coins",
             query: ["aid": String(aid)],
+            cachePolicy: .reloadIgnoringLocalCacheData,
             priority: .utility
         )
         async let favorite: BiliResponse<VideoFavoriteState> = get(
             base: baseURL,
             path: "/x/v2/fav/video/favoured",
             query: ["aid": String(aid)],
+            cachePolicy: .reloadIgnoringLocalCacheData,
             priority: .utility
         )
 
@@ -1633,6 +1641,7 @@ nonisolated final class BiliAPIClient {
             base: baseURL,
             path: "/x/web-interface/archive/relation",
             query: query,
+            cachePolicy: .reloadIgnoringLocalCacheData,
             priority: .utility
         )
         guard response.code == 0 else {
@@ -1654,19 +1663,23 @@ nonisolated final class BiliAPIClient {
                 "cross_domain": "true",
                 "source": "web_normal",
                 "ga": "1"
-            ]
+            ],
+            retryPolicy: .idempotentMutation
         )
         guard response.code == 0 else { throw BiliAPIError.api(code: response.code, message: response.displayMessage) }
     }
 
-    func addVideoCoin(aid: Int, selectLike: Bool = false) async throws {
+    func addVideoCoin(aid: Int, multiply: Int = 1, selectLike: Bool = false) async throws {
+        guard (1...2).contains(multiply) else {
+            throw BiliAPIError.api(code: -1, message: "投币数量无效")
+        }
         let csrf = try await requireCSRF()
         let response: BiliResponse<EmptyBiliPayload> = try await postForm(
             base: baseURL,
             path: "/x/web-interface/coin/add",
             body: [
                 "aid": String(aid),
-                "multiply": "1",
+                "multiply": String(multiply),
                 "select_like": selectLike ? "1" : "0",
                 "csrf": csrf,
                 "cross_domain": "true",
@@ -5170,21 +5183,36 @@ nonisolated final class BiliAPIClient {
         return String(decoding: data, as: UTF8.self)
     }
 
-    func fetchCommentReplies(aid: Int, root: Int, page: Int = 1) async throws -> CommentPage {
-        try await fetchCommentReplies(oid: String(aid), type: 1, root: root, page: page)
+    func fetchCommentReplies(
+        aid: Int,
+        root: Int,
+        page: Int = 1,
+        sort: CommentSort? = nil
+    ) async throws -> CommentPage {
+        try await fetchCommentReplies(oid: String(aid), type: 1, root: root, page: page, sort: sort)
     }
 
-    func fetchCommentReplies(oid: String, type: Int, root: Int, page: Int = 1) async throws -> CommentPage {
+    func fetchCommentReplies(
+        oid: String,
+        type: Int,
+        root: Int,
+        page: Int = 1,
+        sort: CommentSort? = nil
+    ) async throws -> CommentPage {
+        var query = [
+            "oid": oid,
+            "type": String(type),
+            "root": String(root),
+            "pn": String(page),
+            "ps": "20"
+        ]
+        if sort == .time {
+            query["sort"] = "1"
+        }
         let response: BiliResponse<CommentPage> = try await get(
             base: baseURL,
             path: "/x/v2/reply/reply",
-            query: [
-                "oid": oid,
-                "type": String(type),
-                "root": String(root),
-                "pn": String(page),
-                "ps": "20"
-            ],
+            query: query,
             priority: .background
         )
         guard response.code == 0 else { throw BiliAPIError.api(code: response.code, message: response.displayMessage) }
@@ -5807,13 +5835,18 @@ nonisolated final class BiliAPIClient {
         path: String,
         body: [String: String],
         referer: String = "https://www.bilibili.com",
-        userAgent: String? = nil
+        userAgent: String? = nil,
+        retryPolicy: BiliNetworkRetryPolicy = .api
     ) async throws -> T {
         var request = try await makeRequest(base: base, path: path, query: [:], referer: referer, userAgent: userAgent)
         request.httpMethod = "POST"
         request.setValue("application/x-www-form-urlencoded; charset=UTF-8", forHTTPHeaderField: "Content-Type")
         request.httpBody = Self.formBody(from: body)
-        let (data, _) = try await data(for: request, priority: .userInitiated)
+        let (data, _) = try await data(
+            for: request,
+            priority: .userInitiated,
+            retryPolicy: retryPolicy
+        )
         guard !data.isEmpty else { throw BiliAPIError.emptyData }
         return try await Self.decode(data, priority: .userInitiated)
     }
@@ -5922,14 +5955,18 @@ nonisolated final class BiliAPIClient {
         return request
     }
 
-    private func data(for request: URLRequest, priority: Float = URLSessionTask.defaultPriority) async throws -> (Data, URLResponse) {
+    private func data(
+        for request: URLRequest,
+        priority: Float = URLSessionTask.defaultPriority,
+        retryPolicy: BiliNetworkRetryPolicy = .api
+    ) async throws -> (Data, URLResponse) {
         var request = request
         request.networkServiceType = priority >= URLSessionTask.highPriority ? .responsiveData : .default
         let response = try await BiliNetworkRetry.data(
             session: session,
             request: request,
             priority: priority,
-            policy: .api
+            policy: retryPolicy
         )
         ResourceCacheAutoTrim.schedule()
         return response

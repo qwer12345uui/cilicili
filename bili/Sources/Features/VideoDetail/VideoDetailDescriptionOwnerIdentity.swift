@@ -16,11 +16,11 @@ struct VideoDescriptionOwnerIdentity: View {
 
             VStack(alignment: .leading, spacing: 2) {
                 Text(owner?.name ?? "Unknown")
-                    .font(.subheadline.weight(.semibold))
+                    .appTypography(.author, fallback: .subheadline.weight(.semibold))
                     .foregroundStyle(.primary)
                     .lineLimit(1)
                 Text(fanCountText)
-                    .font(.caption)
+                    .appTypography(.metadata, fallback: .caption)
                     .foregroundStyle(.secondary)
             }
 

@@ -28,12 +28,12 @@ private struct VideoCompactAuthorLabel: View {
         switch authorStyle {
         case .plain:
             Text(display.authorName)
-                .font(.caption2)
+                .appTypography(.compactAuthor, fallback: .caption2)
                 .foregroundStyle(.secondary)
                 .lineLimit(1)
         case .icon(let systemImage):
             Label(display.authorName, systemImage: systemImage)
-                .font(.caption2)
+                .appTypography(.compactAuthor, fallback: .caption2)
                 .foregroundStyle(.secondary)
                 .lineLimit(1)
         }
@@ -57,7 +57,7 @@ private struct VideoCompactMetadataRow: View {
                     Text(display.viewText.isEmpty ? display.publishTimeText : "· \(display.publishTimeText)")
                 }
             }
-            .font(.caption2)
+            .appTypography(.tertiaryMetadata, fallback: .caption2)
             .foregroundStyle(.tertiary)
             .lineLimit(1)
         case .search:
@@ -65,7 +65,7 @@ private struct VideoCompactMetadataRow: View {
                 VideoCompactMetadataLabel(text: display.viewText, systemImage: "play.rectangle")
                 VideoCompactMetadataLabel(text: display.publishTimeText, systemImage: "clock")
             }
-            .font(.caption2)
+            .appTypography(.tertiaryMetadata, fallback: .caption2)
             .foregroundStyle(.tertiary)
             .lineLimit(1)
         }

@@ -3,7 +3,7 @@ import SwiftUI
 struct CommentDialogSheet: View {
     let rootComment: Comment
     let focusReply: Comment
-    let store: VideoDetailCommentThreadRenderStore
+    @ObservedObject var store: VideoDetailCommentThreadRenderStore
     let reloadDialog: (Comment, Comment) async -> Void
     let actions: CommentDialogSheetActions
 
@@ -28,28 +28,47 @@ struct CommentDialogSheet: View {
 
     var body: some View {
         NavigationStack {
-            ScrollView {
-                VStack(alignment: .leading, spacing: 0) {
-                    CommentReplyRootView(comment: rootComment)
-                        .padding(.horizontal, 16)
-                        .padding(.vertical, 14)
+            ScrollViewReader { proxy in
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 0) {
+                        CommentReplyRootView(comment: rootComment)
+                            .padding(.horizontal, 16)
+                            .padding(.vertical, 14)
 
-                    Divider()
+                        Divider()
 
-                    CommentDialogContent(
-                        rootComment: rootComment,
-                        focusReply: focusReply,
-                        store: store,
-                        reloadDialog: reloadDialog
-                    )
+                        CommentDialogContent(
+                            rootComment: rootComment,
+                            focusReply: focusReply,
+                            store: store,
+                            reloadDialog: reloadDialog
+                        )
+                    }
+                }
+                .defersRemoteImageLoadsDuringFastScroll()
+                .hiddenInlineNavigationTitle()
+                .nativeTopScrollEdgeEffect()
+                .commentSheetLoadLifecycle(load: actions.load)
+                .onAppear {
+                    scrollToFocusedReply(using: proxy)
+                }
+                .onChange(of: dialogReplyIDs) { _, _ in
+                    scrollToFocusedReply(using: proxy)
                 }
             }
-            .defersRemoteImageLoadsDuringFastScroll()
-            .hiddenInlineNavigationTitle()
-            .nativeTopScrollEdgeEffect()
-            .commentSheetLoadLifecycle(load: actions.load)
         }
         .presentationDetents([.fraction(0.7)])
         .presentationDragIndicator(.visible)
+    }
+
+    private var dialogReplyIDs: [Int] {
+        store.dialogSnapshot(for: rootComment, reply: focusReply).items.map(\.id)
+    }
+
+    private func scrollToFocusedReply(using proxy: ScrollViewProxy) {
+        guard dialogReplyIDs.contains(focusReply.id) else { return }
+        DispatchQueue.main.async {
+            proxy.scrollTo(focusReply.id, anchor: .center)
+        }
     }
 }

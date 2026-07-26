@@ -50,28 +50,6 @@ struct DetailNavigationOwnerLabel: View {
     }
 }
 
-struct DetailNavigationOwnerFollowGroup<FollowButton: View>: View {
-    let avatarURLString: String?
-    let name: String
-    let subtitle: String?
-    @ViewBuilder let followButton: FollowButton
-
-    var body: some View {
-        HStack(spacing: 12) {
-            DetailNavigationOwnerLabel(
-                avatarURLString: avatarURLString,
-                name: name,
-                subtitle: subtitle
-            )
-
-            followButton
-                .fixedSize()
-                .layoutPriority(1)
-        }
-        .frame(maxWidth: 270, alignment: .center)
-    }
-}
-
 struct DetailToolbarAvatar: View {
     let urlString: String?
 

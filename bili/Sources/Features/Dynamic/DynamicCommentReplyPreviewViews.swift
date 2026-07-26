@@ -10,7 +10,8 @@ struct DynamicReplyPreviewRow: View {
             textColor: .primary,
             emoteSize: 18,
             leadingName: reply.member?.uname ?? "Unknown",
-            leadingNameColor: .secondary
+            leadingNameColor: .secondary,
+            typographyRole: .metadata
         )
         .lineLimit(2)
     }

@@ -29,7 +29,13 @@ struct CommentRow: View, Equatable {
             VStack(alignment: .leading, spacing: 5) {
                 CommentRowHeader(display: display)
 
-                BiliEmoteText(content: comment.content, font: .subheadline, textColor: .primary, emoteSize: 21)
+                BiliEmoteText(
+                    content: comment.content,
+                    font: .subheadline,
+                    textColor: .primary,
+                    emoteSize: 21,
+                    typographyRole: .commentBody
+                )
                     .lineSpacing(1)
                     .fixedSize(horizontal: false, vertical: true)
 

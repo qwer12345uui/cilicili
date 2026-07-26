@@ -47,6 +47,28 @@ extension EnvironmentValues {
     }
 }
 
+struct VideoOwnerRouteLink<Label: View>: View {
+    let owner: VideoOwner
+    @ViewBuilder let label: () -> Label
+    @Environment(\.openVideoOwnerRouteAction) private var openVideoOwnerRoute
+
+    var body: some View {
+        if let openVideoOwnerRoute {
+            Button {
+                openVideoOwnerRoute(owner)
+            } label: {
+                label()
+            }
+            .buttonStyle(.plain)
+        } else {
+            NavigationLink(value: owner) {
+                label()
+            }
+            .buttonStyle(.plain)
+        }
+    }
+}
+
 struct VideoRouteLink<Label: View>: View {
     let video: VideoItem
     @ViewBuilder let label: () -> Label

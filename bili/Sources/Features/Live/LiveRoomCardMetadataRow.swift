@@ -8,7 +8,10 @@ struct LiveRoomCardMetadataRow: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
-            StableVideoTitleText(title, style: .compactCard)
+            StableVideoTitleText(
+                title,
+                style: .compactCard
+            )
                 .frame(minHeight: 36, alignment: .topLeading)
                 .frame(maxWidth: .infinity, alignment: .leading)
 
@@ -23,7 +26,7 @@ struct LiveRoomCardMetadataRow: View {
                 .mediaShadow(.subtle)
 
                 Text(anchorName)
-                    .font(.caption2)
+                    .appTypography(.compactAuthor, fallback: .caption2)
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
                     .minimumScaleFactor(0.85)
@@ -32,7 +35,7 @@ struct LiveRoomCardMetadataRow: View {
                     Spacer(minLength: 6)
 
                     Text(metadataText)
-                        .font(.caption2)
+                        .appTypography(.tertiaryMetadata, fallback: .caption2)
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
                         .minimumScaleFactor(0.85)

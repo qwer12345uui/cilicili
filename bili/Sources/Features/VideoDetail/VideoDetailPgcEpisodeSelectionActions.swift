@@ -11,6 +11,7 @@ extension VideoDetailViewModel {
         detail = video
         selectedCID = video.cid ?? video.pages?.first?.cid
         hasResolvedDetailMetadata = true
+        manuallySelectedPageCID = nil
         didResolveCloudHistoryResume = false
         pendingPlaybackHistoryResumeTime = nil
         pendingPlaybackHistoryResumeCID = nil

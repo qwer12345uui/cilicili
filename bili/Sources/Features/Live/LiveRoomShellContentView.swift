@@ -1,10 +1,6 @@
 import Combine
 import SwiftUI
 
-enum LiveRoomPortraitLayout {
-    static let headerHeight: CGFloat = 64
-}
-
 private enum LiveRoomChatLayoutMetrics {
     static let chatOverlaySpacing: CGFloat = 12
     static let bottomContentClearance: CGFloat = 24
@@ -312,7 +308,7 @@ private struct LiveRoomPiliPodLayoutView: View {
             )
 
             Text(viewModel.title)
-                .font(.system(size: 15, weight: .semibold))
+                .appTypography(.liveRoomTitle, fallback: .system(size: 15, weight: .semibold))
                 .foregroundStyle(.white)
                 .lineLimit(2)
                 .minimumScaleFactor(0.85)
@@ -439,6 +435,8 @@ private struct LiveRoomPiliPodDanmakuTimeline: View {
 }
 
 private struct LiveRoomPiliPodDanmakuRow: View {
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+
     let item: DanmakuItem
 
     private var sender: (name: String, usesFallback: Bool) {
@@ -464,9 +462,8 @@ private struct LiveRoomPiliPodDanmakuRow: View {
     private var messageContent: some View {
         if item.inlineEmotes.isEmpty {
             Text(
-                "\(Text("\(sender.name)：").foregroundColor(senderColor))\(Text(item.text).foregroundColor(.white))"
+                "\(Text("\(sender.name)：").font(senderFont).foregroundColor(senderColor))\(Text(item.text).font(messageFont).foregroundColor(.white))"
             )
-                .font(.system(size: 15))
                 .fixedSize(horizontal: false, vertical: true)
         } else {
             BiliEmoteText(
@@ -479,7 +476,9 @@ private struct LiveRoomPiliPodDanmakuRow: View {
                 leadingName: sender.name,
                 leadingNameColor: senderColor,
                 showsLinkButtons: false,
-                fillsAvailableWidth: true
+                fillsAvailableWidth: true,
+                typographyRole: .liveChatBody,
+                leadingNameTypographyRole: .liveChatName
             )
             .fixedSize(horizontal: false, vertical: true)
         }
@@ -487,6 +486,22 @@ private struct LiveRoomPiliPodDanmakuRow: View {
 
     private var senderColor: Color {
         sender.usesFallback ? Color.white.opacity(0.62) : Color.teal
+    }
+
+    private var senderFont: Font {
+        Font(
+            AppTypography.Role.liveChatName.uiFont(
+                contentSizeCategory: dynamicTypeSize.uiContentSizeCategory
+            )
+        )
+    }
+
+    private var messageFont: Font {
+        Font(
+            AppTypography.Role.liveChatBody.uiFont(
+                contentSizeCategory: dynamicTypeSize.uiContentSizeCategory
+            )
+        )
     }
 
     private var accessibilityLabel: String {
@@ -789,7 +804,7 @@ private struct LiveRoomDanmakuBubble: View {
         VStack(alignment: .leading, spacing: 4) {
             if let senderName {
                 Text(senderName)
-                    .font(.caption.weight(.semibold))
+                    .appTypography(.liveChatName, fallback: .caption.weight(.semibold))
                     .foregroundStyle(senderColor)
                     .lineLimit(1)
                     .truncationMode(.tail)
@@ -824,7 +839,7 @@ private struct LiveRoomDanmakuBubble: View {
     private var messageContent: some View {
         if item.inlineEmotes.isEmpty {
             Text(item.text)
-                .font(.body)
+                .appTypography(.liveChatBody, fallback: .body)
                 .foregroundStyle(messageColor)
         } else {
             BiliEmoteText(
@@ -835,7 +850,8 @@ private struct LiveRoomDanmakuBubble: View {
                 textColor: messageColor,
                 emoteSize: 26,
                 showsLinkButtons: false,
-                fillsAvailableWidth: false
+                fillsAvailableWidth: false,
+                typographyRole: .liveChatBody
             )
         }
     }

@@ -2,6 +2,7 @@ import SwiftUI
 
 struct DynamicCommentText: View {
     @Environment(\.appThemeTintColor) private var appTintColor
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     let content: CommentContent?
     let font: Font
@@ -10,6 +11,7 @@ struct DynamicCommentText: View {
     let leadingName: String?
     let leadingNameColor: Color
     let lineSpacing: CGFloat
+    let typographyRole: AppTypography.Role?
 
     @Environment(\.lineLimit) private var lineLimit
 
@@ -20,7 +22,8 @@ struct DynamicCommentText: View {
         emoteSize: CGFloat,
         leadingName: String? = nil,
         leadingNameColor: Color = .pink,
-        lineSpacing: CGFloat = 2
+        lineSpacing: CGFloat = 2,
+        typographyRole: AppTypography.Role? = nil
     ) {
         self.content = content
         self.font = font
@@ -29,6 +32,7 @@ struct DynamicCommentText: View {
         self.leadingName = leadingName
         self.leadingNameColor = leadingNameColor
         self.lineSpacing = lineSpacing
+        self.typographyRole = typographyRole
     }
 
     var body: some View {
@@ -43,11 +47,12 @@ struct DynamicCommentText: View {
             } else {
                 BiliEmoteText(
                     content: content,
-                    font: font,
+                    font: resolvedFont,
                     textColor: textColor,
                     emoteSize: emoteSize,
                     leadingName: leadingName,
-                    leadingNameColor: leadingNameColor
+                    leadingNameColor: leadingNameColor,
+                    typographyRole: typographyRole
                 )
                 .lineSpacing(lineSpacing)
                 .fixedSize(horizontal: false, vertical: true)
@@ -64,7 +69,7 @@ struct DynamicCommentText: View {
             return DynamicCommentTextBuilder.nameAndMessage(
                 name: leadingName,
                 message: message,
-                font: font,
+                font: resolvedFont,
                 contentColor: textColor,
                 nameColor: leadingNameColor,
                 replyTargetColor: appTintColor
@@ -73,7 +78,7 @@ struct DynamicCommentText: View {
 
         return DynamicCommentTextBuilder.replyMessage(
             message,
-            font: font,
+            font: resolvedFont,
             contentColor: textColor,
             replyTargetColor: appTintColor
         )
@@ -91,6 +96,17 @@ struct DynamicCommentText: View {
     private var plainMessage: String? {
         let message = content?.message?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         return message.isEmpty ? nil : message
+    }
+
+    private var resolvedFont: Font {
+        guard let typographyRole else {
+            return font
+        }
+        return Font(
+            typographyRole.uiFont(
+                contentSizeCategory: dynamicTypeSize.uiContentSizeCategory
+            )
+        )
     }
 }
 

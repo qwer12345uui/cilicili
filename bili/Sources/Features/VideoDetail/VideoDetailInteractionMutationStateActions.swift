@@ -10,17 +10,8 @@ extension VideoDetailViewModel {
         isMutatingInteraction = nextValue
     }
 
-    func isInteractionMutationActive(_ kind: VideoDetailInteractionMutationKind) -> Bool {
-        switch kind {
-        case .like:
-            return isMutatingLike
-        case .coin:
-            return isMutatingCoin
-        case .favorite:
-            return isMutatingFavorite
-        case .follow:
-            return isMutatingFollow
-        }
+    func isInteractionMutationActive(_: VideoDetailInteractionMutationKind) -> Bool {
+        return isMutatingInteraction
     }
 
     func setInteractionMutationActive(_ active: Bool, for kind: VideoDetailInteractionMutationKind) {

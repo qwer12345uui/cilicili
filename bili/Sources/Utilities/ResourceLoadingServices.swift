@@ -520,6 +520,16 @@ nonisolated struct BiliNetworkRetryPolicy: Sendable {
         retriesEmptyData: true
     )
 
+    static let idempotentMutation = BiliNetworkRetryPolicy(
+        label: "idempotentMutation",
+        attempts: 2,
+        baseDelayNanoseconds: 160_000_000,
+        maxDelayNanoseconds: 320_000_000,
+        jitterNanoseconds: 60_000_000,
+        retryMethods: ["POST"],
+        retriesEmptyData: true
+    )
+
     static let image = BiliNetworkRetryPolicy(
         label: "image",
         attempts: 2,

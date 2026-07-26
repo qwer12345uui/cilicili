@@ -20,6 +20,10 @@ extension HomeViewModel {
         updateLastSeenMarkerIndex(nil)
         updateFeed([])
         restoreCachedVideosIfAvailable()
+        if newMode == .recommend, !videos.isEmpty {
+            state = .loaded
+            return
+        }
         await refresh(resetCursor: true)
     }
 

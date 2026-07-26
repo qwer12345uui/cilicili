@@ -4,15 +4,21 @@ import SwiftUI
 struct PlaybackDetailTitleText: View {
     let text: String
     let lineLimit: Int?
+    let typographyRole: AppTypography.Role
 
-    init(text: String, lineLimit: Int? = 1) {
+    init(
+        text: String,
+        lineLimit: Int? = 1,
+        typographyRole: AppTypography.Role = .videoDetailTitle
+    ) {
         self.text = text
         self.lineLimit = lineLimit
+        self.typographyRole = typographyRole
     }
 
     var body: some View {
         Text(text)
-            .font(.callout.weight(.semibold))
+            .appTypography(typographyRole, fallback: .callout.weight(.semibold))
             .lineSpacing(1.5)
             .foregroundStyle(.primary)
             .lineLimit(lineLimit)

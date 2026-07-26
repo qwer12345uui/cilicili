@@ -20,6 +20,7 @@ extension EnvironmentValues {
         get { self[ScrollEdgeEffectPreferenceKey.self] }
         set { self[ScrollEdgeEffectPreferenceKey.self] = newValue }
     }
+
 }
 
 extension View {
@@ -43,9 +44,16 @@ extension View {
     @ViewBuilder
     func rootNavigationTitle<Accessory: View>(
         _ title: String,
+        accessoryUsesFullWidth: Bool = false,
         @ViewBuilder accessory: @escaping () -> Accessory
     ) -> some View {
-        modifier(RootFloatingNavigationTitleModifier(title: title, accessory: accessory))
+        modifier(
+            RootFloatingNavigationTitleModifier(
+                title: title,
+                accessoryUsesFullWidth: accessoryUsesFullWidth,
+                accessory: accessory
+            )
+        )
     }
 
     @ViewBuilder
@@ -265,7 +273,7 @@ struct TopScrollEdgeEffect: ViewModifier {
     @ViewBuilder
     func body(content: Content) -> some View {
         if hidesRootNavigationTitle {
-            styledContent(content)
+            nativeStyledContent(content)
                 .onScrollGeometryChange(for: Bool.self) { geometry in
                     geometry.contentOffset.y + geometry.contentInsets.top > 18
                 } action: { _, isHidden in
@@ -275,12 +283,12 @@ struct TopScrollEdgeEffect: ViewModifier {
                     }
                 }
         } else {
-            styledContent(content)
+            nativeStyledContent(content)
         }
     }
 
     @ViewBuilder
-    private func styledContent(_ content: Content) -> some View {
+    private func nativeStyledContent(_ content: Content) -> some View {
         switch scrollEdgeEffectPreference {
         case .soft:
             content.scrollEdgeEffectStyle(.soft, for: .top)
@@ -294,6 +302,7 @@ struct TopScrollEdgeEffect: ViewModifier {
 
 private struct RootFloatingNavigationTitleModifier<Accessory: View>: ViewModifier {
     let title: String
+    let accessoryUsesFullWidth: Bool
     let accessory: () -> Accessory
     @State private var isTitleHidden = false
 
@@ -305,6 +314,7 @@ private struct RootFloatingNavigationTitleModifier<Accessory: View>: ViewModifie
                 RootFloatingNavigationTitle(
                     title: title,
                     isTitleHidden: isTitleHidden,
+                    accessoryUsesFullWidth: accessoryUsesFullWidth,
                     accessory: accessory
                 )
             }
@@ -314,29 +324,51 @@ private struct RootFloatingNavigationTitleModifier<Accessory: View>: ViewModifie
 private struct RootFloatingNavigationTitle<Accessory: View>: View {
     let title: String
     let isTitleHidden: Bool
+    let accessoryUsesFullWidth: Bool
     let accessory: () -> Accessory
 
+    @ViewBuilder
     var body: some View {
-        HStack(alignment: .center, spacing: 12) {
-            Text(title)
-                .font(.largeTitle.weight(.bold))
-                .lineLimit(1)
-                .minimumScaleFactor(0.82)
-                .opacity(isTitleHidden ? 0 : 1)
-                .scaleEffect(isTitleHidden ? 0.92 : 1, anchor: .leading)
-                .clipped()
+        Group {
+            if accessoryUsesFullWidth {
+                ZStack {
+                    HStack {
+                        titleView
+                        Spacer(minLength: 12)
+                    }
 
-            Spacer(minLength: 12)
-
-            accessory()
-                .opacity(isTitleHidden ? 0 : 1)
-                .scaleEffect(isTitleHidden ? 0.92 : 1, anchor: .trailing)
-                .allowsHitTesting(!isTitleHidden)
+                    accessoryView
+                        .frame(maxWidth: .infinity)
+                }
+            } else {
+                HStack(alignment: .center, spacing: 12) {
+                    titleView
+                    Spacer(minLength: 12)
+                    accessoryView
+                }
+            }
         }
         .frame(maxWidth: .infinity, minHeight: 38, alignment: .leading)
         .padding(.horizontal, 16)
         .padding(.top, -6)
         .padding(.bottom, 3)
+    }
+
+    private var titleView: some View {
+        Text(title)
+            .font(.largeTitle.weight(.bold))
+            .lineLimit(1)
+            .minimumScaleFactor(0.82)
+            .opacity(isTitleHidden ? 0 : 1)
+            .scaleEffect(isTitleHidden ? 0.92 : 1, anchor: .leading)
+            .clipped()
+    }
+
+    private var accessoryView: some View {
+        accessory()
+            .opacity(isTitleHidden ? 0 : 1)
+            .scaleEffect(isTitleHidden ? 0.92 : 1, anchor: .trailing)
+            .allowsHitTesting(!isTitleHidden)
     }
 }
 

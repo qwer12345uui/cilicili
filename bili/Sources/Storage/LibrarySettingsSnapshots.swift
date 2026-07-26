@@ -121,45 +121,6 @@ final class PullRefreshRuntimeSettingsStore: ObservableObject {
     }
 }
 
-struct PlayerRuntimeSettingsSnapshot: Equatable {
-    var defaultPlaybackRate: Double = 1.0
-    var incognitoModeEnabled = false
-}
-
-@MainActor
-final class PlayerRuntimeSettingsStore: ObservableObject {
-    @Published private(set) var snapshot = PlayerRuntimeSettingsSnapshot()
-    private weak var libraryStore: LibraryStore?
-    private var cancellable: AnyCancellable?
-
-    var defaultPlaybackRate: Double { snapshot.defaultPlaybackRate }
-    var incognitoModeEnabled: Bool { snapshot.incognitoModeEnabled }
-
-    func bind(_ libraryStore: LibraryStore) {
-        guard self.libraryStore !== libraryStore else {
-            refresh()
-            return
-        }
-        self.libraryStore = libraryStore
-        refresh()
-        cancellable = libraryStore.objectWillChange.sink { [weak self] _ in
-            DispatchQueue.main.async {
-                self?.refresh()
-            }
-        }
-    }
-
-    private func refresh() {
-        guard let libraryStore else { return }
-        let next = PlayerRuntimeSettingsSnapshot(
-            defaultPlaybackRate: libraryStore.defaultPlaybackRate,
-            incognitoModeEnabled: libraryStore.incognitoModeEnabled
-        )
-        guard next != snapshot else { return }
-        snapshot = next
-    }
-}
-
 struct VideoDetailRuntimeSettingsSnapshot: Equatable {
     var playerPerformanceOverlayEnabled = false
     var videoRotationFrameReportOverlayEnabled = false

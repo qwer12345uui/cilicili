@@ -42,16 +42,6 @@ struct VideoDetailSummaryCardActions {
         }
     }
 
-    func coin() {
-        Haptics.medium()
-        Task { [weak viewModel = viewModelBox.viewModel] in
-            guard let viewModel else { return }
-            if await viewModel.addCoin() {
-                Haptics.success()
-            }
-        }
-    }
-
     func favorite() {
         Haptics.light()
         showFavoriteFolders()

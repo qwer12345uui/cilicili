@@ -1,6 +1,8 @@
 import SwiftUI
 
 struct YouTubeStyleVideoFeedMetadataRow: View {
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+
     let display: VideoCardDisplayModel
     let showsMetadataSummary: Bool
     let usesGenericAuthorIcon: Bool
@@ -12,9 +14,11 @@ struct YouTubeStyleVideoFeedMetadataRow: View {
     var body: some View {
         Group {
             if usesGenericAuthorIcon {
-                VStack(alignment: .leading, spacing: 1) {
+                VStack(alignment: .leading, spacing: 3) {
                     titleLabel
-                    if placesViewAndPublishTimeTrailing {
+                    if usesAccessibilityLayout {
+                        genericAuthorAccessibilityMetadata
+                    } else if placesViewAndPublishTimeTrailing {
                         genericAuthorSplitMetadataRow
                     } else {
                         HStack(spacing: 3) {
@@ -28,37 +32,40 @@ struct YouTubeStyleVideoFeedMetadataRow: View {
                 HStack(alignment: .center, spacing: 9) {
                     authorIdentityIcon
 
-                    VStack(alignment: .leading, spacing: 1) {
+                    VStack(alignment: .leading, spacing: 3) {
                         titleLabel
                         metadataLabel
                     }
-                    .frame(height: Self.avatarSide, alignment: .center)
                 }
             }
         }
-        .frame(height: Self.avatarSide)
+        .frame(minHeight: Self.avatarSide, alignment: .leading)
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     private var titleLabel: some View {
-        StableVideoTitleText(display.title, style: .feedHeadline, lineLimit: 1)
+        StableVideoTitleText(
+            display.title,
+            style: .feedHeadline,
+            lineLimit: usesAccessibilityLayout ? 2 : 1
+        )
             .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     private var metadataLabel: some View {
         Text(metadataText)
-            .font(.caption.weight(.medium))
+            .appTypography(.metadata, fallback: .caption.weight(.medium))
             .foregroundStyle(.secondary)
-            .lineLimit(1)
+            .lineLimit(usesAccessibilityLayout ? 2 : 1)
             .truncationMode(.tail)
             .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     private var genericAuthorMetadataLabel: some View {
         Text(genericAuthorMetadataText)
-            .font(.caption.weight(.medium))
+            .appTypography(.metadata, fallback: .caption.weight(.medium))
             .foregroundStyle(.secondary)
-            .lineLimit(1)
+            .lineLimit(usesAccessibilityLayout ? 2 : 1)
             .truncationMode(.tail)
             .frame(maxWidth: .infinity, alignment: .leading)
     }
@@ -125,9 +132,33 @@ struct YouTubeStyleVideoFeedMetadataRow: View {
                     .fixedSize(horizontal: true, vertical: false)
             }
         }
-        .font(.caption.weight(.medium))
+        .appTypography(.metadata, fallback: .caption.weight(.medium))
         .foregroundStyle(.secondary)
         .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private var genericAuthorAccessibilityMetadata: some View {
+        VStack(alignment: .leading, spacing: 3) {
+            HStack(spacing: 3) {
+                BilibiliUPBadge(size: Self.authorBadgeSide)
+
+                Text(genericAuthorLeadingMetadataText)
+                    .appTypography(.compactAuthor, fallback: .caption.weight(.medium))
+                    .lineLimit(2)
+            }
+
+            if !trailingMetadataText.isEmpty {
+                Text(trailingMetadataText)
+                    .appTypography(.metadata, fallback: .caption.weight(.medium))
+                    .lineLimit(2)
+            }
+        }
+        .foregroundStyle(.secondary)
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private var usesAccessibilityLayout: Bool {
+        dynamicTypeSize.isAccessibilitySize
     }
 
     @ViewBuilder

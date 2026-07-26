@@ -16,11 +16,11 @@ struct SettingsNavigationRow: View {
 
             VStack(alignment: .leading, spacing: 2) {
                 Text(title)
-                    .font(.subheadline.weight(.semibold))
+                    .appTypography(.settingsRow, fallback: .subheadline.weight(.semibold))
                     .foregroundStyle(.primary)
 
                 Text(subtitle)
-                    .font(.caption)
+                    .appTypography(.settingsSubtitle, fallback: .caption)
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
             }
@@ -34,7 +34,7 @@ struct MinePlaybackPreferenceChip: View {
 
     var body: some View {
         Label(title, systemImage: systemImage)
-            .font(.caption2.weight(.semibold))
+            .appTypography(.badge, fallback: .caption2.weight(.semibold))
             .labelStyle(.titleAndIcon)
             .lineLimit(1)
             .minimumScaleFactor(0.78)

@@ -21,12 +21,12 @@ struct CommentReplyDetailRow: View {
             VStack(alignment: .leading, spacing: 8) {
                 HStack(alignment: .firstTextBaseline, spacing: 6) {
                     Text(display.authorName)
-                        .font(.subheadline.weight(.semibold))
+                        .appTypography(.commentAuthor, fallback: .subheadline.weight(.semibold))
                         .foregroundStyle(.secondary)
 
                     if !display.timeText.isEmpty {
                         Text(display.timeText)
-                            .font(.caption)
+                            .appTypography(.metadata, fallback: .caption)
                             .foregroundStyle(.secondary)
                     }
 
@@ -39,7 +39,13 @@ struct CommentReplyDetailRow: View {
                     )
                 }
 
-                BiliEmoteText(content: reply.content, font: .subheadline, textColor: .primary, emoteSize: 22)
+                BiliEmoteText(
+                    content: reply.content,
+                    font: .subheadline,
+                    textColor: .primary,
+                    emoteSize: 22,
+                    typographyRole: .commentBody
+                )
                     .lineSpacing(1)
                     .fixedSize(horizontal: false, vertical: true)
 
@@ -51,7 +57,7 @@ struct CommentReplyDetailRow: View {
                 if let showDialog {
                     Button(action: showDialog) {
                         Label("查看对话", systemImage: "text.bubble")
-                            .font(.caption.weight(.semibold))
+                            .appTypography(.action, fallback: .caption.weight(.semibold))
                             .padding(.horizontal, 9)
                             .frame(height: 26)
                     }

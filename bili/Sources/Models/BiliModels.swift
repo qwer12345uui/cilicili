@@ -2802,11 +2802,24 @@ nonisolated struct HTTPByteRange: Hashable, Sendable {
 nonisolated struct CommentPage: Decodable {
     let replies: [Comment]?
     let topReplies: [Comment]?
+    let root: Comment?
     let cursor: CommentCursor?
 
     enum CodingKeys: String, CodingKey {
-        case replies, cursor
+        case replies, root, cursor
         case topReplies = "top_replies"
+    }
+
+    init(
+        replies: [Comment]?,
+        topReplies: [Comment]?,
+        root: Comment? = nil,
+        cursor: CommentCursor?
+    ) {
+        self.replies = replies
+        self.topReplies = topReplies
+        self.root = root
+        self.cursor = cursor
     }
 }
 
@@ -3376,7 +3389,7 @@ nonisolated struct HotSearchItem: Identifiable, Decodable, Hashable {
 
 nonisolated struct EmptyBiliPayload: Decodable {}
 
-struct VideoInteractionState: Hashable {
+nonisolated struct VideoInteractionState: Hashable, Sendable {
     var isLiked = false
     var coinCount = 0
     var isFavorited = false

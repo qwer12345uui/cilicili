@@ -1,4 +1,5 @@
 import XCTest
+import UIKit
 @testable import bili
 
 final class PlayerFormalPlaybackConfigurationTests: XCTestCase {
@@ -81,7 +82,33 @@ final class PlayerFormalPlaybackConfigurationTests: XCTestCase {
     }
 
     @MainActor
-    func testLibraryStoreRemovesRetiredPlaybackAndLiveExperimentPreferences() {
+    func testAppTypographyScalesSemanticVideoTitleRoles() {
+        let regular = AppTypography.Role.feedVideoTitle.uiFont(contentSizeCategory: .large)
+        let compact = AppTypography.Role.compactVideoTitle.uiFont(contentSizeCategory: .large)
+        let accessibility = AppTypography.Role.feedVideoTitle.uiFont(
+            contentSizeCategory: .accessibilityExtraLarge
+        )
+
+        XCTAssertEqual(regular.pointSize, 15, accuracy: 0.001)
+        XCTAssertEqual(compact.pointSize, 14, accuracy: 0.001)
+        XCTAssertGreaterThan(accessibility.pointSize, regular.pointSize)
+    }
+
+    @MainActor
+    func testLibraryStorePersistsHomeNavigationModeSwitcherExperiment() {
+        let defaults = makeUserDefaults()
+        let store = LibraryStore(userDefaults: defaults)
+
+        XCTAssertTrue(store.homeNavigationModeSwitcherExperimentEnabled)
+        store.setHomeNavigationModeSwitcherExperimentEnabled(false)
+
+        XCTAssertFalse(
+            LibraryStore(userDefaults: defaults).homeNavigationModeSwitcherExperimentEnabled
+        )
+    }
+
+    @MainActor
+    func testLibraryStoreRemovesRetiredExperimentPreferences() {
         let defaults = makeUserDefaults()
         let retiredKeys = [
             "cc.bili.playback.startupRequestSchedulingExperimentEnabled.v1",
@@ -93,6 +120,12 @@ final class PlayerFormalPlaybackConfigurationTests: XCTestCase {
             "cc.bili.live.hlsFastStartExperimentEnabled.v1",
             "cc.bili.live.danmakuRenderBatchingExperimentEnabled.v1",
             "cc.bili.live.rotationSurfaceAlignmentExperimentEnabled.v1",
+            "cc.bili.display.mineSingleStackNavigationExperimentEnabled.v1",
+            "cc.bili.display.fixedVideoTitleTypographyExperimentEnabled.v1",
+            "cc.bili.display.unifiedAppTypographyExperimentEnabled.v1",
+            "cc.bili.display.highQualityImageViewerExperimentEnabled.v1",
+            "cc.bili.account.messageCenterExperimentEnabled.v1",
+            "cc.bili.display.telegramTopEdgeBlurExperimentEnabled.v1",
         ]
         retiredKeys.forEach { defaults.set(true, forKey: $0) }
 

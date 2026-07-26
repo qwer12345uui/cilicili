@@ -6,13 +6,13 @@ struct CommentRowHeader: View {
     var body: some View {
         HStack(alignment: .firstTextBaseline, spacing: 8) {
             Text(display.authorName)
-                .font(.subheadline.weight(.semibold))
+                .appTypography(.commentAuthor, fallback: .subheadline.weight(.semibold))
                 .foregroundStyle(.primary)
                 .lineLimit(1)
 
             if !display.timeText.isEmpty {
                 Text(display.timeText)
-                    .font(.caption)
+                    .appTypography(.metadata, fallback: .caption)
                     .foregroundStyle(.secondary)
             }
 

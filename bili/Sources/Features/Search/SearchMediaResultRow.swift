@@ -17,7 +17,7 @@ struct SearchMediaResultRow: View {
 
             VStack(alignment: .leading, spacing: 5) {
                 Text(media.title)
-                    .font(.subheadline.weight(.semibold))
+                    .appTypography(.compactVideoTitle, fallback: .subheadline.weight(.semibold))
                     .foregroundStyle(.primary)
                     .lineLimit(2)
 
@@ -45,7 +45,7 @@ private struct SearchMediaMetaLine: View {
                 Text(indexShow)
             }
         }
-        .font(.caption)
+        .appTypography(.metadata, fallback: .caption)
         .foregroundStyle(.secondary)
         .lineLimit(1)
     }
@@ -57,7 +57,7 @@ private struct SearchMediaStylesText: View {
     var body: some View {
         if let stylesText = media.stylesText, !stylesText.isEmpty {
             Text(stylesText)
-                .font(.caption2)
+                .appTypography(.tertiaryMetadata, fallback: .caption2)
                 .foregroundStyle(.secondary)
                 .lineLimit(1)
         }
@@ -70,7 +70,7 @@ private struct SearchMediaDescriptionText: View {
     var body: some View {
         if let description = media.description, !description.isEmpty {
             Text(description.removingHTMLTags())
-                .font(.caption)
+                .appTypography(.settingsSubtitle, fallback: .caption)
                 .foregroundStyle(.secondary)
                 .lineLimit(2)
         }

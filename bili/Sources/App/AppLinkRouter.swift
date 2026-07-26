@@ -21,9 +21,34 @@ struct InAppBrowserView: UIViewControllerRepresentable {
 
 enum AppLinkDestination {
     case video(VideoItem)
+    case videoComment(VideoCommentRoute)
     case liveRoom(LiveRoom)
     case user(VideoOwner)
     case browser(URL)
+}
+
+nonisolated struct VideoCommentAnchor: Hashable, Sendable {
+    let rootID: Int
+    let secondaryID: Int?
+
+    init?(rootID: Int?, secondaryID: Int? = nil) {
+        guard let rootID, rootID > 0 else { return nil }
+        self.rootID = rootID
+        self.secondaryID = secondaryID.flatMap { $0 > 0 ? $0 : nil }
+    }
+
+    init?(url: URL) {
+        let queryItems = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems ?? []
+        self.init(
+            rootID: queryItems.firstValue(named: "comment_root_id").flatMap(Int.init),
+            secondaryID: queryItems.firstValue(named: "comment_secondary_id").flatMap(Int.init)
+        )
+    }
+}
+
+nonisolated struct VideoCommentRoute: Hashable, Sendable {
+    let video: VideoItem
+    let anchor: VideoCommentAnchor
 }
 
 nonisolated enum AppLinkRouter {
@@ -32,7 +57,7 @@ nonisolated enum AppLinkRouter {
 
         if let videoLink = BiliVideoLink(url: normalizedURL) {
             if let video = await videoItem(for: videoLink, api: api) {
-                return .video(video)
+                return videoDestination(video, url: normalizedURL)
             }
         }
 
@@ -119,6 +144,12 @@ nonisolated enum AppLinkRouter {
         return value
     }
 
+    static func commentAnchor(for url: URL) -> VideoCommentAnchor? {
+        let normalizedURL = normalizedHTTPURL(url) ?? url
+        guard BiliVideoLink(url: normalizedURL) != nil else { return nil }
+        return VideoCommentAnchor(url: normalizedURL)
+    }
+
     private static func internalDestination(
         forResolvedURL resolvedURL: URL,
         originalURL _: URL,
@@ -127,7 +158,7 @@ nonisolated enum AppLinkRouter {
         let normalizedURL = normalizedHTTPURL(resolvedURL) ?? resolvedURL
         if let videoLink = BiliVideoLink(url: normalizedURL),
            let video = await videoItem(for: videoLink, api: api) {
-            return .video(video)
+            return videoDestination(video, url: normalizedURL)
         }
         if let room = liveRoom(from: normalizedURL) {
             return .liveRoom(room)
@@ -136,6 +167,13 @@ nonisolated enum AppLinkRouter {
             return .user(owner)
         }
         return nil
+    }
+
+    private static func videoDestination(_ video: VideoItem, url: URL) -> AppLinkDestination {
+        if let anchor = commentAnchor(for: url) {
+            return .videoComment(VideoCommentRoute(video: video, anchor: anchor))
+        }
+        return .video(video)
     }
 
     private static func videoItem(for link: BiliVideoLink, api: BiliAPIClient) async -> VideoItem? {
@@ -278,7 +316,7 @@ nonisolated enum AppLinkRouter {
     }
 }
 
-private nonisolated struct BiliVideoLink {
+nonisolated struct BiliVideoLink {
     let bvid: String?
     let aid: Int?
     let resumeTime: TimeInterval?
