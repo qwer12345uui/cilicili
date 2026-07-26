@@ -114,7 +114,9 @@ struct RootTabView: View {
                     RootMineNavigationDestination(
                         route: route,
                         holder: mineViewModelHolder,
-                        libraryStore: libraryStore
+                        libraryStore: libraryStore,
+                        sessionStore: dependencies.sessionStore,
+                        api: dependencies.api
                     )
                 }
                 .videoDestinations(hidesRootTabBar: false)

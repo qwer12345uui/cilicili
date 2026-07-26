@@ -543,6 +543,11 @@ private struct SurfaceOnlyPlayerOverlayRoot: View {
                     .allowsHitTesting(!isBareSurfaceTransitionActive)
                 }
 
+                if showsCenterPlaybackControl {
+                    centerPlaybackControl
+                        .zIndex(5)
+                }
+
                 VideoDetailPlayerSurfaceDanmakuLayer(
                     store: detailViewModel.danmakuRenderStore,
                     playerViewModel: viewModel,
@@ -631,12 +636,38 @@ private struct SurfaceOnlyPlayerOverlayRoot: View {
         !isBareSurfaceTransitionActive || retainsChromeDuringBareSurfaceTransition
     }
 
+    private var showsCenterPlaybackControl: Bool {
+        keepsChromeMounted
+            && !isBareSurfaceTransitionActive
+            && viewModel.showsExplicitPlaybackStartControl
+            && surfaceState.errorMessage == nil
+    }
+
+    private var centerPlaybackControl: some View {
+        PlayerNativeGlassIconButton(
+            systemName: "play.fill",
+            accessibilityLabel: "播放",
+            metrics: centerPlaybackControlMetrics
+        ) {
+            viewModel.play()
+            playbackControlsVisibility.showAndSchedule(
+                showsPlaybackControls: keepsChromeMounted,
+                isLayoutTransitioning: isBareSurfaceTransitionActive
+            )
+        }
+        .biliLiquidGlassForeground(shadowOpacity: 0.20)
+    }
+
+    private var centerPlaybackControlMetrics: PlayerNativeControlMetrics {
+        controlMetrics.sized(controlHeight: 56, iconSize: 24)
+    }
+
     private var configuration: BiliPlayerViewConfiguration {
         BiliPlayerViewOptions(
             presentation: isLandscape ? .fullScreen : .embedded,
             showsNavigationChrome: false,
             showsPlaybackControls: keepsChromeMounted,
-            showsStartupLoadingIndicator: keepsChromeMounted,
+            showsStartupLoadingIndicator: keepsChromeMounted && viewModel.wantsAutoplay,
             pausesOnDisappear: false,
             topLeadingControlsAccessory: keepsChromeMounted ? AnyView(backButton) : nil,
             isDanmakuEnabled: keepsChromeMounted && overlaySnapshot.isDanmakuEnabled,

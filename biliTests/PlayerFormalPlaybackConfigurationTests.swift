@@ -55,6 +55,41 @@ final class PlayerFormalPlaybackConfigurationTests: XCTestCase {
     }
 
     @MainActor
+    func testLibraryStoreDefaultsVideoDetailAutoplayOnAndPersistsSelection() {
+        let defaults = makeUserDefaults()
+        let store = LibraryStore(userDefaults: defaults)
+
+        XCTAssertTrue(store.videoDetailAutoplayEnabled)
+        store.setVideoDetailAutoplayEnabled(false)
+
+        XCTAssertFalse(
+            LibraryStore(userDefaults: defaults).videoDetailAutoplayEnabled
+        )
+    }
+
+    @MainActor
+    func testExplicitPlaybackPromptsDoNotReturnAfterPause() {
+        let player = PlayerStateViewModel(
+            videoURL: nil,
+            audioURL: nil,
+            title: "Test",
+            referer: "https://www.bilibili.com"
+        )
+        defer { player.stop() }
+
+        player.setInitialManualPlaybackPrompt(true)
+        player.setRelatedVideoReturnPlaybackPrompt(true)
+        XCTAssertTrue(player.isAwaitingInitialManualPlayback)
+        XCTAssertTrue(player.isAwaitingRelatedVideoReturnPlayback)
+
+        player.play()
+        player.pause()
+
+        XCTAssertFalse(player.isAwaitingInitialManualPlayback)
+        XCTAssertFalse(player.isAwaitingRelatedVideoReturnPlayback)
+    }
+
+    @MainActor
     func testLibraryStoreDefaultsAppIconPreferenceToSystemAndPersistsSelection() {
         let defaults = makeUserDefaults()
         let store = LibraryStore(userDefaults: defaults)
@@ -126,6 +161,7 @@ final class PlayerFormalPlaybackConfigurationTests: XCTestCase {
             "cc.bili.display.highQualityImageViewerExperimentEnabled.v1",
             "cc.bili.account.messageCenterExperimentEnabled.v1",
             "cc.bili.display.telegramTopEdgeBlurExperimentEnabled.v1",
+            "cc.bili.display.uploaderProfileGlassSheetExperimentEnabled.v1",
         ]
         retiredKeys.forEach { defaults.set(true, forKey: $0) }
 

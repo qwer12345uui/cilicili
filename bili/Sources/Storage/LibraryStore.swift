@@ -135,8 +135,10 @@ final class LibraryStore: ObservableObject {
     @Published private(set) var playerControlEdgeScrimEnabled: Bool
     @Published private(set) var showsVideoDetailNetworkDiagnosticsButton: Bool
     @Published private(set) var showsVideoDetailPinnedProgressBar: Bool
+    @Published private(set) var videoDetailAutoplayEnabled: Bool
     @Published private(set) var incognitoModeEnabled: Bool
     @Published private(set) var guestModeEnabled: Bool
+    @Published private(set) var multiAccountExperimentEnabled: Bool
     @Published private(set) var minimizesTabBarOnScroll: Bool
     @Published private(set) var scrollEdgeEffectPreference: AppScrollEdgeEffectPreference
     @Published private(set) var liquidGlassStylePreference: AppLiquidGlassStylePreference
@@ -199,8 +201,10 @@ final class LibraryStore: ObservableObject {
     nonisolated static let playerControlEdgeScrimEnabledKey = "cc.bili.playback.controlEdgeScrimEnabled.v1"
     private static let showsVideoDetailNetworkDiagnosticsButtonKey = "cc.bili.videoDetail.showsNetworkDiagnosticsButton.v1"
     private static let showsVideoDetailPinnedProgressBarKey = "cc.bili.videoDetail.showsPinnedProgressBar.v1"
+    private static let videoDetailAutoplayEnabledKey = "cc.bili.videoDetail.autoplayEnabled.v1"
     private static let incognitoModeEnabledKey = "cc.bili.privacy.incognitoModeEnabled.v1"
     private static let guestModeEnabledKey = "cc.bili.privacy.guestModeEnabled.v1"
+    private static let multiAccountExperimentEnabledKey = "cc.bili.account.multiAccountExperimentEnabled.v1"
     private static let minimizesTabBarOnScrollKey = "cc.bili.display.minimizesTabBarOnScroll.v1"
     private static let scrollEdgeEffectPreferenceKey = "cc.bili.display.scrollEdgeEffectPreference.v1"
     private static let liquidGlassStylePreferenceKey = AppLiquidGlassStylePreference.storageKey
@@ -226,6 +230,7 @@ final class LibraryStore: ObservableObject {
         "cc.bili.display.highQualityImageViewerExperimentEnabled.v1",
         "cc.bili.account.messageCenterExperimentEnabled.v1",
         "cc.bili.display.telegramTopEdgeBlurExperimentEnabled.v1",
+        "cc.bili.display.uploaderProfileGlassSheetExperimentEnabled.v1",
     ]
     private static let fastScrollImageLoadSuppressionExperimentEnabledKey = "cc.bili.display.fastScrollImageLoadSuppressionExperimentEnabled.v1"
     private static let remoteImageCDNFailoverExperimentEnabledKey = RemoteImageCDNFailoverExperiment.storageKey
@@ -436,8 +441,12 @@ final class LibraryStore: ObservableObject {
         self.playerControlEdgeScrimEnabled = userDefaults.object(forKey: Self.playerControlEdgeScrimEnabledKey) as? Bool ?? true
         self.showsVideoDetailNetworkDiagnosticsButton = userDefaults.object(forKey: Self.showsVideoDetailNetworkDiagnosticsButtonKey) as? Bool ?? false
         self.showsVideoDetailPinnedProgressBar = userDefaults.object(forKey: Self.showsVideoDetailPinnedProgressBarKey) as? Bool ?? false
+        self.videoDetailAutoplayEnabled = userDefaults.object(forKey: Self.videoDetailAutoplayEnabledKey) as? Bool ?? true
         self.incognitoModeEnabled = userDefaults.object(forKey: Self.incognitoModeEnabledKey) as? Bool ?? false
         self.guestModeEnabled = userDefaults.object(forKey: Self.guestModeEnabledKey) as? Bool ?? false
+        self.multiAccountExperimentEnabled = userDefaults.object(
+            forKey: Self.multiAccountExperimentEnabledKey
+        ) as? Bool ?? false
         self.minimizesTabBarOnScroll = userDefaults.object(forKey: Self.minimizesTabBarOnScrollKey) as? Bool ?? true
         self.scrollEdgeEffectPreference = AppScrollEdgeEffectPreference(
             rawValue: userDefaults.string(forKey: Self.scrollEdgeEffectPreferenceKey) ?? ""
@@ -991,6 +1000,11 @@ final class LibraryStore: ObservableObject {
         userDefaults.set(isEnabled, forKey: Self.showsVideoDetailPinnedProgressBarKey)
     }
 
+    func setVideoDetailAutoplayEnabled(_ isEnabled: Bool) {
+        videoDetailAutoplayEnabled = isEnabled
+        userDefaults.set(isEnabled, forKey: Self.videoDetailAutoplayEnabledKey)
+    }
+
     func setIncognitoModeEnabled(_ isEnabled: Bool) {
         incognitoModeEnabled = isEnabled
         userDefaults.set(isEnabled, forKey: Self.incognitoModeEnabledKey)
@@ -999,6 +1013,11 @@ final class LibraryStore: ObservableObject {
     func setGuestModeEnabled(_ isEnabled: Bool) {
         guestModeEnabled = isEnabled
         userDefaults.set(isEnabled, forKey: Self.guestModeEnabledKey)
+    }
+
+    func setMultiAccountExperimentEnabled(_ isEnabled: Bool) {
+        multiAccountExperimentEnabled = isEnabled
+        userDefaults.set(isEnabled, forKey: Self.multiAccountExperimentEnabledKey)
     }
 
     func setMinimizesTabBarOnScroll(_ isEnabled: Bool) {

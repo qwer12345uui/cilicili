@@ -1650,6 +1650,21 @@ nonisolated struct PlayURLData: Decodable, Sendable {
         )
     }
 
+    nonisolated func removingHistoryMetadata() -> PlayURLData {
+        PlayURLData(
+            code: code,
+            message: message,
+            durl: durl,
+            dash: dash,
+            quality: quality,
+            acceptQuality: acceptQuality,
+            acceptDescription: acceptDescription,
+            supportFormats: supportFormats,
+            lastPlayTime: nil,
+            lastPlayCID: nil
+        )
+    }
+
     nonisolated func resumeTime(
         duration: TimeInterval?,
         minimumProgress: TimeInterval = TimeInterval(LibraryStore.defaultPlaybackHistorySyncThresholdSeconds)

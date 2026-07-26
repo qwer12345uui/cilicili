@@ -4,6 +4,7 @@ import Foundation
 final class DynamicFeedLifecycleCoordinator {
     private let api: BiliAPIClient
     private let sessionStore: SessionStore
+    private let libraryStore: LibraryStore
     private let contentFilter: DynamicFeedContentFilter
     private let resourcePrefetchCoordinator: DynamicFeedResourcePrefetchCoordinator
     private var rawItems: [DynamicFeedItem] = []
@@ -22,11 +23,13 @@ final class DynamicFeedLifecycleCoordinator {
     init(
         api: BiliAPIClient,
         sessionStore: SessionStore,
+        libraryStore: LibraryStore,
         contentFilter: DynamicFeedContentFilter,
         resourcePrefetchCoordinator: DynamicFeedResourcePrefetchCoordinator
     ) {
         self.api = api
         self.sessionStore = sessionStore
+        self.libraryStore = libraryStore
         self.contentFilter = contentFilter
         self.resourcePrefetchCoordinator = resourcePrefetchCoordinator
     }
@@ -45,14 +48,18 @@ final class DynamicFeedLifecycleCoordinator {
 
     func loadInitialPage() async throws -> [DynamicFeedItem] {
         resetPagination()
-        let page = try await DynamicFeedWarmCache.shared.page(api: api)
+        let page = try await DynamicFeedWarmCache.shared.page(
+            api: api,
+            identityKey: cacheIdentityKey
+        )
         return apply(page: page, prefetchDelay: 0.08)
     }
 
     func refreshPage() async throws -> [DynamicFeedItem] {
         resetPagination()
+        let identityKey = cacheIdentityKey
         let page = try await api.fetchDynamicFeed()
-        await DynamicFeedWarmCache.shared.store(page)
+        await DynamicFeedWarmCache.shared.store(page, identityKey: identityKey)
         return apply(page: page, prefetchDelay: 0.08)
     }
 
@@ -90,6 +97,13 @@ final class DynamicFeedLifecycleCoordinator {
     private func resetPagination() {
         offset = ""
         hasMore = true
+    }
+
+    private var cacheIdentityKey: String {
+        sessionStore.accountCacheIdentityKey(
+            for: .dynamicFeed,
+            multiAccountEnabled: libraryStore.multiAccountExperimentEnabled
+        )
     }
 
     private func apply(page: DynamicFeedData, prefetchDelay: TimeInterval) -> [DynamicFeedItem] {

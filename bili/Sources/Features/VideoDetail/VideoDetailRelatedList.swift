@@ -1,9 +1,21 @@
 import SwiftUI
 
+private struct MarkRelatedVideoNavigationActionKey: EnvironmentKey {
+    static let defaultValue: (() -> Void)? = nil
+}
+
+extension EnvironmentValues {
+    var markRelatedVideoNavigation: (() -> Void)? {
+        get { self[MarkRelatedVideoNavigationActionKey.self] }
+        set { self[MarkRelatedVideoNavigationActionKey.self] = newValue }
+    }
+}
+
 struct VideoDetailRelatedList: View {
     let items: [VideoDetailRelatedDisplayItem]
     let layout: VideoDetailRelatedListLayout
     let actions: VideoDetailRelatedListActions
+    @Environment(\.markRelatedVideoNavigation) private var markRelatedVideoNavigation
 
     var body: some View {
         let lastRelatedVideoID = items.last?.id
@@ -11,7 +23,7 @@ struct VideoDetailRelatedList: View {
         LazyVStack(alignment: .leading, spacing: 0) {
             ForEach(items) { item in
                 VStack(spacing: 0) {
-                    VideoRouteLink(item.video) {
+                    VideoRouteLink(item.video, onOpen: markRelatedVideoNavigation) {
                         VideoDetailRelatedRow(
                             item: item,
                             coverSize: layout.coverSize

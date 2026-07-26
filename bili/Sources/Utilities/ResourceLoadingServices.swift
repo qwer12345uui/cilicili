@@ -331,6 +331,8 @@ nonisolated enum BiliURLSessionFactory {
         let configuration = URLSessionConfiguration.default
         configuration.requestCachePolicy = .useProtocolCachePolicy
         configuration.urlCache = apiURLCache
+        configuration.httpCookieStorage = nil
+        configuration.httpShouldSetCookies = false
         configuration.httpMaximumConnectionsPerHost = 6
         configuration.waitsForConnectivity = true
         configuration.networkServiceType = .responsiveData

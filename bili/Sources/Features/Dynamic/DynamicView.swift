@@ -16,7 +16,7 @@ struct DynamicView: View {
 
 private struct DynamicContentRoot: View {
     let api: BiliAPIClient
-    let libraryStore: LibraryStore
+    @ObservedObject var libraryStore: LibraryStore
     @ObservedObject var sessionStore: SessionStore
     @StateObject private var holder = DynamicViewModelHolder()
     @StateObject private var pullRefreshSettings = PullRefreshRuntimeSettingsStore()
@@ -44,7 +44,24 @@ private struct DynamicContentRoot: View {
         .task {
             pullRefreshSettings.bind(libraryStore)
         }
+        .onChange(of: DynamicFeedAccountContext(
+            mainCredentialVersion: sessionStore.playbackCredentialVersion,
+            dynamicFeedCredentialVersion: sessionStore.dynamicFeedAccountCredentialVersion,
+            multiAccountExperimentEnabled: libraryStore.multiAccountExperimentEnabled
+        )) { _, _ in
+            holder.reconfigure(
+                api: api,
+                libraryStore: libraryStore,
+                sessionStore: sessionStore
+            )
+        }
     }
+}
+
+private struct DynamicFeedAccountContext: Equatable {
+    let mainCredentialVersion: Int
+    let dynamicFeedCredentialVersion: Int
+    let multiAccountExperimentEnabled: Bool
 }
 
 extension View {

@@ -14,7 +14,7 @@ struct VideoDescriptionOwnerRow: View {
 
         HStack(spacing: 10) {
             if let owner, canOpenUploader {
-                NavigationLink(value: owner) {
+                VideoOwnerRouteLink(owner: owner) {
                     VideoDescriptionOwnerIdentity(
                         owner: owner,
                         fanCountText: fanCountText,

@@ -29,6 +29,14 @@ extension VideoDetailViewModel {
     }
 
     func configureStablePlayerStartupCallbacks(_ playerViewModel: PlayerStateViewModel) {
+        playerViewModel.onExplicitPlaybackStartRequested = { [weak self, weak playerViewModel] in
+            guard let self,
+                  let playerViewModel,
+                  self.stablePlayerViewModel === playerViewModel
+            else { return }
+            self.isAwaitingInitialManualPlayback = false
+            self.isAwaitingRelatedVideoReturnPlayback = false
+        }
         playerViewModel.restoreUserInterfaceForPictureInPictureStop = { [weak self, weak playerViewModel] in
             guard let self,
                   let playerViewModel,

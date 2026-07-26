@@ -8,13 +8,29 @@ final class DynamicViewModelHolder: ObservableObject {
     private var lastSnapshot: DynamicRenderSnapshot?
 
     func configure(api: BiliAPIClient, libraryStore: LibraryStore, sessionStore: SessionStore) {
-        if viewModel == nil {
-            let viewModel = DynamicViewModel(api: api, libraryStore: libraryStore, sessionStore: sessionStore)
-            self.viewModel = viewModel
-            lastSnapshot = DynamicRenderSnapshot(viewModel)
-            cancellable = viewModel.objectWillChange.sink { [weak self] _ in
-                self?.scheduleSnapshotRefresh(for: viewModel)
-            }
+        guard viewModel == nil else { return }
+        installViewModel(api: api, libraryStore: libraryStore, sessionStore: sessionStore)
+    }
+
+    func reconfigure(api: BiliAPIClient, libraryStore: LibraryStore, sessionStore: SessionStore) {
+        snapshotRefreshTask?.cancel()
+        snapshotRefreshTask = nil
+        cancellable = nil
+        viewModel = nil
+        lastSnapshot = nil
+        installViewModel(api: api, libraryStore: libraryStore, sessionStore: sessionStore)
+    }
+
+    private func installViewModel(
+        api: BiliAPIClient,
+        libraryStore: LibraryStore,
+        sessionStore: SessionStore
+    ) {
+        let viewModel = DynamicViewModel(api: api, libraryStore: libraryStore, sessionStore: sessionStore)
+        self.viewModel = viewModel
+        lastSnapshot = DynamicRenderSnapshot(viewModel)
+        cancellable = viewModel.objectWillChange.sink { [weak self] _ in
+            self?.scheduleSnapshotRefresh(for: viewModel)
         }
     }
 

@@ -18,6 +18,7 @@ struct MinePlaybackPreferenceSection<ProbeSummary: View>: View {
         Section {
             playbackPreferenceSummary
             playbackAutoOptimizationPicker
+            videoDetailAutoplayToggle
             pictureInPictureToggle
             playbackHistorySyncThresholdPicker
             preferredVideoQualityPicker
@@ -30,7 +31,7 @@ struct MinePlaybackPreferenceSection<ProbeSummary: View>: View {
         } header: {
             Text("播放体验")
         } footer: {
-            Text("播放满 \(libraryStore.playbackHistorySyncThresholdSeconds) 秒后同步观看记录并用于下次续播；未满不会上报。默认保持智能播放加速开启。")
+            Text("关闭详情自动播放后，进入视频详情页会先停在首帧，需手动点播放。播放满 \(libraryStore.playbackHistorySyncThresholdSeconds) 秒后同步观看记录并用于下次续播；未满不会上报。")
         }
 
         Section {
@@ -106,6 +107,15 @@ struct MinePlaybackPreferenceSection<ProbeSummary: View>: View {
             set: { libraryStore.setPictureInPictureEnabled($0) }
         )) {
             Label("画中画播放", systemImage: "pip")
+        }
+    }
+
+    private var videoDetailAutoplayToggle: some View {
+        Toggle(isOn: Binding(
+            get: { libraryStore.videoDetailAutoplayEnabled },
+            set: { libraryStore.setVideoDetailAutoplayEnabled($0) }
+        )) {
+            Label("进入详情自动播放", systemImage: "play.circle")
         }
     }
 

@@ -165,6 +165,7 @@ nonisolated final class BiliAPIClient {
         let homeRecommendFeedSourcePreference: HomeRecommendFeedSourcePreference
         let guestModeEnabled: Bool
         let playbackCredentialVersion: Int
+        let isAccountPurposeEnabled: Bool
 
         var effectivePreferredVideoQuality: Int? {
             LibraryStore.effectivePreferredVideoQuality(
@@ -190,23 +191,30 @@ nonisolated final class BiliAPIClient {
     }
 
     @MainActor
-    private func requestSnapshot() -> RequestSnapshot {
-        RequestSnapshot(
-            cookieHeader: sessionStore.cookieHeader(),
-            anonymousCookieHeader: sessionStore.anonymousCookieHeader(),
-            appAccessKey: sessionStore.appAccessKey(),
+    private func requestSnapshot(
+        purpose: BiliAccountPurpose = .main
+    ) -> RequestSnapshot {
+        let account = sessionStore.credentialSnapshot(
+            for: purpose,
+            multiAccountEnabled: libraryStore.multiAccountExperimentEnabled
+        )
+        return RequestSnapshot(
+            cookieHeader: account.cookieHeader,
+            anonymousCookieHeader: account.anonymousCookieHeader,
+            appAccessKey: account.accessKey,
             homeRecommendIdentityKey: sessionStore.recommendCacheIdentityKey(
                 guestModeEnabled: libraryStore.guestModeEnabled
             ),
-            isLoggedIn: sessionStore.isLoggedIn,
-            csrfToken: sessionStore.csrfToken(),
-            currentUserMID: sessionStore.user?.mid,
+            isLoggedIn: account.isLoggedIn,
+            csrfToken: account.csrfToken,
+            currentUserMID: account.accountMID,
             preferredVideoQuality: libraryStore.preferredVideoQuality,
             cellularPreferredVideoQuality: libraryStore.cellularPreferredVideoQuality,
             playbackStreamSourcePreference: libraryStore.playbackStreamSourcePreference,
             homeRecommendFeedSourcePreference: libraryStore.homeRecommendFeedSourcePreference,
             guestModeEnabled: libraryStore.guestModeEnabled,
-            playbackCredentialVersion: sessionStore.playbackCredentialVersion
+            playbackCredentialVersion: account.version,
+            isAccountPurposeEnabled: account.isPurposeEnabled
         )
     }
 
@@ -215,8 +223,10 @@ nonisolated final class BiliAPIClient {
         return snapshot.cookieHeader
     }
 
-    private func anonymousCookieHeader() async -> String {
-        let snapshot = await requestSnapshot()
+    private func anonymousCookieHeader(
+        purpose: BiliAccountPurpose = .main
+    ) async -> String {
+        let snapshot = await requestSnapshot(purpose: purpose)
         return snapshot.anonymousCookieHeader
     }
 
@@ -997,7 +1007,9 @@ nonisolated final class BiliAPIClient {
     }
 
     func fetchVideoDetail(bvid: String) async throws -> VideoItem {
-        if let task = await state.videoDetailTask(for: bvid) {
+        let snapshot = await requestSnapshot()
+        let taskKey = "bvid:\(bvid)|credential:\(snapshot.playbackCredentialVersion)"
+        if let task = await state.videoDetailTask(for: taskKey) {
             return try await task.value
         }
         let task = Task<VideoItem, Error>(priority: .userInitiated) { [self] in
@@ -1005,25 +1017,27 @@ nonisolated final class BiliAPIClient {
                 base: baseURL,
                 path: "/x/web-interface/view",
                 query: ["bvid": bvid],
+                cookieHeader: snapshot.cookieHeader,
                 responseCachePolicy: .detail
             )
             guard response.code == 0 else { throw BiliAPIError.api(code: response.code, message: response.displayMessage) }
             guard let item = response.payload else { throw BiliAPIError.missingPayload }
             return item
         }
-        await state.setVideoDetailTask(task, for: bvid)
+        await state.setVideoDetailTask(task, for: taskKey)
         do {
             let item = try await task.value
-            await state.clearVideoDetailTask(for: bvid)
+            await state.clearVideoDetailTask(for: taskKey)
             return item
         } catch {
-            await state.clearVideoDetailTask(for: bvid)
+            await state.clearVideoDetailTask(for: taskKey)
             throw error
         }
     }
 
     func fetchVideoDetail(aid: Int) async throws -> VideoItem {
-        let taskKey = "aid:\(aid)"
+        let snapshot = await requestSnapshot()
+        let taskKey = "aid:\(aid)|credential:\(snapshot.playbackCredentialVersion)"
         if let task = await state.videoDetailTask(for: taskKey) {
             return try await task.value
         }
@@ -1032,6 +1046,7 @@ nonisolated final class BiliAPIClient {
                 base: baseURL,
                 path: "/x/web-interface/view",
                 query: ["aid": String(aid)],
+                cookieHeader: snapshot.cookieHeader,
                 responseCachePolicy: .detail
             )
             guard response.code == 0 else { throw BiliAPIError.api(code: response.code, message: response.displayMessage) }
@@ -1070,6 +1085,7 @@ nonisolated final class BiliAPIClient {
     func fetchVideoShot(bvid: String, cid: Int) async throws -> VideoShotMetadata {
         let normalizedBVID = bvid.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !normalizedBVID.isEmpty, cid > 0 else { throw BiliAPIError.missingPayload }
+        let snapshot = await requestSnapshot(purpose: .playback)
         let response: BiliResponse<VideoShotMetadata> = try await get(
             base: baseURL,
             path: "/x/player/videoshot",
@@ -1080,6 +1096,7 @@ nonisolated final class BiliAPIClient {
             ],
             referer: "https://www.bilibili.com/video/\(normalizedBVID)",
             userAgent: Self.webUserAgent,
+            cookieHeader: snapshot.cookieHeader,
             responseCachePolicy: .long,
             priority: .utility
         )
@@ -1564,7 +1581,7 @@ nonisolated final class BiliAPIClient {
     }
 
     func fetchVideoInteractionState(aid: Int, bvid: String?) async throws -> VideoInteractionState {
-        let snapshot = await requestSnapshot()
+        let snapshot = await requestSnapshot(purpose: .interaction)
         guard snapshot.isLoggedIn || snapshot.appAccessKey?.isEmpty == false else {
             throw BiliAPIError.missingSESSDATA
         }
@@ -1575,7 +1592,9 @@ nonisolated final class BiliAPIClient {
                 bvid: bvid,
                 snapshot: snapshot
             )
-            return relationState.interactionState
+            var state = relationState.interactionState
+            state.isFollowing = false
+            return state
         } catch is CancellationError {
             throw CancellationError()
         } catch {
@@ -1590,6 +1609,7 @@ nonisolated final class BiliAPIClient {
             base: baseURL,
             path: "/x/web-interface/archive/has/like",
             query: ["aid": String(aid)],
+            cookieHeader: snapshot.cookieHeader,
             cachePolicy: .reloadIgnoringLocalCacheData,
             priority: .utility
         )
@@ -1597,6 +1617,7 @@ nonisolated final class BiliAPIClient {
             base: baseURL,
             path: "/x/web-interface/archive/coins",
             query: ["aid": String(aid)],
+            cookieHeader: snapshot.cookieHeader,
             cachePolicy: .reloadIgnoringLocalCacheData,
             priority: .utility
         )
@@ -1604,6 +1625,7 @@ nonisolated final class BiliAPIClient {
             base: baseURL,
             path: "/x/v2/fav/video/favoured",
             query: ["aid": String(aid)],
+            cookieHeader: snapshot.cookieHeader,
             cachePolicy: .reloadIgnoringLocalCacheData,
             priority: .utility
         )
@@ -1641,6 +1663,7 @@ nonisolated final class BiliAPIClient {
             base: baseURL,
             path: "/x/web-interface/archive/relation",
             query: query,
+            cookieHeader: snapshot.cookieHeader,
             cachePolicy: .reloadIgnoringLocalCacheData,
             priority: .utility
         )
@@ -1652,18 +1675,19 @@ nonisolated final class BiliAPIClient {
     }
 
     func toggleVideoLike(aid: Int, liked: Bool) async throws {
-        let csrf = try await requireCSRF()
+        let context = try await requireCSRFContext(for: .interaction)
         let response: BiliResponse<EmptyBiliPayload> = try await postForm(
             base: baseURL,
             path: "/x/web-interface/archive/like",
             body: [
                 "aid": String(aid),
                 "like": liked ? "1" : "2",
-                "csrf": csrf,
+                "csrf": context.csrf,
                 "cross_domain": "true",
                 "source": "web_normal",
                 "ga": "1"
             ],
+            cookieHeader: context.snapshot.cookieHeader,
             retryPolicy: .idempotentMutation
         )
         guard response.code == 0 else { throw BiliAPIError.api(code: response.code, message: response.displayMessage) }
@@ -1673,7 +1697,7 @@ nonisolated final class BiliAPIClient {
         guard (1...2).contains(multiply) else {
             throw BiliAPIError.api(code: -1, message: "投币数量无效")
         }
-        let csrf = try await requireCSRF()
+        let context = try await requireCSRFContext(for: .interaction)
         let response: BiliResponse<EmptyBiliPayload> = try await postForm(
             base: baseURL,
             path: "/x/web-interface/coin/add",
@@ -1681,18 +1705,22 @@ nonisolated final class BiliAPIClient {
                 "aid": String(aid),
                 "multiply": String(multiply),
                 "select_like": selectLike ? "1" : "0",
-                "csrf": csrf,
+                "csrf": context.csrf,
                 "cross_domain": "true",
                 "source": "web_normal",
                 "ga": "1"
-            ]
+            ],
+            cookieHeader: context.snapshot.cookieHeader
         )
         guard response.code == 0 else { throw BiliAPIError.api(code: response.code, message: response.displayMessage) }
     }
 
     func setVideoFavorite(aid: Int, favorited: Bool) async throws {
-        let csrf = try await requireCSRF()
-        let folderIDs = try await favoriteFolderIDs(for: aid)
+        let context = try await requireCSRFContext(for: .interaction)
+        let folderIDs = try await favoriteFolderIDs(
+            for: aid,
+            snapshot: context.snapshot
+        )
         let targetIDs: [Int]
         if favorited {
             guard let folderID = folderIDs.first else { throw BiliAPIError.missingPayload }
@@ -1712,22 +1740,25 @@ nonisolated final class BiliAPIClient {
                 "type": "2",
                 "add_media_ids": addMediaIDs,
                 "del_media_ids": delMediaIDs,
-                "csrf": csrf,
+                "csrf": context.csrf,
                 "platform": "web",
                 "gaia_source": "web_normal",
                 "ga": "1"
-            ]
+            ],
+            cookieHeader: context.snapshot.cookieHeader
         )
         guard response.code == 0 else { throw BiliAPIError.api(code: response.code, message: response.displayMessage) }
     }
 
     func fetchFavoriteFolders(for aid: Int? = nil) async throws -> [FavoriteFolder] {
-        try await favoriteFolderSummaries(rid: aid)
+        let snapshot = await requestSnapshot(purpose: .interaction)
+        guard snapshot.isLoggedIn else { throw BiliAPIError.missingSESSDATA }
+        return try await favoriteFolderSummaries(rid: aid, snapshot: snapshot)
             .filter { $0.id > 0 }
     }
 
     func setVideoFavorite(aid: Int, addFolderIDs: Set<Int>, removeFolderIDs: Set<Int>) async throws {
-        let csrf = try await requireCSRF()
+        let context = try await requireCSRFContext(for: .interaction)
         let addIDs = addFolderIDs
             .filter { $0 > 0 && !removeFolderIDs.contains($0) }
             .sorted()
@@ -1744,11 +1775,12 @@ nonisolated final class BiliAPIClient {
                 "type": "2",
                 "add_media_ids": addIDs.map(String.init).joined(separator: ","),
                 "del_media_ids": removeIDs.map(String.init).joined(separator: ","),
-                "csrf": csrf,
+                "csrf": context.csrf,
                 "platform": "web",
                 "gaia_source": "web_normal",
                 "ga": "1"
-            ]
+            ],
+            cookieHeader: context.snapshot.cookieHeader
         )
         guard response.code == 0 else { throw BiliAPIError.api(code: response.code, message: response.displayMessage) }
     }
@@ -1774,7 +1806,8 @@ nonisolated final class BiliAPIClient {
         cursor: AccountHistoryCursor? = nil,
         pageSize: Int = 20
     ) async throws -> AccountVideoEntryPage {
-        guard await isLoggedIn() else { throw BiliAPIError.missingSESSDATA }
+        let snapshot = await requestSnapshot(purpose: .historyRead)
+        guard snapshot.isLoggedIn else { throw BiliAPIError.missingSESSDATA }
         let previousCursor = cursor
         let response: BiliResponse<DynamicJSONValue> = try await get(
             base: baseURL,
@@ -1784,7 +1817,8 @@ nonisolated final class BiliAPIClient {
                 "ps": String(pageSize),
                 "max": String(cursor?.max ?? 0),
                 "view_at": String(cursor?.viewAt ?? 0)
-            ]
+            ],
+            cookieHeader: snapshot.cookieHeader
         )
         guard response.code == 0 else { throw BiliAPIError.api(code: response.code, message: response.displayMessage) }
         let entries = response.payload?.accountVideoEntries ?? []
@@ -1799,7 +1833,8 @@ nonisolated final class BiliAPIClient {
     }
 
     func fetchVideoHistoryProgress(aid: Int) async throws -> VideoHistoryProgress {
-        guard await isLoggedIn() else { throw BiliAPIError.missingSESSDATA }
+        let snapshot = await requestSnapshot(purpose: .historyRead)
+        guard snapshot.isLoggedIn else { throw BiliAPIError.missingSESSDATA }
         let response: BiliResponse<VideoHistoryProgress> = try await get(
             base: baseURL,
             path: "/x/v2/history",
@@ -1807,7 +1842,8 @@ nonisolated final class BiliAPIClient {
                 "aid": String(aid),
                 "type": "3"
             ],
-            referer: "https://www.bilibili.com/video/av\(aid)"
+            referer: "https://www.bilibili.com/video/av\(aid)",
+            cookieHeader: snapshot.cookieHeader
         )
         guard response.code == 0 else { throw BiliAPIError.api(code: response.code, message: response.displayMessage) }
         guard let progress = response.payload else { throw BiliAPIError.missingPayload }
@@ -1815,8 +1851,9 @@ nonisolated final class BiliAPIClient {
     }
 
     func fetchAccountFavorites(page: Int = 1, pageSize: Int = 20) async throws -> [AccountVideoEntry] {
-        guard await isLoggedIn() else { throw BiliAPIError.missingSESSDATA }
-        let folders = try await favoriteFolderSummaries()
+        let snapshot = await requestSnapshot(purpose: .interaction)
+        guard snapshot.isLoggedIn else { throw BiliAPIError.missingSESSDATA }
+        let folders = try await favoriteFolderSummaries(snapshot: snapshot)
         var entries = [AccountVideoEntry]()
         var seen = Set<String>()
         var lastError: Error?
@@ -1835,7 +1872,8 @@ nonisolated final class BiliAPIClient {
                         "type": "0",
                         "tid": "0",
                         "platform": "web"
-                    ]
+                    ],
+                    cookieHeader: snapshot.cookieHeader
                 )
                 guard response.code == 0 else { throw BiliAPIError.api(code: response.code, message: response.displayMessage) }
                 for entry in response.payload?.accountVideoEntries ?? [] where seen.insert(entry.id).inserted {
@@ -1860,7 +1898,8 @@ nonisolated final class BiliAPIClient {
     }
 
     func fetchFavoriteFolderVideoPage(folderID: Int, page: Int = 1, pageSize: Int = 20) async throws -> AccountVideoEntryPage {
-        guard await isLoggedIn() else { throw BiliAPIError.missingSESSDATA }
+        let snapshot = await requestSnapshot(purpose: .interaction)
+        guard snapshot.isLoggedIn else { throw BiliAPIError.missingSESSDATA }
         let response: BiliResponse<DynamicJSONValue> = try await get(
             base: baseURL,
             path: "/x/v3/fav/resource/list",
@@ -1873,7 +1912,8 @@ nonisolated final class BiliAPIClient {
                 "type": "0",
                 "tid": "0",
                 "platform": "web"
-            ]
+            ],
+            cookieHeader: snapshot.cookieHeader
         )
         guard response.code == 0 else { throw BiliAPIError.api(code: response.code, message: response.displayMessage) }
         let entries = response.payload?.accountVideoEntries ?? []
@@ -1982,7 +2022,8 @@ nonisolated final class BiliAPIClient {
         duration: TimeInterval?,
         bvid: String? = nil
     ) async throws {
-        let snapshot = await requestSnapshot()
+        let snapshot = await requestSnapshot(purpose: .historyWrite)
+        guard snapshot.isAccountPurposeEnabled else { return }
         var webError: Error?
         if let csrf = snapshot.csrfToken, !csrf.isEmpty, snapshot.isLoggedIn {
             do {
@@ -1991,7 +2032,8 @@ nonisolated final class BiliAPIClient {
                     bvid: bvid,
                     cid: cid,
                     progress: progress,
-                    csrf: csrf
+                    csrf: csrf,
+                    cookieHeader: snapshot.cookieHeader
                 )
                 return
             } catch is CancellationError {
@@ -2006,7 +2048,8 @@ nonisolated final class BiliAPIClient {
                             cid: cid,
                             progress: progress,
                             duration: duration,
-                            csrf: csrf
+                            csrf: csrf,
+                            cookieHeader: snapshot.cookieHeader
                         )
                         return
                     } catch is CancellationError {
@@ -2048,7 +2091,8 @@ nonisolated final class BiliAPIClient {
         cid: Int?,
         progress: TimeInterval,
         duration: TimeInterval?,
-        csrf: String
+        csrf: String,
+        cookieHeader: String
     ) async throws {
         var body = [
             "aid": String(aid),
@@ -2068,7 +2112,8 @@ nonisolated final class BiliAPIClient {
             base: baseURL,
             path: "/x/v2/history/report",
             body: body,
-            userAgent: Self.webUserAgent
+            userAgent: Self.webUserAgent,
+            cookieHeader: cookieHeader
         )
         guard response.code == 0 else { throw BiliAPIError.api(code: response.code, message: response.displayMessage) }
     }
@@ -2078,7 +2123,8 @@ nonisolated final class BiliAPIClient {
         bvid: String?,
         cid: Int?,
         progress: TimeInterval,
-        csrf: String
+        csrf: String,
+        cookieHeader: String
     ) async throws {
         let normalizedBVID = bvid?.trimmingCharacters(in: .whitespacesAndNewlines)
         var body = [
@@ -2109,7 +2155,8 @@ nonisolated final class BiliAPIClient {
             path: "/x/click-interface/web/heartbeat",
             body: body,
             referer: referer,
-            userAgent: Self.webUserAgent
+            userAgent: Self.webUserAgent,
+            cookieHeader: cookieHeader
         )
         guard response.code == 0 else { throw BiliAPIError.api(code: response.code, message: response.displayMessage) }
     }
@@ -2490,7 +2537,7 @@ nonisolated final class BiliAPIClient {
         supplementsQualities: Bool = true,
         preferProgressiveFastStart: Bool = false
     ) async throws -> PlayURLData {
-        let snapshot = await requestSnapshot()
+        let snapshot = await requestSnapshot(purpose: .playback)
         let requestedQuality = preferredQuality ?? snapshot.effectivePreferredVideoQuality ?? qn
         let key = PlayURLCacheKey(
             bvid: bvid,
@@ -2516,10 +2563,13 @@ nonisolated final class BiliAPIClient {
             PlayerMetricsLog.logger.info(
                 "playURLMemoryCacheHit bvid=\(bvid, privacy: .public) cid=\(cid, privacy: .public) qn=\(requestedQuality, privacy: .public)"
             )
-            return cached
+            return await applyingConfiguredHistoryAccount(
+                to: cached,
+                playbackSnapshot: snapshot
+            )
         }
 
-        return try await fetchPlayURLWithPendingRequest(
+        let data = try await fetchPlayURLWithPendingRequest(
             cacheKey: key,
             scope: scope,
             bvid: bvid,
@@ -2537,6 +2587,10 @@ nonisolated final class BiliAPIClient {
                 preferProgressiveFastStart: preferProgressiveFastStart
             )
         }
+        return await applyingConfiguredHistoryAccount(
+            to: data,
+            playbackSnapshot: snapshot
+        )
     }
 
     func fetchPgcPlayURL(
@@ -2547,7 +2601,7 @@ nonisolated final class BiliAPIClient {
         qn: Int = 112,
         preferredQuality: Int? = nil
     ) async throws -> PlayURLData {
-        let snapshot = await requestSnapshot()
+        let snapshot = await requestSnapshot(purpose: .playback)
         let requestedQuality = preferredQuality ?? snapshot.effectivePreferredVideoQuality ?? qn
         let streamSource = snapshot.playbackStreamSourcePreference
         let keys = try await fetchWBIKeys(priority: .userInitiated)
@@ -2587,7 +2641,10 @@ nonisolated final class BiliAPIClient {
                 guard codecPreference.accepts(requestedData) else {
                     throw BiliAPIError.emptyPlayURL
                 }
-                return requestedData
+                return await applyingConfiguredHistoryAccount(
+                    to: requestedData,
+                    playbackSnapshot: snapshot
+                )
             } catch {
                 guard !Task.isCancelled else { throw error }
                 lastError = error
@@ -2602,19 +2659,34 @@ nonisolated final class BiliAPIClient {
     }
 
     func cachedPlayablePlayURLFallback(bvid: String, cid: Int) async -> PlayURLData? {
-        let snapshot = await requestSnapshot()
+        let snapshot = await requestSnapshot(purpose: .playback)
         let scope = PlayURLCacheLoginScope(
             isLoggedIn: snapshot.isLoggedIn,
             userMID: snapshot.currentUserMID,
             guestModeEnabled: snapshot.guestModeEnabled,
             credentialVersion: snapshot.playbackCredentialVersion
         )
-        return await playURLCache.playableFallback(
+        guard let data = await playURLCache.playableFallback(
             bvid: bvid,
             cid: cid,
             platform: nil,
             scope: scope
+        ) else { return nil }
+        return await applyingConfiguredHistoryAccount(
+            to: data,
+            playbackSnapshot: snapshot
         )
+    }
+
+    private func applyingConfiguredHistoryAccount(
+        to data: PlayURLData,
+        playbackSnapshot: RequestSnapshot
+    ) async -> PlayURLData {
+        let historySnapshot = await requestSnapshot(purpose: .historyRead)
+        guard historySnapshot.currentUserMID == playbackSnapshot.currentUserMID else {
+            return data.removingHistoryMetadata()
+        }
+        return data
     }
 
     private func fetchPlayURLUncached(
@@ -2628,7 +2700,7 @@ nonisolated final class BiliAPIClient {
     ) async throws -> PlayURLData {
         let requestStart = CACurrentMediaTime()
         let referer = "https://www.bilibili.com/video/\(bvid)"
-        let snapshot = await requestSnapshot()
+        let snapshot = await requestSnapshot(purpose: .playback)
         let anonymousCookieHeader = snapshot.anonymousCookieHeader
         let playCookieHeader = snapshot.cookieHeader
         let requestedQuality = preferredQuality ?? snapshot.effectivePreferredVideoQuality ?? qn
@@ -2883,7 +2955,7 @@ nonisolated final class BiliAPIClient {
     ) async throws -> PlayURLData {
         let stageStart = CACurrentMediaTime()
         let referer = "https://www.bilibili.com/video/\(bvid)"
-        let snapshot = await requestSnapshot()
+        let snapshot = await requestSnapshot(purpose: .playback)
         let requestedQuality = preferredQuality ?? snapshot.effectivePreferredVideoQuality ?? 112
         let streamSource = snapshot.playbackStreamSourcePreference
         let data = try await runCachedPlayURLStage(
@@ -2903,7 +2975,10 @@ nonisolated final class BiliAPIClient {
             )
         }
         logPlayURLStage("webpagePlayInfo", bvid: bvid, cid: cid, start: stageStart, data: data)
-        return data
+        return await applyingConfiguredHistoryAccount(
+            to: data,
+            playbackSnapshot: snapshot
+        )
     }
 
     func fetchStartupPlayURL(
@@ -2914,7 +2989,7 @@ nonisolated final class BiliAPIClient {
         requestLease: StartupPlayURLRequestLease? = nil,
         requestSource: StartupPlayURLRequestSource = .preload
     ) async throws -> PlayURLData {
-        let snapshot = await requestSnapshot()
+        let snapshot = await requestSnapshot(purpose: .playback)
         let configuredQuality = preferredQuality ?? snapshot.effectivePreferredVideoQuality
         let requestedQuality = startupRequestedQuality(configuredQuality: configuredQuality)
         let key = PlayURLCacheKey(
@@ -2942,10 +3017,13 @@ nonisolated final class BiliAPIClient {
             PlayerMetricsLog.logger.info(
                 "playURLStartupMemoryCacheHit bvid=\(bvid, privacy: .public) cid=\(cid, privacy: .public) qn=\(requestedQuality, privacy: .public)"
             )
-            return cached
+            return await applyingConfiguredHistoryAccount(
+                to: cached,
+                playbackSnapshot: snapshot
+            )
         }
 
-        return try await fetchPlayURLWithPendingRequest(
+        let data = try await fetchPlayURLWithPendingRequest(
             cacheKey: key,
             scope: scope,
             bvid: bvid,
@@ -2962,6 +3040,10 @@ nonisolated final class BiliAPIClient {
                 requestSource: requestSource
             )
         }
+        return await applyingConfiguredHistoryAccount(
+            to: data,
+            playbackSnapshot: snapshot
+        )
     }
 
     private func fetchPlayURLWithPendingRequest(
@@ -3033,7 +3115,7 @@ nonisolated final class BiliAPIClient {
         cid: Int,
         preferredQuality: Int? = nil
     ) async -> Bool {
-        let snapshot = await requestSnapshot()
+        let snapshot = await requestSnapshot(purpose: .playback)
         let configuredQuality = preferredQuality ?? snapshot.effectivePreferredVideoQuality
         let requestedQuality = startupRequestedQuality(configuredQuality: configuredQuality)
         let key = PlayURLCacheKey(
@@ -3615,7 +3697,7 @@ nonisolated final class BiliAPIClient {
         qn: Int,
         cookieMode: String
     ) async {
-        let snapshot = await requestSnapshot()
+        let snapshot = await requestSnapshot(purpose: .playback)
         let cacheKey = playURLFailureCacheKey(
             stage: stage,
             bvid: bvid,
@@ -3723,7 +3805,7 @@ nonisolated final class BiliAPIClient {
     ) async throws -> PlayURLData {
         let stageStart = CACurrentMediaTime()
         let referer = "https://www.bilibili.com/video/\(bvid)"
-        let snapshot = await requestSnapshot()
+        let snapshot = await requestSnapshot(purpose: .playback)
         let requestedQuality = preferredQuality ?? snapshot.effectivePreferredVideoQuality ?? 112
         let streamSource = snapshot.playbackStreamSourcePreference
         let data = try await runCachedPlayURLStage(
@@ -3760,7 +3842,7 @@ nonisolated final class BiliAPIClient {
     ) async throws -> PlayURLData {
         let stageStart = CACurrentMediaTime()
         let referer = "https://www.bilibili.com/video/\(bvid)"
-        let snapshot = await requestSnapshot()
+        let snapshot = await requestSnapshot(purpose: .playback)
         let requestedQuality = preferredQuality ?? snapshot.effectivePreferredVideoQuality ?? 112
         let streamSource = snapshot.playbackStreamSourcePreference
         let authCookieHeader = snapshot.cookieHeader
@@ -4562,7 +4644,7 @@ nonisolated final class BiliAPIClient {
             query: query,
             referer: referer,
             userAgent: userAgent(for: streamSource),
-            cookieHeader: await anonymousCookieHeader(),
+            cookieHeader: await anonymousCookieHeader(purpose: .playback),
             cachePolicy: .reloadIgnoringLocalCacheData
         )
         return try requirePlayURLData(response)
@@ -4868,6 +4950,8 @@ nonisolated final class BiliAPIClient {
     }
 
     func fetchDynamicFeed(offset: String? = nil) async throws -> DynamicFeedData {
+        let snapshot = await requestSnapshot(purpose: .dynamicFeed)
+        guard snapshot.isLoggedIn else { throw BiliAPIError.missingSESSDATA }
         var query = [
             "type": "all",
             "platform": "web",
@@ -4881,6 +4965,7 @@ nonisolated final class BiliAPIClient {
             base: baseURL,
             path: "/x/polymer/web-dynamic/v1/feed/all",
             query: query,
+            cookieHeader: snapshot.cookieHeader,
             responseCachePolicy: .brief
         )
         guard response.code == 0 else { throw BiliAPIError.api(code: response.code, message: response.displayMessage) }
@@ -4889,7 +4974,8 @@ nonisolated final class BiliAPIClient {
     }
 
     func fetchDynamicPortal() async throws -> DynamicPortalData {
-        guard await isLoggedIn() else { throw BiliAPIError.missingSESSDATA }
+        let snapshot = await requestSnapshot(purpose: .dynamicFeed)
+        guard snapshot.isLoggedIn else { throw BiliAPIError.missingSESSDATA }
         let response: BiliResponse<DynamicPortalData> = try await get(
             base: baseURL,
             path: "/x/polymer/web-dynamic/v1/portal",
@@ -4897,6 +4983,7 @@ nonisolated final class BiliAPIClient {
                 "up_list_more": "1",
                 "web_location": "333.1365"
             ],
+            cookieHeader: snapshot.cookieHeader,
             responseCachePolicy: .brief
         )
         guard response.code == 0 else { throw BiliAPIError.api(code: response.code, message: response.displayMessage) }
@@ -5263,6 +5350,23 @@ nonisolated final class BiliAPIClient {
             await state.clearNavUserTask()
             throw error
         }
+    }
+
+    func fetchNavUser(cookieHeader: String) async throws -> NavUserInfo {
+        let response: BiliResponse<NavUserInfo> = try await get(
+            base: baseURL,
+            path: "/x/web-interface/nav",
+            query: [:],
+            cookieHeader: cookieHeader,
+            cachePolicy: .reloadIgnoringLocalCacheData
+        )
+        guard response.code == 0 else {
+            throw BiliAPIError.api(code: response.code, message: response.displayMessage)
+        }
+        guard let info = response.payload, info.isLogin == true else {
+            throw BiliAPIError.missingSESSDATA
+        }
+        return info
     }
 
     func fetchLiveRooms(page: Int = 1, refreshIndex: Int = 0) async throws -> [LiveRoom] {
@@ -5836,9 +5940,17 @@ nonisolated final class BiliAPIClient {
         body: [String: String],
         referer: String = "https://www.bilibili.com",
         userAgent: String? = nil,
+        cookieHeader: String? = nil,
         retryPolicy: BiliNetworkRetryPolicy = .api
     ) async throws -> T {
-        var request = try await makeRequest(base: base, path: path, query: [:], referer: referer, userAgent: userAgent)
+        var request = try await makeRequest(
+            base: base,
+            path: path,
+            query: [:],
+            referer: referer,
+            userAgent: userAgent,
+            cookieHeader: cookieHeader
+        )
         request.httpMethod = "POST"
         request.setValue("application/x-www-form-urlencoded; charset=UTF-8", forHTTPHeaderField: "Content-Type")
         request.httpBody = Self.formBody(from: body)
@@ -5992,15 +6104,21 @@ nonisolated final class BiliAPIClient {
         return "\(hasSession ? "auth" : "anon")|mid:\(mid)|buvid:\(buvid)"
     }
 
-    private func requireCSRF() async throws -> String {
-        let snapshot = await requestSnapshot()
+    private func requireCSRFContext(
+        for purpose: BiliAccountPurpose
+    ) async throws -> (csrf: String, snapshot: RequestSnapshot) {
+        let snapshot = await requestSnapshot(purpose: purpose)
         guard snapshot.isLoggedIn else {
             throw BiliAPIError.missingSESSDATA
         }
         guard let csrf = snapshot.csrfToken, !csrf.isEmpty else {
             throw BiliAPIError.missingCSRF
         }
-        return csrf
+        return (csrf, snapshot)
+    }
+
+    private func requireCSRF() async throws -> String {
+        try await requireCSRFContext(for: .main).csrf
     }
 
     private func applyCommonHeaders(to request: inout URLRequest, referer: String, userAgent: String? = nil, cookieHeader: String) {
@@ -6165,14 +6283,23 @@ nonisolated final class BiliAPIClient {
         try await decode(T.self, from: data, priority: priority)
     }
 
-    private func favoriteFolderIDs(for aid: Int) async throws -> [Int] {
-        try await favoriteFolderSummaries(rid: aid)
+    private func favoriteFolderIDs(
+        for aid: Int,
+        snapshot: RequestSnapshot
+    ) async throws -> [Int] {
+        try await favoriteFolderSummaries(rid: aid, snapshot: snapshot)
             .filter { $0.id > 0 }
             .map(\.id)
     }
 
-    private func favoriteFolderSummaries(rid: Int? = nil) async throws -> [FavoriteFolder] {
-        let userMID = try await currentUserMID()
+    private func favoriteFolderSummaries(
+        rid: Int? = nil,
+        snapshot: RequestSnapshot
+    ) async throws -> [FavoriteFolder] {
+        guard snapshot.isLoggedIn else { throw BiliAPIError.missingSESSDATA }
+        guard let userMID = snapshot.currentUserMID, userMID > 0 else {
+            throw BiliAPIError.missingPayload
+        }
         var query = [
             "up_mid": String(userMID),
             "type": "2"
@@ -6183,19 +6310,11 @@ nonisolated final class BiliAPIClient {
         let response: BiliResponse<FavoriteFolderListData> = try await get(
             base: baseURL,
             path: "/x/v3/fav/folder/created/list-all",
-            query: query
+            query: query,
+            cookieHeader: snapshot.cookieHeader
         )
         guard response.code == 0 else { throw BiliAPIError.api(code: response.code, message: response.displayMessage) }
         return response.payload?.list ?? []
-    }
-
-    private func currentUserMID() async throws -> Int {
-        if let mid = await requestSnapshot().currentUserMID, mid > 0 {
-            return mid
-        }
-        let user = try await fetchNavUser()
-        guard let mid = user.mid, mid > 0 else { throw BiliAPIError.missingPayload }
-        return mid
     }
 
     private func requirePlayURLData(_ response: BiliResponse<PlayURLData>, requirePlayablePayload: Bool = false) throws -> PlayURLData {

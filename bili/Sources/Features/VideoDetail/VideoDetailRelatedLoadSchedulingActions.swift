@@ -15,18 +15,24 @@ extension VideoDetailViewModel {
             defer {
                 self.clearRelatedLoadingTaskIfCurrent(generation: loadGeneration)
             }
-            guard let release = await self.waitForPlaybackStartupRelease(acceptsFailure: true),
-                  !Task.isCancelled,
-                  !self.isPlaybackInvalidatedForNavigation,
-                  self.relatedLoadingGeneration == loadGeneration
-            else { return }
-            if case .firstFrame = release, self.playbackAdaptationProfile.shouldThrottleBackgroundPreload {
-                try? await Task.sleep(nanoseconds: 700_000_000)
-                guard !Task.isCancelled,
+            if self.libraryStore.videoDetailAutoplayEnabled {
+                guard let release = await self.waitForPlaybackStartupRelease(acceptsFailure: true),
+                      !Task.isCancelled,
                       !self.isPlaybackInvalidatedForNavigation,
                       self.relatedLoadingGeneration == loadGeneration
                 else { return }
+                if case .firstFrame = release, self.playbackAdaptationProfile.shouldThrottleBackgroundPreload {
+                    try? await Task.sleep(nanoseconds: 700_000_000)
+                    guard !Task.isCancelled,
+                          !self.isPlaybackInvalidatedForNavigation,
+                          self.relatedLoadingGeneration == loadGeneration
+                    else { return }
+                }
             }
+            guard !Task.isCancelled,
+                  !self.isPlaybackInvalidatedForNavigation,
+                  self.relatedLoadingGeneration == loadGeneration
+            else { return }
             await self.loadRelated()
             guard !Task.isCancelled,
                   !self.isPlaybackInvalidatedForNavigation,

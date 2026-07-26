@@ -2,6 +2,7 @@ import SwiftUI
 
 enum MineOverlayRoute: Hashable {
     case accountMessages
+    case multiAccountSettings
     case history
     case favorites
     case interfaceSettings

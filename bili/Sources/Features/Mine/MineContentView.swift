@@ -15,9 +15,11 @@ struct MineContentView: View {
             MineAccountSection(
                 viewModel: viewModel,
                 sessionStore: sessionStore,
+                libraryStore: libraryStore,
                 onQRCodeLogin: onQRCodeLogin,
                 onSMSLogin: onSMSLogin,
-                onWebLogin: onWebLogin
+                onWebLogin: onWebLogin,
+                onOpenRoute: onOpenRoute
             )
 
             MineAccountLibrarySection(

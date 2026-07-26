@@ -118,6 +118,8 @@ final class VideoDetailViewModel: ObservableObject {
     var pendingPlaybackHistoryResumeTime: TimeInterval?
     var pendingPlaybackHistoryResumeCID: Int?
     var didResolveCloudHistoryResume = false
+    var isAwaitingInitialManualPlayback = false
+    var isAwaitingRelatedVideoReturnPlayback = false
     var manuallySelectedPageCID: Int?
     var uploaderInteractionLoadState = VideoDetailUploaderInteractionLoadState()
     var lastUserSeekAt: Date?
@@ -146,6 +148,7 @@ final class VideoDetailViewModel: ObservableObject {
         }
         self.isDanmakuEnabled = libraryStore.danmakuEnabled
         self.danmakuSettings = libraryStore.danmakuSettings
+        self.isAwaitingInitialManualPlayback = !libraryStore.videoDetailAutoplayEnabled
         refreshDetailDisplayMetrics()
         refreshUploaderFanCountText()
         configureLifecycleBindings()

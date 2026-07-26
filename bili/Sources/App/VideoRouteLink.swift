@@ -71,12 +71,18 @@ struct VideoOwnerRouteLink<Label: View>: View {
 
 struct VideoRouteLink<Label: View>: View {
     let video: VideoItem
+    let onOpen: (() -> Void)?
     @ViewBuilder let label: () -> Label
     @Environment(\.openVideoAction) private var openVideo
     @Environment(\.prewarmVideoRouteAction) private var prewarmVideoRoute
 
-    init(_ video: VideoItem, @ViewBuilder label: @escaping () -> Label) {
+    init(
+        _ video: VideoItem,
+        onOpen: (() -> Void)? = nil,
+        @ViewBuilder label: @escaping () -> Label
+    ) {
         self.video = video
+        self.onOpen = onOpen
         self.label = label
     }
 
@@ -86,6 +92,7 @@ struct VideoRouteLink<Label: View>: View {
                 video: video,
                 openVideo: openVideo,
                 prewarmVideoRoute: prewarmVideoRoute,
+                onOpen: onOpen,
                 label: label
             )
         } else {
@@ -93,6 +100,7 @@ struct VideoRouteLink<Label: View>: View {
                 label()
             }
             .buttonStyle(VideoRoutePrewarmButtonStyle {
+                onOpen?()
                 prewarmVideoRoute?(video)
             })
         }
@@ -103,6 +111,7 @@ private struct VideoRouteTapLink<Label: View>: View {
     let video: VideoItem
     let openVideo: (VideoItem) -> Void
     let prewarmVideoRoute: ((VideoItem) -> Void)?
+    let onOpen: (() -> Void)?
     @ViewBuilder let label: () -> Label
 
     var body: some View {
@@ -115,6 +124,7 @@ private struct VideoRouteTapLink<Label: View>: View {
     }
 
     private func open() {
+        onOpen?()
         prewarmVideoRoute?(video)
         openVideo(video)
     }

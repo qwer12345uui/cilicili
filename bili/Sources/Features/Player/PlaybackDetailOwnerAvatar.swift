@@ -21,7 +21,7 @@ struct PlaybackDetailOwnerAvatar: View {
 
     var body: some View {
         if let owner, owner.mid > 0 {
-            NavigationLink(value: owner) {
+            VideoOwnerRouteLink(owner: owner) {
                 avatarImage(urlString: owner.face?.normalizedBiliURL())
             }
             .buttonStyle(.plain)

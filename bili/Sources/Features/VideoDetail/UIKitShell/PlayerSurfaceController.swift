@@ -182,7 +182,7 @@ final class PlayerSurfaceController {
         appliedLayout = nil
         updateLayout(layout)
         scheduleRotationChromePrewarm(for: playerViewModel)
-        if isNewPlayer {
+        if isNewPlayer, playerViewModel.wantsAutoplay {
             playerViewModel.play()
         }
     }

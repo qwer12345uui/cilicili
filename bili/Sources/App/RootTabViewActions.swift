@@ -34,7 +34,7 @@ extension RootTabView {
         didConsumeStartupUploader = true
         selectedTab = .home
         DispatchQueue.main.async {
-            rootNavigationPath.append(Self.seedUploader(mid: startUploaderMID))
+            openVideoOwnerRoute(Self.seedUploader(mid: startUploaderMID))
         }
     }
 
@@ -67,6 +67,8 @@ extension RootTabView {
     }
 
     func openVideoOwnerRoute(_ owner: VideoOwner) {
+        guard owner.mid > 0 else { return }
+        AppOrientationLock.restorePortrait()
         pushRootRoute(owner)
     }
 
@@ -108,17 +110,7 @@ extension RootTabView {
     }
 
     func openUserFromLink(_ owner: VideoOwner) {
-        AppOrientationLock.restorePortrait()
-        if bottomMode == .video {
-            withAnimation(.smooth(duration: 0.28)) {
-                videoNavigationPath.append(owner)
-            }
-            return
-        }
-
-        DispatchQueue.main.async {
-            rootNavigationPath.append(owner)
-        }
+        openVideoOwnerRoute(owner)
     }
 
     func videoNavigationHost() -> some View {

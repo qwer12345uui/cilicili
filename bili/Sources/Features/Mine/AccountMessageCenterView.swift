@@ -1009,7 +1009,7 @@ private struct AccountMessageLikeDetailActorRow: View {
 
     var body: some View {
         if let owner = entry.actor.owner {
-            NavigationLink(value: owner) {
+            VideoOwnerRouteLink(owner: owner) {
                 content
             }
         } else {
@@ -1171,7 +1171,7 @@ private struct AccountMessageFollowerRow: View {
 
     var body: some View {
         if let owner = follower.actor.owner {
-            NavigationLink(value: owner) {
+            VideoOwnerRouteLink(owner: owner) {
                 content
             }
         } else {

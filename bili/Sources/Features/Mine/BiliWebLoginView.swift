@@ -3,11 +3,12 @@ import WebKit
 
 struct BiliWebLoginView: View {
     @Environment(\.dismiss) private var dismiss
+    var usesIsolatedSession = false
     let onLoginCookies: ([HTTPCookie]) -> Void
 
     var body: some View {
         NavigationStack {
-            BiliWebLoginWebView { cookies in
+            BiliWebLoginWebView(usesIsolatedSession: usesIsolatedSession) { cookies in
                 onLoginCookies(cookies)
                 dismiss()
             }
@@ -26,11 +27,12 @@ struct BiliWebLoginView: View {
 private struct BiliWebLoginWebView: UIViewRepresentable {
     private static let loginURL = URL(string: "https://passport.bilibili.com/login")!
 
+    let usesIsolatedSession: Bool
     let onLoginCookies: ([HTTPCookie]) -> Void
 
     func makeUIView(context: Context) -> WKWebView {
         let configuration = WKWebViewConfiguration()
-        configuration.websiteDataStore = .default()
+        configuration.websiteDataStore = usesIsolatedSession ? .nonPersistent() : .default()
 
         let webView = WKWebView(frame: .zero, configuration: configuration)
         webView.navigationDelegate = context.coordinator

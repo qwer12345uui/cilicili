@@ -8,7 +8,10 @@ struct MineView: View {
     @ObservedObject var holder: MineViewModelHolder
     let onOpenRoute: (MineOverlayRoute) -> Void
     @State private var loginSheet: LoginSheet?
-    @State private var hasLoadedAccountSummary = false
+    @State private var loadedMainAccountCredentialVersion: Int?
+    @State private var loadedHistoryAccountCredentialVersion: Int?
+    @State private var loadedInteractionAccountCredentialVersion: Int?
+    @State private var loadedMultiAccountExperimentEnabled: Bool?
 
     var body: some View {
         Group {
@@ -65,26 +68,61 @@ struct MineView: View {
             onWebLogin: { loginSheet = .web },
             onOpenRoute: onOpenRoute
         )
-        .task {
-            await refreshAccountSummaryIfNeeded(viewModel)
-        }
-        .task(id: sessionStore.playbackCredentialVersion) {
+        .task(id: MineAccountRefreshTaskID(
+            mainCredentialVersion: sessionStore.playbackCredentialVersion,
+            historyCredentialVersion: sessionStore.historyAccountCredentialVersion,
+            interactionCredentialVersion: sessionStore.interactionAccountCredentialVersion,
+            multiAccountExperimentEnabled: libraryStore.multiAccountExperimentEnabled
+        )) {
             guard sessionStore.isLoggedIn else {
+                loadedMainAccountCredentialVersion = nil
+                loadedHistoryAccountCredentialVersion = nil
+                loadedInteractionAccountCredentialVersion = nil
+                loadedMultiAccountExperimentEnabled = nil
                 return
             }
-            await accountMessageViewModel.refreshUnread()
-        }
-    }
+            let mainCredentialVersion = sessionStore.playbackCredentialVersion
+            let historyCredentialVersion = sessionStore.historyAccountCredentialVersion
+            let interactionCredentialVersion = sessionStore.interactionAccountCredentialVersion
+            let mainAccountChanged = loadedMainAccountCredentialVersion != mainCredentialVersion
+            let historyAccountChanged = loadedHistoryAccountCredentialVersion != historyCredentialVersion
+            let interactionAccountChanged = loadedInteractionAccountCredentialVersion != interactionCredentialVersion
+            let experimentModeChanged = loadedMultiAccountExperimentEnabled != libraryStore.multiAccountExperimentEnabled
+            loadedMainAccountCredentialVersion = mainCredentialVersion
+            loadedHistoryAccountCredentialVersion = historyCredentialVersion
+            loadedInteractionAccountCredentialVersion = interactionCredentialVersion
+            loadedMultiAccountExperimentEnabled = libraryStore.multiAccountExperimentEnabled
 
-    private func refreshAccountSummaryIfNeeded(_ viewModel: MineViewModel) async {
-        guard sessionStore.isLoggedIn else {
-            hasLoadedAccountSummary = false
-            return
+            if mainAccountChanged {
+                async let userRefresh: Void = viewModel.refreshUser()
+                async let unreadRefresh: Void = accountMessageViewModel.refreshUnread()
+                _ = await (userRefresh, unreadRefresh)
+                return
+            }
+
+            let historyNeedsRefresh = historyAccountChanged || experimentModeChanged
+            let favoritesNeedRefresh = interactionAccountChanged || experimentModeChanged
+            switch (historyNeedsRefresh, favoritesNeedRefresh) {
+            case (true, true):
+                async let historyRefresh: Void = viewModel.refreshHistory()
+                async let favoritesRefresh: Void = viewModel.refreshFavorites()
+                _ = await (historyRefresh, favoritesRefresh)
+            case (true, false):
+                await viewModel.refreshHistory()
+            case (false, true):
+                await viewModel.refreshFavorites()
+            case (false, false):
+                break
+            }
         }
-        guard !hasLoadedAccountSummary else { return }
-        hasLoadedAccountSummary = true
-        await viewModel.refreshUser()
     }
+}
+
+private struct MineAccountRefreshTaskID: Hashable {
+    let mainCredentialVersion: Int
+    let historyCredentialVersion: Int
+    let interactionCredentialVersion: Int
+    let multiAccountExperimentEnabled: Bool
 }
 
 private enum LoginSheet: Identifiable, Hashable {

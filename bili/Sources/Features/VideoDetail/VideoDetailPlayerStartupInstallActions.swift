@@ -16,6 +16,12 @@ extension VideoDetailViewModel {
         configureStablePlayerStartupCallbacks(playerViewModel)
         playerViewModel.setPlaybackRate(playbackRate)
         playerViewModel.setPlaybackIntent(shouldAutoplay)
+        playerViewModel.setInitialManualPlaybackPrompt(
+            isAwaitingInitialManualPlayback && !shouldAutoplay
+        )
+        playerViewModel.setRelatedVideoReturnPlaybackPrompt(
+            isAwaitingRelatedVideoReturnPlayback && !shouldAutoplay
+        )
         stablePlayerViewModel = playerViewModel
         syncPlayerIdentityRenderStore()
         updateResumeDiagnostics(

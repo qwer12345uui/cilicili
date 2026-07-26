@@ -55,6 +55,9 @@ struct VideoDetailView: View {
                 onNavigateBack: popOneVideoLevel,
                 lifecycleActions: contentLifecycleActions
             )
+            .environment(\.markRelatedVideoNavigation) {
+                holder.viewModel?.markRelatedVideoNavigation()
+            }
         }
     }
 

@@ -4,6 +4,8 @@ struct RootMineNavigationDestination: View {
     let route: MineOverlayRoute
     @ObservedObject var holder: MineViewModelHolder
     @ObservedObject var libraryStore: LibraryStore
+    @ObservedObject var sessionStore: SessionStore
+    let api: BiliAPIClient
 
     var body: some View {
         Group {
@@ -14,6 +16,12 @@ struct RootMineNavigationDestination: View {
                 } else {
                     ProgressView()
                 }
+            case .multiAccountSettings:
+                MultiAccountExperimentSettingsView(
+                    sessionStore: sessionStore,
+                    libraryStore: libraryStore,
+                    api: api
+                )
             case .history:
                 accountLibraryPage(kind: .history)
             case .favorites:

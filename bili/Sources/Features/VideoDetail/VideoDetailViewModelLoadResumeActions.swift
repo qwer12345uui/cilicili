@@ -18,9 +18,11 @@ extension VideoDetailViewModel {
 
     func restoreStablePlayerForLoadedDetail() {
         let resumeTime = pendingNavigationResumeTime
-        let shouldResumeOverride: Bool? = shouldResumePlaybackAfterCancelledNavigation
-            ? true
-            : (hasPendingNavigationInterruption ? false : nil)
+        let shouldResumeOverride: Bool? = isAwaitingRelatedVideoReturnPlayback
+            ? false
+            : (shouldResumePlaybackAfterCancelledNavigation
+                ? true
+                : (hasPendingNavigationInterruption ? false : nil))
         guard !isPlaybackInvalidatedForNavigation else { return }
         updateStablePlayerViewModelIfNeeded(
             resumeTimeOverride: resumeTime,
@@ -35,14 +37,20 @@ extension VideoDetailViewModel {
         beginCloudHistoryResumeFetchIfNeeded()
         schedulePlayURLLoadIfNeeded()
         scheduleUploaderAndInteractionLoadIfNeeded()
-        scheduleFullDetailLoadIfNeeded(priority: .utility, waitsForFirstFrame: true)
+        scheduleFullDetailLoadIfNeeded(
+            priority: .utility,
+            waitsForFirstFrame: libraryStore.videoDetailAutoplayEnabled
+        )
     }
 
     func startPlaybackAfterFastStartActivation() async {
         beginCloudHistoryResumeFetchIfNeeded()
         await prioritizeCurrentPlaybackForStartup()
         scheduleUploaderAndInteractionLoadIfNeeded()
-        scheduleFullDetailLoadIfNeeded(priority: .utility, waitsForFirstFrame: true)
+        scheduleFullDetailLoadIfNeeded(
+            priority: .utility,
+            waitsForFirstFrame: libraryStore.videoDetailAutoplayEnabled
+        )
         await loadPlayURLIfNeeded()
     }
 }

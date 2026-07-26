@@ -20,7 +20,8 @@ extension VideoDetailViewModel {
         if redirectToHistoryCIDIfNeeded(data.lastPlayCID, currentCID: cid) {
             return true
         }
-        if redirectToHistoryCIDIfNeeded(detail.historyCID, currentCID: cid) {
+        if usesMainAccountHistoryMetadata,
+           redirectToHistoryCIDIfNeeded(detail.historyCID, currentCID: cid) {
             return true
         }
         let minimumProgress = playbackHistoryResumeMinimumProgress
@@ -46,7 +47,8 @@ extension VideoDetailViewModel {
             setPendingPlaybackHistoryResumeTime(resumeTime, cid: cid)
             return false
         }
-        if let resumeTime = detail.historyResumeTime,
+        if usesMainAccountHistoryMetadata,
+           let resumeTime = detail.historyResumeTime,
            resumeTime >= minimumProgress,
            detail.historyCID == nil || detail.historyCID == cid {
             setPendingPlaybackHistoryResumeTime(resumeTime, cid: cid)
@@ -78,6 +80,14 @@ extension VideoDetailViewModel {
 
     private var playbackHistoryResumeMinimumProgress: TimeInterval {
         TimeInterval(libraryStore.playbackHistorySyncThresholdSeconds)
+    }
+
+    private var usesMainAccountHistoryMetadata: Bool {
+        let snapshot = sessionStore.credentialSnapshot(
+            for: .historyRead,
+            multiAccountEnabled: libraryStore.multiAccountExperimentEnabled
+        )
+        return snapshot.accountMID == sessionStore.mainAccountMID
     }
 
     private func prepareCloudHistoryResumeIfNeeded(currentCID: Int) async {

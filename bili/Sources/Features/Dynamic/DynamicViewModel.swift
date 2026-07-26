@@ -35,6 +35,7 @@ final class DynamicViewModel: ObservableObject {
         lifecycleCoordinator = DynamicFeedLifecycleCoordinator(
             api: api,
             sessionStore: sessionStore,
+            libraryStore: libraryStore,
             contentFilter: contentFilter,
             resourcePrefetchCoordinator: resourcePrefetchCoordinator
         )

@@ -50,20 +50,27 @@ extension VideoDetailViewModel {
         ownerMID: Int?,
         generation: Int
     ) async -> Bool {
-        guard let release = await waitForPlaybackStartupRelease(acceptsFailure: true),
-              !Task.isCancelled,
-              isCurrentVideoContext(aid: aid, bvid: bvid, ownerMID: ownerMID),
-              currentUploaderInteractionIdentity == identity,
-              uploaderInteractionLoadGeneration == generation
-        else { return false }
-        if case .firstFrame = release {
-            try? await Task.sleep(nanoseconds: 350_000_000)
-            guard !Task.isCancelled,
+        if libraryStore.videoDetailAutoplayEnabled {
+            guard let release = await waitForPlaybackStartupRelease(acceptsFailure: true),
+                  !Task.isCancelled,
                   isCurrentVideoContext(aid: aid, bvid: bvid, ownerMID: ownerMID),
                   currentUploaderInteractionIdentity == identity,
                   uploaderInteractionLoadGeneration == generation
             else { return false }
-        }
+            if case .firstFrame = release {
+                try? await Task.sleep(nanoseconds: 350_000_000)
+                guard !Task.isCancelled,
+                      isCurrentVideoContext(aid: aid, bvid: bvid, ownerMID: ownerMID),
+                      currentUploaderInteractionIdentity == identity,
+                      uploaderInteractionLoadGeneration == generation
+                else { return false }
+                }
+            }
+        guard !Task.isCancelled,
+              isCurrentVideoContext(aid: aid, bvid: bvid, ownerMID: ownerMID),
+              currentUploaderInteractionIdentity == identity,
+              uploaderInteractionLoadGeneration == generation
+        else { return false }
         await loadUploaderAndInteraction(bvid: bvid, aid: aid, ownerMID: ownerMID)
         return !Task.isCancelled
             && isCurrentVideoContext(aid: aid, bvid: bvid, ownerMID: ownerMID)

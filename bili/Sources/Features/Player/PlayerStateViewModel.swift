@@ -322,6 +322,7 @@ final class PlayerStateViewModel: NSObject, ObservableObject {
     var onPlaybackFailureWithReason: ((String?, HLSBridgeFailureReason?) -> Void)?
     var onBufferingPressure: ((Int) -> Void)?
     var onFirstFramePresented: (@MainActor () -> Void)?
+    var onExplicitPlaybackStartRequested: (@MainActor () -> Void)?
     var restoreUserInterfaceForPictureInPictureStop: (() async -> Bool)?
 
     private(set) var currentTime: TimeInterval = 0
@@ -351,6 +352,8 @@ final class PlayerStateViewModel: NSObject, ObservableObject {
     @Published private(set) var videoPresentationSize: CGSize = .zero
     @Published private(set) var lastFailureReason: HLSBridgeFailureReason?
     @Published private(set) var isUserSeeking = false
+    @Published private(set) var isAwaitingInitialManualPlayback = false
+    @Published private(set) var isAwaitingRelatedVideoReturnPlayback = false
     private(set) var surfaceLayoutGeneration = 0
     var isCurrentPlaybackSurfaceReady: Bool {
         isCurrentPlaybackSurfaceReadyForDisplay
@@ -1592,6 +1595,11 @@ final class PlayerStateViewModel: NSObject, ObservableObject {
 
     func play() {
         guard !isTerminated else { return }
+        if showsExplicitPlaybackStartControl {
+            isAwaitingInitialManualPlayback = false
+            isAwaitingRelatedVideoReturnPlayback = false
+            onExplicitPlaybackStartRequested?()
+        }
         restoreAudioAfterCancelledNavigation()
         ActivePlaybackCoordinator.shared.activate(self)
         wantsAutoplay = true
@@ -1788,6 +1796,20 @@ final class PlayerStateViewModel: NSObject, ObservableObject {
             playbackPhase = engine.hasMedia ? .paused : .idle
             rescheduleTimeObserverIfNeeded()
         }
+    }
+
+    func setInitialManualPlaybackPrompt(_ isAwaitingManualPlayback: Bool) {
+        guard !isTerminated else { return }
+        isAwaitingInitialManualPlayback = isAwaitingManualPlayback
+    }
+
+    func setRelatedVideoReturnPlaybackPrompt(_ isAwaitingPlayback: Bool) {
+        guard !isTerminated else { return }
+        isAwaitingRelatedVideoReturnPlayback = isAwaitingPlayback
+    }
+
+    var showsExplicitPlaybackStartControl: Bool {
+        isAwaitingInitialManualPlayback || isAwaitingRelatedVideoReturnPlayback
     }
 
     func suspendForNavigation() {

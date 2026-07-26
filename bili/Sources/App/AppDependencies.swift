@@ -41,11 +41,26 @@ final class AppDependencies: ObservableObject {
                     await PlayURLCache.shared.invalidateForLoginStateChange()
                     await VideoPreloadCenter.shared.clearPlayURLCache()
                     await self?.api.resetPlaybackAuthorizationState()
-                    await DynamicFeedWarmCache.shared.clear()
                     await self?.api.resetHomeRecommendState()
                     self?.homeRecommendDiagnosticsStore.reset()
                     HomeRecommendFeedbackCenter.shared.reset()
                     HomeFeedSnapshotCache.clearAll()
+                }
+            }
+            .store(in: &sessionCancellables)
+        Publishers.CombineLatest(
+            sessionStore.$playbackAccountCredentialVersion,
+            libraryStore.$multiAccountExperimentEnabled
+        )
+            .removeDuplicates { lhs, rhs in
+                lhs.0 == rhs.0 && lhs.1 == rhs.1
+            }
+            .dropFirst()
+            .sink { [weak self] _ in
+                Task {
+                    await PlayURLCache.shared.invalidateForLoginStateChange()
+                    await VideoPreloadCenter.shared.clearPlayURLCache()
+                    await self?.api.resetPlaybackAuthorizationState()
                 }
             }
             .store(in: &sessionCancellables)
@@ -110,11 +125,18 @@ final class AppDependencies: ObservableObject {
         refreshPlaybackCDNProbeOnAppActivationIfNeeded()
 
         let api = api
+        let dynamicFeedIdentityKey = sessionStore.accountCacheIdentityKey(
+            for: .dynamicFeed,
+            multiAccountEnabled: libraryStore.multiAccountExperimentEnabled
+        )
         Task(priority: .utility) {
             await RemoteImageCache.shared.applyAdaptiveBudget()
             await ResourceCacheCenter.enforceConfiguredLimit()
             async let startupResources: Void = api.prewarmStartupResources()
-            async let dynamicFeed: Void = DynamicFeedWarmCache.shared.prewarm(api: api)
+            async let dynamicFeed: Void = DynamicFeedWarmCache.shared.prewarm(
+                api: api,
+                identityKey: dynamicFeedIdentityKey
+            )
             _ = await (startupResources, dynamicFeed)
         }
     }

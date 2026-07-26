@@ -58,6 +58,23 @@ struct PlayerNativeControlMetrics: Equatable {
         qualityButtonMaxWidth: 92,
         qualityHorizontalPadding: 9
     )
+
+    func sized(controlHeight: CGFloat, iconSize: CGFloat) -> PlayerNativeControlMetrics {
+        PlayerNativeControlMetrics(
+            controlHeight: controlHeight,
+            progressControlHeight: progressControlHeight,
+            sliderVisualScale: sliderVisualScale,
+            iconSize: iconSize,
+            timeFont: timeFont,
+            stackSpacing: stackSpacing,
+            groupSpacing: groupSpacing,
+            controlSpacing: controlSpacing,
+            sliderHorizontalPadding: sliderHorizontalPadding,
+            timeLabelWidth: timeLabelWidth,
+            qualityButtonMaxWidth: qualityButtonMaxWidth,
+            qualityHorizontalPadding: qualityHorizontalPadding
+        )
+    }
 }
 
 private struct PlayerNativeControlMetricsKey: EnvironmentKey {
