@@ -16,12 +16,15 @@ struct CommentDialogRow: View {
 
     var body: some View {
         HStack(alignment: .top, spacing: 10) {
-            CommentAvatar(urlString: display.avatarURLString, size: 36)
+            CommentAvatar(
+                urlString: display.avatarURLString,
+                owner: display.authorOwner,
+                size: 36
+            )
 
             VStack(alignment: .leading, spacing: 11) {
                 HStack(alignment: .firstTextBaseline, spacing: 6) {
-                    Text(display.authorName)
-                        .appTypography(.commentAuthor, fallback: .subheadline.weight(.semibold))
+                    CommentAuthorIdentity(name: display.authorName, owner: display.authorOwner)
                         .foregroundStyle(.secondary)
 
                     if !display.timeText.isEmpty {

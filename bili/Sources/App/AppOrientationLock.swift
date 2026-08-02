@@ -82,8 +82,22 @@ final class AppDelegate: NSObject, UIApplicationDelegate {
         _ application: UIApplication,
         didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil
     ) -> Bool {
+        PlayerSystemMediaControls.clear()
         LaunchAppearance.applyToConnectedWindows()
         return true
+    }
+
+    func applicationWillTerminate(_ application: UIApplication) {
+        ActivePlaybackCoordinator.shared.stopActivePlayback()
+        PlayerSystemMediaControls.clear()
+    }
+
+    func applicationDidEnterBackground(_ application: UIApplication) {
+        ActivePlaybackCoordinator.shared.pauseActivePlaybackForAppBackground()
+    }
+
+    func applicationProtectedDataWillBecomeUnavailable(_ application: UIApplication) {
+        ActivePlaybackCoordinator.shared.pauseActivePlaybackForAppBackground()
     }
 
     func application(

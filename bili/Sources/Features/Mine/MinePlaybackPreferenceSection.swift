@@ -39,6 +39,7 @@ struct MinePlaybackPreferenceSection<ProbeSummary: View>: View {
             if showsAdvancedPlaybackSettings {
                 playbackStreamSourcePicker
                 playbackCDNPicker
+                cellularBiliTrafficCompatibilityExperimentToggle
                 prefersBackupAudioURLToggle
                 playbackCustomCDNHostEditor
                 playbackCDNProbeRefreshPolicyPicker
@@ -84,7 +85,10 @@ struct MinePlaybackPreferenceSection<ProbeSummary: View>: View {
         let networkTitle = libraryStore.playbackNetworkAddressFamilyPreference == .automatic
             ? "自动网络"
             : libraryStore.playbackNetworkAddressFamilyPreference.title
-        return "\(cdnTitle) · \(networkTitle)"
+        let compatibilityTitle = libraryStore.cellularBiliTrafficCompatibilityExperimentEnabled
+            ? "B站域名优先"
+            : "常规线路"
+        return "\(cdnTitle) · \(networkTitle) · \(compatibilityTitle)"
     }
 
     private var playbackAutoOptimizationPicker: some View {
@@ -231,6 +235,20 @@ struct MinePlaybackPreferenceSection<ProbeSummary: View>: View {
             Label("播放取流来源", systemImage: "antenna.radiowaves.left.and.right")
         }
         .pickerStyle(.navigationLink)
+    }
+
+    private var cellularBiliTrafficCompatibilityExperimentToggle: some View {
+        Toggle(isOn: Binding(
+            get: { libraryStore.cellularBiliTrafficCompatibilityExperimentEnabled },
+            set: { libraryStore.setCellularBiliTrafficCompatibilityExperimentEnabled($0) }
+        )) {
+            VStack(alignment: .leading, spacing: 3) {
+                Label("蜂窝网络 B站定向流量兼容实验", systemImage: "antenna.radiowaves.left.and.right")
+                Text("使用手机流量时优先 B站域名，外部线路仍会在播放失败时兜底；无法确认套餐是否实际免流。")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
     }
 
     private var playbackCDNPicker: some View {

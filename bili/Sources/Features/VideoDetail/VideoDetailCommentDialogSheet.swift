@@ -27,7 +27,7 @@ struct CommentDialogSheet: View {
     }
 
     var body: some View {
-        NavigationStack {
+        CommentOwnerProfileNavigationContainer {
             ScrollViewReader { proxy in
                 ScrollView {
                     VStack(alignment: .leading, spacing: 0) {

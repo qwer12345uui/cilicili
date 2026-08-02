@@ -3,10 +3,11 @@ import SwiftUI
 struct DynamicCommentRepliesSheet: View {
     let rootComment: Comment
     let replyStore: DynamicCommentReplyStore
+    @Environment(\.commentContentOwnerMID) private var commentContentOwnerMID
     @State private var dialogReply: Comment?
 
     var body: some View {
-        NavigationStack {
+        CommentOwnerProfileNavigationContainer {
             ScrollView {
                 VStack(alignment: .leading, spacing: 0) {
                     DynamicCommentReplyRootView(comment: rootComment)
@@ -31,6 +32,7 @@ struct DynamicCommentRepliesSheet: View {
         .presentationDragIndicator(.visible)
         .sheet(item: $dialogReply) { reply in
             DynamicCommentDialogSheet(rootComment: rootComment, focusReply: reply, replyStore: replyStore)
+                .environment(\.commentContentOwnerMID, commentContentOwnerMID)
         }
     }
 }
@@ -41,7 +43,7 @@ private struct DynamicCommentDialogSheet: View {
     let replyStore: DynamicCommentReplyStore
 
     var body: some View {
-        NavigationStack {
+        CommentOwnerProfileNavigationContainer {
             ScrollView {
                 VStack(alignment: .leading, spacing: 0) {
                     DynamicCommentReplyRootView(comment: rootComment)

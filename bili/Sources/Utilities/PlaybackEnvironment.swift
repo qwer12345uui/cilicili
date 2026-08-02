@@ -293,6 +293,7 @@ final class NetworkPathSnapshot: @unchecked Sendable {
     nonisolated private let queue = DispatchQueue(label: "cc.bili.network-path")
     nonisolated private let lock = NSLock()
     nonisolated(unsafe) private var cachedClass: PlaybackEnvironment.NetworkClass = .unknown
+    nonisolated(unsafe) private var cachedUsesCellular = false
 
     nonisolated private init() {
         monitor.pathUpdateHandler = { [weak self] path in
@@ -305,21 +306,28 @@ final class NetworkPathSnapshot: @unchecked Sendable {
         lock.withLock { cachedClass }
     }
 
+    nonisolated var usesCellular: Bool {
+        lock.withLock { cachedUsesCellular }
+    }
+
     nonisolated private func update(_ path: NWPath) {
+        let usesCellular = path.usesInterfaceType(.cellular)
         let value: PlaybackEnvironment.NetworkClass
         if path.isConstrained {
             value = .constrained
         } else if path.usesInterfaceType(.wifi) || path.usesInterfaceType(.wiredEthernet) {
             value = .wifi
-        } else if path.usesInterfaceType(.cellular) {
+        } else if usesCellular {
             value = .cellular
         } else {
             value = .unknown
         }
         let didChange = lock.withLock {
             let previous = cachedClass
-            guard previous != value else { return false }
+            let previousUsesCellular = cachedUsesCellular
+            guard previous != value || previousUsesCellular != usesCellular else { return false }
             cachedClass = value
+            cachedUsesCellular = usesCellular
             return true
         }
         if didChange {

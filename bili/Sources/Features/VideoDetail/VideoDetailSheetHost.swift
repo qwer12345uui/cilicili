@@ -21,6 +21,7 @@ private struct VideoDetailSheetHostModifier: ViewModifier {
                         loadDialog: sheetActions.replies.loadDialog,
                         reloadDialog: sheetActions.replies.reloadDialog
                     )
+                    .environment(\.commentContentOwnerMID, viewModel.detail.owner?.mid)
                 } else {
                     VideoDetailReplySheetHost(
                         rootComment: comment,
@@ -28,6 +29,7 @@ private struct VideoDetailSheetHostModifier: ViewModifier {
                         initialReplyID: nil,
                         actions: sheetActions.replies
                     )
+                    .environment(\.commentContentOwnerMID, viewModel.detail.owner?.mid)
                 }
             }
             .sheet(isPresented: sheetState.isShowingFavoriteFolders) {

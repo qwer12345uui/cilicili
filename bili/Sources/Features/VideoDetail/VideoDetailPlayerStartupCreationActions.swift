@@ -13,6 +13,7 @@ extension VideoDetailViewModel {
             audioStream: variant.audioStream,
             alternateVideoRenditions: alternateVideoRenditions,
             title: detail.title,
+            authorName: detail.owner?.name,
             referer: "https://www.bilibili.com/video/\(detail.bvid)",
             durationHint: detail.duration.map(TimeInterval.init),
             resumeTime: resumeTime,

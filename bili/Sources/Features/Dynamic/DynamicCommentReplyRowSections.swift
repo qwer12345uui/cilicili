@@ -6,8 +6,7 @@ struct DynamicCommentReplyAuthorLine: View {
 
     var body: some View {
         HStack(alignment: .firstTextBaseline, spacing: 6) {
-            Text(display.authorName)
-                .appTypography(.commentAuthor, fallback: .subheadline.weight(.semibold))
+            CommentAuthorIdentity(name: display.authorName, owner: display.authorOwner)
                 .foregroundStyle(.secondary)
 
             if !display.timeText.isEmpty {

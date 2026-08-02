@@ -9,6 +9,7 @@ struct BiliPlayerView: View {
     @StateObject private var playbackControlsVisibility = PlayerPlaybackControlsVisibilityModel()
     @StateObject private var rotationTransitionSnapshotModel = PlayerRotationTransitionSnapshotModel()
     @StateObject private var seekTransitionSnapshotModel = PlayerRotationTransitionSnapshotModel()
+    @StateObject private var appBackgroundRecoverySnapshotModel = PlayerRotationTransitionSnapshotModel()
     @StateObject private var speedBoostModel = PlayerSpeedBoostModel()
     @StateObject private var seekPreviewModel = PlayerSeekPreviewModel()
     @StateObject private var playbackProgressCoordinator = PlayerPlaybackProgressCoordinator()
@@ -31,6 +32,7 @@ struct BiliPlayerView: View {
             playbackControlsVisibility: playbackControlsVisibility,
             rotationTransitionSnapshotModel: rotationTransitionSnapshotModel,
             seekTransitionSnapshotModel: seekTransitionSnapshotModel,
+            appBackgroundRecoverySnapshotModel: appBackgroundRecoverySnapshotModel,
             speedBoostModel: speedBoostModel,
             seekPreviewModel: seekPreviewModel,
             playbackProgressCoordinator: playbackProgressCoordinator,

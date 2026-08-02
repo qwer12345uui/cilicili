@@ -11,7 +11,11 @@ struct DynamicCommentReplyRootView: View {
 
     var body: some View {
         HStack(alignment: .top, spacing: 10) {
-            DynamicCommentAvatar(urlString: display.avatarURLString, size: 40)
+            DynamicCommentAvatar(
+                urlString: display.avatarURLString,
+                owner: display.authorOwner,
+                size: 40
+            )
 
             VStack(alignment: .leading, spacing: 8) {
                 DynamicCommentReplyAuthorLine(display: display, showsLike: false)
@@ -44,7 +48,11 @@ struct DynamicCommentReplyDetailRow: View {
 
     var body: some View {
         HStack(alignment: .top, spacing: 10) {
-            DynamicCommentAvatar(urlString: display.avatarURLString, size: 36)
+            DynamicCommentAvatar(
+                urlString: display.avatarURLString,
+                owner: display.authorOwner,
+                size: 36
+            )
 
             VStack(alignment: .leading, spacing: 6) {
                 DynamicCommentReplyAuthorLine(display: display, showsLike: true)
@@ -88,7 +96,11 @@ struct DynamicCommentDialogRow: View {
 
     var body: some View {
         HStack(alignment: .top, spacing: 10) {
-            DynamicCommentAvatar(urlString: display.avatarURLString, size: 36)
+            DynamicCommentAvatar(
+                urlString: display.avatarURLString,
+                owner: display.authorOwner,
+                size: 36
+            )
 
             VStack(alignment: .leading, spacing: 6) {
                 DynamicCommentReplyAuthorLine(display: display, showsLike: true)

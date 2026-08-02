@@ -228,6 +228,54 @@ final class PlayerRotationTransitionSnapshotModel: ObservableObject {
         )
     }
 
+    func releaseForAppBackgroundPlaybackRecovery(
+        isReadyForReveal: @escaping @MainActor () -> Bool,
+        shouldKeepWaiting: @escaping @MainActor () -> Bool,
+        onReleased: (@MainActor () -> Void)? = nil
+    ) {
+        cancelReleaseTask()
+        let generation = advanceReleaseGeneration()
+        releaseTask = Task { @MainActor [weak self] in
+            guard let self else { return }
+            await Task.yield()
+
+            while shouldKeepWaiting(), !isReadyForReveal() {
+                try? await Task.sleep(
+                    nanoseconds: PlayerRotationTransitionSnapshotTiming.readinessPollDelayNanoseconds
+                )
+                guard !Task.isCancelled,
+                      self.releaseGeneration == generation
+                else { return }
+            }
+
+            guard shouldKeepWaiting(),
+                  isReadyForReveal(),
+                  !Task.isCancelled,
+                  self.releaseGeneration == generation
+            else {
+                self.snapshot = nil
+                self.opacity = 0
+                self.requiredSurfaceLayoutGeneration = nil
+                self.clearReleaseTaskIfCurrent(generation: generation)
+                return
+            }
+
+            withAnimation(.linear(duration: PlayerRotationTransitionSnapshotTiming.stableSurfaceFadeDuration)) {
+                self.opacity = 0
+            }
+            try? await Task.sleep(
+                nanoseconds: PlayerRotationTransitionSnapshotTiming.stableSurfaceRemovalDelayNanoseconds
+            )
+            guard !Task.isCancelled,
+                  self.releaseGeneration == generation
+            else { return }
+            self.snapshot = nil
+            self.requiredSurfaceLayoutGeneration = nil
+            self.clearReleaseTaskIfCurrent(generation: generation)
+            onReleased?()
+        }
+    }
+
     func hasReachedRequiredSurfaceLayoutGeneration(_ currentGeneration: Int) -> Bool {
         guard let requiredSurfaceLayoutGeneration else { return true }
         return currentGeneration >= requiredSurfaceLayoutGeneration

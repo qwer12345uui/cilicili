@@ -80,9 +80,11 @@ struct BiliPlayerViewContent: View {
             surfaceOverlay: context.configuration.surfaceOverlay,
             rotationSnapshot: context.rotationTransitionSnapshotModel.snapshot,
             seekSnapshot: context.seekTransitionSnapshotModel.snapshot,
+            appBackgroundRecoverySnapshot: context.appBackgroundRecoverySnapshotModel.snapshot,
             rotationFallbackCoverURL: context.rotationFallbackCoverURL,
             rotationSnapshotOpacity: context.rotationTransitionSnapshotModel.opacity,
             seekSnapshotOpacity: context.seekTransitionSnapshotModel.opacity,
+            appBackgroundRecoverySnapshotOpacity: context.appBackgroundRecoverySnapshotModel.opacity,
             constrainsRotationSnapshotToVideoAspect: context.configuration.isFullscreenActive
                 || context.configuration.isLayoutTransitioning,
             showsPlayerLoadingChrome: renderState.showsPlayerLoadingChrome,

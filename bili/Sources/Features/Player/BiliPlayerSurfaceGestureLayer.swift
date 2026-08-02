@@ -19,15 +19,23 @@ struct BiliPlayerSurfaceGestureLayer<Content: View>: View {
     @State private var horizontalSeekStartProgress: Double?
     @State private var horizontalSeekCurrentProgress: Double?
     @State private var horizontalSeekLastTranslationWidth: CGFloat?
-    @State private var lastReportedHorizontalSeekProgress: Double?
     @State private var isHorizontalSeeking = false
     @State private var isHorizontalSeekCancelPending = false
     @State private var isSpeedBoostGestureActive = false
     @State private var didAttemptSpeedBoost = false
+    @StateObject private var systemControlsController = PlayerSystemControlsController()
+    @State private var verticalAdjustmentTarget: PlayerSurfaceVerticalAdjustmentTarget?
+    @State private var verticalAdjustmentStartValue: Float?
+    @State private var verticalAdjustmentValue: Float?
+    @State private var isVerticalAdjusting = false
+    @State private var hardwareVolumeIndicatorValue: Float?
+    @State private var hardwareVolumeIndicatorDismissTask: Task<Void, Never>?
+    @State private var lastGestureRequestedVolume: Float?
 
     private let horizontalSeekActivationDistance: CGFloat = 8
     private let horizontalSeekDominanceRatio: CGFloat = 3
-    private let horizontalSeekChangeReportDelta = 0.004
+    private let verticalAdjustmentActivationDistance: CGFloat = 8
+    private let verticalAdjustmentDominanceRatio: CGFloat = 3
 
     var body: some View {
         GeometryReader { proxy in
@@ -36,7 +44,7 @@ struct BiliPlayerSurfaceGestureLayer<Content: View>: View {
                 LongPressGesture(minimumDuration: 0.28, maximumDistance: 80)
                     .sequenced(before: DragGesture(minimumDistance: 0, coordinateSpace: .local))
                     .onChanged { value in
-                        guard !isHorizontalSeeking else { return }
+                        guard !isHorizontalSeeking, !isVerticalAdjusting else { return }
                         guard case .second(true, _) = value else { return }
                         guard !didAttemptSpeedBoost else { return }
                         didAttemptSpeedBoost = true
@@ -52,6 +60,7 @@ struct BiliPlayerSurfaceGestureLayer<Content: View>: View {
                     }
             )
             .simultaneousGesture(horizontalSeekGesture(size: proxy.size))
+            .simultaneousGesture(verticalAdjustmentGesture(size: proxy.size))
         }
     }
 
@@ -67,9 +76,41 @@ struct BiliPlayerSurfaceGestureLayer<Content: View>: View {
     }
 
     private var playerContent: some View {
-        content
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .contentShape(Rectangle())
+        ZStack {
+            content
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+
+            PlayerSystemControlsHost(controller: systemControlsController)
+                .frame(width: 1, height: 1)
+                .opacity(0.01)
+                .allowsHitTesting(false)
+                .accessibilityHidden(true)
+
+            if isVerticalAdjusting,
+               let verticalAdjustmentTarget,
+               let verticalAdjustmentValue {
+                PlayerSurfaceVerticalAdjustmentIndicator(
+                    target: verticalAdjustmentTarget,
+                    value: verticalAdjustmentValue
+                )
+                .allowsHitTesting(false)
+            } else if let hardwareVolumeIndicatorValue {
+                PlayerSurfaceVerticalAdjustmentIndicator(
+                    target: .volume,
+                    value: hardwareVolumeIndicatorValue
+                )
+                .allowsHitTesting(false)
+                .transition(.opacity.combined(with: .scale(scale: 0.96)))
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .contentShape(Rectangle())
+        .onChange(of: systemControlsController.outputVolume) { previousValue, currentValue in
+            handleOutputVolumeChange(previousValue: previousValue, currentValue: currentValue)
+        }
+        .onDisappear {
+            dismissHardwareVolumeIndicator()
+        }
     }
 
     private var singleTapGesture: some Gesture {
@@ -82,7 +123,7 @@ struct BiliPlayerSurfaceGestureLayer<Content: View>: View {
     private func horizontalSeekGesture(size: CGSize) -> some Gesture {
         DragGesture(minimumDistance: horizontalSeekActivationDistance, coordinateSpace: .local)
             .onChanged { value in
-                guard canSeek else { return }
+                guard canSeek, !isSpeedBoostGestureActive, !isVerticalAdjusting else { return }
                 updateHorizontalSeek(for: value, size: size)
             }
             .onEnded { value in
@@ -100,11 +141,21 @@ struct BiliPlayerSurfaceGestureLayer<Content: View>: View {
                     return
                 }
                 let progress = horizontalSeekCurrentProgress
-                    ?? lastReportedHorizontalSeekProgress
                     ?? horizontalSeekStartProgress
                     ?? clock.progress
                 onHorizontalSeekEnded(progress)
                 resetHorizontalSeekState(clearsClockPreview: false)
+            }
+    }
+
+    private func verticalAdjustmentGesture(size: CGSize) -> some Gesture {
+        DragGesture(minimumDistance: verticalAdjustmentActivationDistance, coordinateSpace: .local)
+            .onChanged { value in
+                guard !isHorizontalSeeking, !isSpeedBoostGestureActive else { return }
+                updateVerticalAdjustment(for: value, size: size)
+            }
+            .onEnded { _ in
+                resetVerticalAdjustmentState()
             }
     }
 
@@ -133,10 +184,6 @@ struct BiliPlayerSurfaceGestureLayer<Content: View>: View {
         if !isHorizontalSeeking {
             guard abs(dx) >= horizontalSeekActivationDistance else { return }
             guard abs(dx) > abs(dy) * horizontalSeekDominanceRatio else { return }
-            if isSpeedBoostGestureActive {
-                isSpeedBoostGestureActive = false
-                onEndSpeedBoost(.supersededBySeek)
-            }
             let startProgress = clock.progress
             isHorizontalSeeking = true
             horizontalSeekStartProgress = startProgress
@@ -162,31 +209,111 @@ struct BiliPlayerSurfaceGestureLayer<Content: View>: View {
         clock.updateSeekPreview(progress: progress)
         isHorizontalSeekCancelPending = horizontalSeekShouldCancel(at: value.location, size: size)
         onHorizontalSeekCancelPendingChanged(isHorizontalSeekCancelPending)
-        reportHorizontalSeekChanged(progress)
+        onHorizontalSeekChanged(progress)
+    }
+
+    private func updateVerticalAdjustment(for value: DragGesture.Value, size: CGSize) {
+        if !isVerticalAdjusting {
+            guard PlayerSurfaceVerticalAdjustmentPolicy.shouldBegin(
+                translation: value.translation,
+                activationDistance: verticalAdjustmentActivationDistance,
+                dominanceRatio: verticalAdjustmentDominanceRatio
+            ),
+            let target = PlayerSurfaceVerticalAdjustmentPolicy.target(
+                startLocationX: value.startLocation.x,
+                width: size.width
+            )
+            else { return }
+
+            guard let startValue = systemValue(for: target) else { return }
+            isVerticalAdjusting = true
+            dismissHardwareVolumeIndicator()
+            verticalAdjustmentTarget = target
+            verticalAdjustmentStartValue = startValue
+        }
+
+        guard let target = verticalAdjustmentTarget,
+              let startValue = verticalAdjustmentStartValue
+        else { return }
+
+        let value = PlayerSurfaceVerticalAdjustmentPolicy.adjustedValue(
+            initialValue: startValue,
+            verticalTranslation: value.translation.height,
+            height: size.height
+        )
+        verticalAdjustmentValue = value
+        applySystemValue(value, for: target)
+    }
+
+    private func resetVerticalAdjustmentState() {
+        isVerticalAdjusting = false
+        verticalAdjustmentTarget = nil
+        verticalAdjustmentStartValue = nil
+        verticalAdjustmentValue = nil
+    }
+
+    private func systemValue(for target: PlayerSurfaceVerticalAdjustmentTarget) -> Float? {
+        switch target {
+        case .brightness:
+            return systemControlsController.displayBrightness
+        case .volume:
+            return systemControlsController.outputVolume
+        }
+    }
+
+    private func applySystemValue(_ value: Float, for target: PlayerSurfaceVerticalAdjustmentTarget) {
+        switch target {
+        case .brightness:
+            systemControlsController.setDisplayBrightness(value)
+        case .volume:
+            lastGestureRequestedVolume = value
+            systemControlsController.setOutputVolume(value)
+        }
+    }
+
+    private func handleOutputVolumeChange(previousValue: Float, currentValue: Float) {
+        if isVerticalAdjusting {
+            return
+        }
+        if let lastGestureRequestedVolume,
+           abs(lastGestureRequestedVolume - currentValue) <= 0.0001 {
+            self.lastGestureRequestedVolume = nil
+            return
+        }
+        lastGestureRequestedVolume = nil
+        guard PlayerSurfaceVerticalAdjustmentPolicy.shouldPresentHardwareVolumeIndicator(
+            previousValue: previousValue,
+            currentValue: currentValue,
+            isVerticalAdjusting: isVerticalAdjusting
+        ) else { return }
+
+        hardwareVolumeIndicatorDismissTask?.cancel()
+        withAnimation(.easeOut(duration: 0.14)) {
+            hardwareVolumeIndicatorValue = currentValue
+        }
+        hardwareVolumeIndicatorDismissTask = Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 1_200_000_000)
+            guard !Task.isCancelled else { return }
+            withAnimation(.easeIn(duration: 0.16)) {
+                hardwareVolumeIndicatorValue = nil
+            }
+        }
+    }
+
+    private func dismissHardwareVolumeIndicator() {
+        hardwareVolumeIndicatorDismissTask?.cancel()
+        hardwareVolumeIndicatorDismissTask = nil
+        hardwareVolumeIndicatorValue = nil
     }
 
     private var resolvedDuration: TimeInterval? {
         clock.duration ?? durationHint
     }
 
-    private func reportHorizontalSeekChanged(_ progress: Double) {
-        let clamped = min(max(progress, 0), 1)
-        guard let lastReportedHorizontalSeekProgress else {
-            lastReportedHorizontalSeekProgress = clamped
-            clock.updateSeekPreview(progress: clamped)
-            onHorizontalSeekChanged(clamped)
-            return
-        }
-        guard abs(clamped - lastReportedHorizontalSeekProgress) >= horizontalSeekChangeReportDelta else { return }
-        self.lastReportedHorizontalSeekProgress = clamped
-        onHorizontalSeekChanged(clamped)
-    }
-
     private func resetHorizontalSeekState(clearsClockPreview: Bool) {
         horizontalSeekStartProgress = nil
         horizontalSeekCurrentProgress = nil
         horizontalSeekLastTranslationWidth = nil
-        lastReportedHorizontalSeekProgress = nil
         isHorizontalSeeking = false
         isHorizontalSeekCancelPending = false
         if clearsClockPreview {
@@ -200,5 +327,40 @@ struct BiliPlayerSurfaceGestureLayer<Content: View>: View {
         let edgeCancelWidth = size.width * 0.125
         return location.y <= topCancelHeight
             && (location.x <= edgeCancelWidth || location.x >= size.width - edgeCancelWidth)
+    }
+}
+
+private struct PlayerSurfaceVerticalAdjustmentIndicator: View {
+    let target: PlayerSurfaceVerticalAdjustmentTarget
+    let value: Float
+
+    var body: some View {
+        VStack(spacing: 8) {
+            Image(systemName: systemImage)
+                .font(.title3.weight(.semibold))
+            Text("\(Int((value * 100).rounded()))%")
+                .font(.caption.weight(.semibold))
+                .monospacedDigit()
+            ProgressView(value: Double(value), total: 1)
+                .tint(.white)
+                .frame(width: 86)
+        }
+        .biliLiquidGlassForeground(shadowOpacity: 0.20)
+        .padding(14)
+        .frame(minWidth: 112)
+        .biliPlayerClearGlass(interactive: false, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .accessibilityLabel(target.accessibilityLabel)
+        .accessibilityValue("\(Int((value * 100).rounded()))%")
+        .accessibilityAddTraits(.updatesFrequently)
+    }
+
+    private var systemImage: String {
+        switch target {
+        case .brightness:
+            return "sun.max.fill"
+        case .volume:
+            if value <= 0.01 { return "speaker.slash.fill" }
+            return value < 0.5 ? "speaker.wave.1.fill" : "speaker.wave.2.fill"
+        }
     }
 }

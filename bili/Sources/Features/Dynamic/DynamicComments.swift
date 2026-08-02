@@ -12,8 +12,13 @@ struct DynamicCommentsSheet: View {
         _viewModel = StateObject(wrappedValue: DynamicCommentsViewModel(item: item, api: api))
     }
 
+    private var commentContentOwnerMID: Int? {
+        guard let mid = item.author?.mid, mid > 0 else { return nil }
+        return mid
+    }
+
     var body: some View {
-        NavigationStack {
+        CommentOwnerProfileNavigationContainer {
             ScrollView {
                 DynamicCommentsSheetContent(item: item, viewModel: viewModel) { comment in
                     replySheetComment = comment
@@ -28,6 +33,7 @@ struct DynamicCommentsSheet: View {
                 await viewModel.loadInitial()
             }
         }
+        .environment(\.commentContentOwnerMID, commentContentOwnerMID)
         .onChange(of: runtimeSettings.blocksGoodsComments) { _, isEnabled in
             viewModel.setBlocksGoodsComments(isEnabled)
         }
@@ -35,6 +41,7 @@ struct DynamicCommentsSheet: View {
         .presentationDragIndicator(.visible)
         .sheet(item: $replySheetComment) { comment in
             DynamicCommentRepliesSheet(rootComment: comment, replyStore: viewModel.replyStore)
+                .environment(\.commentContentOwnerMID, commentContentOwnerMID)
         }
     }
 }

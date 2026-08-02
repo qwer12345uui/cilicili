@@ -25,8 +25,6 @@ final class AVPlayerHLSBridgeEngine: PlayerRenderingEngine {
     }
 
     private let player = AVPlayer()
-    private var backgroundObserver: Any?
-    private var foregroundObserver: Any?
     private var itemEndObserver: Any?
     private var itemFailedObserver: Any?
     private var itemStalledObserver: Any?
@@ -49,6 +47,7 @@ final class AVPlayerHLSBridgeEngine: PlayerRenderingEngine {
     private var playerItem: AVPlayerItem?
     private var videoOutput: AVPlayerItemVideoOutput?
     private var lastVideoFrameImage: UIImage?
+    private var recoveryFrameCacheTask: Task<Void, Never>?
     private var source: PlayerStreamSource?
     private var hlsBridge: LocalHLSBridge?
     private var liveHLSProxy: LocalLiveHLSProxy?
@@ -90,8 +89,8 @@ final class AVPlayerHLSBridgeEngine: PlayerRenderingEngine {
     private var contentOverlay: AnyView?
     private var contentOverlayHostingController: UIHostingController<AnyView>?
     private weak var contentOverlayContainerView: UIView?
-    private weak var viewModel: PlayerStateViewModel?
     private var pendingSurfaceDetachTask: Task<Void, Never>?
+    private var shouldPrerollPausedRecoveryAfterSeek = false
 
     var hasMedia: Bool {
         !isStopped && player.currentItem != nil
@@ -141,6 +140,7 @@ final class AVPlayerHLSBridgeEngine: PlayerRenderingEngine {
             localPlaylistURL: diagnosticsLocalPlaylistURL,
             sourceVideoHost: source?.videoURL?.host,
             sourceAudioHost: source?.audioURL?.host,
+            cellularBiliTrafficCompatibility: CellularBiliTrafficCompatibilityExperiment.currentState,
             hlsVideoVariantCount: hlsBridge?.videoVariantCount ?? 0,
             hlsVideoVariantQualities: hlsBridge?.videoVariantQualities ?? [],
             hlsVideoVariantDetails: diagnosticVideoVariantDetails,
@@ -204,9 +204,7 @@ final class AVPlayerHLSBridgeEngine: PlayerRenderingEngine {
         nativeDolbyVideoOverlay.onReadyToPlay = { [weak self] in
             self?.handleNativeDolbyVideoOverlayReadyToPlay()
         }
-        configureAudioSession()
         observePlayerState()
-        observeAppLifecycle()
     }
 
     deinit {
@@ -240,12 +238,7 @@ final class AVPlayerHLSBridgeEngine: PlayerRenderingEngine {
         terminalStallTask?.cancel()
         itemReadinessTimeoutTask?.cancel()
         firstFrameWatchdogTask?.cancel()
-        if let backgroundObserver {
-            NotificationCenter.default.removeObserver(backgroundObserver)
-        }
-        if let foregroundObserver {
-            NotificationCenter.default.removeObserver(foregroundObserver)
-        }
+        recoveryFrameCacheTask?.cancel()
     }
 
     func attachSurface(_ surface: UIView) {
@@ -295,7 +288,16 @@ final class AVPlayerHLSBridgeEngine: PlayerRenderingEngine {
         guard !isStopped else { return }
         configureAudioSession()
         if let playerViewController {
+            // AVPlayerViewController owns the active video layer for normal video
+            // playback. Reassigning its player forces a fresh drawable after a
+            // long screen lock, where the item can remain ready but its layer is
+            // no longer rendering frames.
+            playerViewController.player = nil
+            playerViewController.player = player
             configureNativePlaybackController(playerViewController)
+            playerViewController.view.setNeedsLayout()
+            playerViewController.view.setNeedsDisplay()
+            playerViewController.view.layer.setNeedsDisplay()
             return
         }
         guard let surfaceView else { return }
@@ -310,9 +312,133 @@ final class AVPlayerHLSBridgeEngine: PlayerRenderingEngine {
         nativeDolbyVideoOverlay.attach(to: surfaceView, gravity: videoGravity)
     }
 
-    func setViewModel(_ viewModel: PlayerStateViewModel?) {
-        self.viewModel = viewModel
+    @discardableResult
+    func refreshVideoOutputForPlaybackRecovery() -> Bool {
+        guard !isStopped,
+              let item = playerItem,
+              player.currentItem === item
+        else {
+            recoverSurface()
+            return false
+        }
+
+        recoveryFrameCacheTask?.cancel()
+        recoveryFrameCacheTask = nil
+        if let videoOutput {
+            item.remove(videoOutput)
+        }
+        videoOutput = nil
+        attachVideoOutput(to: item)
+        recoverSurface()
+        ensurePeriodicTimeObserver()
+        return true
     }
+
+    @discardableResult
+    func rebuildPlayerItemForPlaybackRecovery(at time: TimeInterval) -> TimeInterval? {
+        guard !isStopped,
+              let source,
+              let bridge = hlsBridge,
+              liveHLSProxy == nil,
+              !isDirectLiveHLS,
+              !nativeDolbyVideoOverlay.isActive,
+              let oldItem = playerItem,
+              player.currentItem === oldItem
+        else { return nil }
+
+        let startedAt = CACurrentMediaTime()
+        let targetTime = time.isFinite ? max(time, 0) : 0
+        let recoveryGeneration = playbackGeneration &+ 1
+        var playlistComponents = URLComponents(
+            url: bridge.masterPlaylistURL,
+            resolvingAgainstBaseURL: false
+        )
+        var queryItems = playlistComponents?.queryItems ?? []
+        queryItems.removeAll { $0.name == "recovery" }
+        queryItems.append(URLQueryItem(name: "recovery", value: String(recoveryGeneration)))
+        playlistComponents?.queryItems = queryItems
+        let recoveryPlaylistURL = playlistComponents?.url ?? bridge.masterPlaylistURL
+        let asset = AVURLAsset(url: recoveryPlaylistURL)
+        let item = AVPlayerItem(asset: asset)
+        Self.applyDolbyVisionMetadataPolicy(to: item, source: source)
+
+        playbackGeneration = recoveryGeneration
+        silencePlayerImmediately()
+        player.cancelPendingPrerolls()
+        oldItem.cancelPendingSeeks()
+        if let videoOutput {
+            oldItem.remove(videoOutput)
+        }
+        itemReadinessTimeoutTask?.cancel()
+        itemReadinessTimeoutTask = nil
+        cancelFirstFrameWatchdog()
+        cancelTerminalStallWatchdog()
+        recoveryFrameCacheTask?.cancel()
+        recoveryFrameCacheTask = nil
+        startupBitRateLiftTask?.cancel()
+        startupBitRateLiftTask = nil
+        seekProtectionReleaseTask?.cancel()
+        seekProtectionReleaseTask = nil
+        seekProtectionTargetTime = nil
+        seekProtectionAppliedAt = nil
+        automaticallyWaitsBeforeSeekProtection = nil
+        lastSeekFinishedAt = nil
+        isSeekProtectionActive = false
+        isPerformingSeek = false
+        seekGeneration &+= 1
+        videoOutput = nil
+        didReportFirstFrame = false
+        didLiftStartupBitRate = false
+        isStartupFastStartActive = true
+        lastRecordedAccessLogStallCount = 0
+        lastPlaybackFailureReason = nil
+        removeCurrentItemObservers()
+        removePeriodicTimeObserver()
+
+        playerItem = item
+        retainedAssets = [asset]
+        configureStartupBuffering(for: item, source: source)
+        attachVideoOutput(to: item)
+        player.replaceCurrentItem(with: item)
+        oldItem.asset.cancelLoading()
+        player.automaticallyWaitsToMinimizeStalling = false
+        ensurePeriodicTimeObserver()
+        observeCurrentItem(item)
+        scheduleItemReadinessTimeout(for: item, generation: recoveryGeneration)
+        onLoadingProgressChange?(0.72)
+        publishPlaybackState(.buffering)
+
+        let restoredTime = seek(toTime: targetTime) ?? targetTime
+        recoverSurface()
+        if item.status == .readyToPlay {
+            handleCurrentItemReadyToPlay(item)
+        }
+        recordPrepareStage(
+            source: source,
+            stage: "recovery-item",
+            startedAt: startedAt,
+            extra: "bridge=reused target=\(String(format: "%.2fs", restoredTime))"
+        )
+        return restoredTime
+    }
+
+    @discardableResult
+    func warmPausedPlaybackForRecovery() -> Bool {
+        guard !isStopped,
+              !wantsPlayback,
+              let item = playerItem,
+              player.currentItem === item
+        else { return false }
+
+        shouldPrerollPausedRecoveryAfterSeek = true
+        if !isPerformingSeek {
+            startPausedRecoveryPrerollIfNeeded()
+        }
+        deactivateAudioSessionIfPossible()
+        return true
+    }
+
+    func setViewModel(_: PlayerStateViewModel?) {}
 
     func setVideoGravity(_ gravity: AVLayerVideoGravity) {
         guard videoGravity != gravity else { return }
@@ -396,7 +522,6 @@ final class AVPlayerHLSBridgeEngine: PlayerRenderingEngine {
         startupBitRateLiftTask?.cancel()
         startupBitRateLiftTask = nil
         cancelFirstFrameWatchdog()
-        configureAudioSession()
         applyTargetAudioState()
         onLoadingProgressChange?(0.18)
         recordPrepareStage(source: source, stage: "start", startedAt: prepareStart)
@@ -473,6 +598,7 @@ final class AVPlayerHLSBridgeEngine: PlayerRenderingEngine {
 
     func play() {
         guard !isStopped, let item = player.currentItem else { return }
+        shouldPrerollPausedRecoveryAfterSeek = false
         configureAudioSession()
         applyTargetAudioState()
         wantsPlayback = true
@@ -500,15 +626,31 @@ final class AVPlayerHLSBridgeEngine: PlayerRenderingEngine {
 
     func pause() {
         guard !isStopped else { return }
+        shouldPrerollPausedRecoveryAfterSeek = false
         wantsPlayback = false
         cancelTerminalStallWatchdog()
         player.pause()
         nativeDolbyVideoOverlay.pause()
+        deactivateAudioSessionIfPossible()
+        publishPlaybackState(.paused)
+    }
+
+    func pauseForAppBackground() {
+        guard !isStopped else { return }
+        shouldPrerollPausedRecoveryAfterSeek = false
+        wantsPlayback = false
+        cancelTerminalStallWatchdog()
+        player.rate = 0
+        player.pause()
+        player.cancelPendingPrerolls()
+        nativeDolbyVideoOverlay.pause()
+        deactivateAudioSessionIfPossible()
         publishPlaybackState(.paused)
     }
 
     func pauseForNavigation() {
         guard !isStopped else { return }
+        shouldPrerollPausedRecoveryAfterSeek = false
         wantsPlayback = false
         cancelTerminalStallWatchdog()
         player.rate = 0
@@ -516,22 +658,26 @@ final class AVPlayerHLSBridgeEngine: PlayerRenderingEngine {
         nativeDolbyVideoOverlay.pause()
         player.currentItem?.cancelPendingSeeks()
         player.cancelPendingPrerolls()
+        deactivateAudioSessionIfPossible()
         publishPlaybackState(.paused)
     }
 
     func suspendForNavigation() {
         guard !isStopped else { return }
+        shouldPrerollPausedRecoveryAfterSeek = false
         wantsPlayback = false
         cancelTerminalStallWatchdog()
         silencePlayerImmediately()
         nativeDolbyVideoOverlay.pause()
         player.currentItem?.cancelPendingSeeks()
+        deactivateAudioSessionIfPossible()
         publishPlaybackState(.paused)
     }
 
     func stop() {
         playbackGeneration &+= 1
         isStopped = true
+        shouldPrerollPausedRecoveryAfterSeek = false
         wantsPlayback = false
         cancelTerminalStallWatchdog()
         nativeDolbyVideoSyncTask?.cancel()
@@ -764,7 +910,9 @@ final class AVPlayerHLSBridgeEngine: PlayerRenderingEngine {
         let status = item?.status
         return PlayerPlaybackSnapshot(
             currentTime: currentSeconds.isFinite && currentSeconds >= 0 ? currentSeconds : nil,
-            renderedVideoTime: shouldReportRenderedVideoTimeForSeekRecovery ? currentRenderedVideoTime() : nil,
+            renderedVideoTime: shouldReportRenderedVideoTimeForSeekRecovery
+                ? sampledRenderedVideoTime(cachesFrameImage: true)
+                : nil,
             requiresRenderedVideoTimeForRecovery: shouldReportRenderedVideoTimeForSeekRecovery,
             duration: durationSeconds > 0 ? durationSeconds : durationHint,
             isPlaying: player.rate > 0,
@@ -798,7 +946,11 @@ final class AVPlayerHLSBridgeEngine: PlayerRenderingEngine {
         return cacheVideoFrameImage(from: pixelBuffer)
     }
 
-    private func currentRenderedVideoTime() -> TimeInterval? {
+    func currentRenderedVideoTime() -> TimeInterval? {
+        sampledRenderedVideoTime(cachesFrameImage: false)
+    }
+
+    private func sampledRenderedVideoTime(cachesFrameImage: Bool) -> TimeInterval? {
         guard let videoOutput,
               player.currentItem === playerItem
         else { return nil }
@@ -812,7 +964,9 @@ final class AVPlayerHLSBridgeEngine: PlayerRenderingEngine {
             return nil
         }
 
-        _ = cacheVideoFrameImage(from: pixelBuffer)
+        if cachesFrameImage {
+            _ = cacheVideoFrameImage(from: pixelBuffer)
+        }
         let playerTime = itemDisplayTime.isValid && itemDisplayTime.seconds.isFinite
             ? itemDisplayTime.seconds
             : hostItemTime.seconds
@@ -863,6 +1017,7 @@ final class AVPlayerHLSBridgeEngine: PlayerRenderingEngine {
     }
 
     private func silencePlayerImmediately() {
+        shouldPrerollPausedRecoveryAfterSeek = false
         player.isMuted = true
         player.volume = 0
         player.rate = 0
@@ -963,6 +1118,8 @@ final class AVPlayerHLSBridgeEngine: PlayerRenderingEngine {
         itemReadinessTimeoutTask?.cancel()
         itemReadinessTimeoutTask = nil
         cancelFirstFrameWatchdog()
+        recoveryFrameCacheTask?.cancel()
+        recoveryFrameCacheTask = nil
         videoOutput = nil
         lastVideoFrameImage = nil
         removeCurrentItemObservers()
@@ -1023,7 +1180,11 @@ final class AVPlayerHLSBridgeEngine: PlayerRenderingEngine {
 
     private func cacheVideoFrameImage(from pixelBuffer: CVPixelBuffer) -> UIImage? {
         guard let image = makeImage(from: pixelBuffer) else { return lastVideoFrameImage }
-        lastVideoFrameImage = image
+        // Do not replace a usable recovery frame with a transient black decoder
+        // output. The old image is only used while a locked screen is recovering.
+        if !image.biliLooksLikeBlackFrame {
+            lastVideoFrameImage = image
+        }
         return image
     }
 
@@ -1162,7 +1323,7 @@ final class AVPlayerHLSBridgeEngine: PlayerRenderingEngine {
         let isPictureInPictureAllowed = isPictureInPictureEnabled
             && AVPictureInPictureController.isPictureInPictureSupported()
         controller.allowsPictureInPicturePlayback = isPictureInPictureAllowed
-        controller.canStartPictureInPictureAutomaticallyFromInline = isPictureInPictureAllowed
+        controller.canStartPictureInPictureAutomaticallyFromInline = false
         controller.requiresLinearPlayback = false
         controller.updatesNowPlayingInfoCenter = false
         controller.view.backgroundColor = .black
@@ -1401,46 +1562,6 @@ final class AVPlayerHLSBridgeEngine: PlayerRenderingEngine {
 
     private func applyRateAwareAudioPitchAlgorithm(to item: AVPlayerItem) {
         item.audioTimePitchAlgorithm = currentRate >= 1.45 ? .timeDomain : .spectral
-    }
-
-    private func observeAppLifecycle() {
-        backgroundObserver = NotificationCenter.default.addObserver(
-            forName: UIApplication.didEnterBackgroundNotification,
-            object: nil,
-            queue: .main
-        ) { [weak self] _ in
-            Task { @MainActor [weak self] in
-                guard let self, !self.isStopped else { return }
-                self.configureAudioSession()
-                guard self.isPictureInPictureEnabled else {
-                    if self.wantsPlayback {
-                        self.pause()
-                    }
-                    return
-                }
-                if self.wantsPlayback {
-                    self.beginPlayback()
-                }
-            }
-        }
-
-        foregroundObserver = NotificationCenter.default.addObserver(
-            forName: UIApplication.didBecomeActiveNotification,
-            object: nil,
-            queue: .main
-        ) { [weak self] _ in
-            Task { @MainActor [weak self] in
-                guard let self, !self.isStopped else { return }
-                guard self.canRecoverSurfaceFromAppLifecycle else { return }
-                guard self.surfaceView != nil || self.playerViewController != nil else { return }
-                self.recoverSurface()
-            }
-        }
-    }
-
-    private var canRecoverSurfaceFromAppLifecycle: Bool {
-        guard let viewModel else { return true }
-        return !viewModel.isTerminated && ActivePlaybackCoordinator.shared.isActive(viewModel)
     }
 
     private func observePlayerState() {
@@ -2068,17 +2189,54 @@ final class AVPlayerHLSBridgeEngine: PlayerRenderingEngine {
             updateLoadingProgress(for: item)
         }
         guard finished else {
+            shouldPrerollPausedRecoveryAfterSeek = false
             releaseSeekProtection(reason: "cancelled")
             return
         }
         guard shouldResume else {
             releaseSeekProtection(reason: "paused")
+            startPausedRecoveryPrerollIfNeeded()
             return
         }
+        shouldPrerollPausedRecoveryAfterSeek = false
         scheduleSeekProtectionRelease(generation: generation)
         beginPlayback()
         if let item = player.currentItem {
             maybeReleaseSeekProtectionIfReady(for: item, reason: "finish")
+        }
+    }
+
+    private func startPausedRecoveryPrerollIfNeeded() {
+        guard shouldPrerollPausedRecoveryAfterSeek else { return }
+        shouldPrerollPausedRecoveryAfterSeek = false
+        guard !isStopped,
+              !wantsPlayback,
+              let item = playerItem,
+              player.currentItem === item
+        else { return }
+
+        let generation = playbackGeneration
+        let startedAt = CACurrentMediaTime()
+        player.preroll(atRate: max(currentRate, 1)) { [weak self, weak item] finished in
+            Task { @MainActor [weak self, weak item] in
+                guard let self,
+                      let item,
+                      finished,
+                      !self.wantsPlayback,
+                      self.isCurrentPlaybackGeneration(generation),
+                      self.isCurrentPlayerItem(item)
+                else { return }
+                self.onLoadingProgressChange?(0.92)
+                self.publishPlaybackState(.ready)
+                self.recoverSurface()
+                self.deactivateAudioSessionIfPossible()
+                guard let source = self.source else { return }
+                self.recordPrepareStage(
+                    source: source,
+                    stage: "paused-recovery-preroll",
+                    startedAt: startedAt
+                )
+            }
         }
     }
 
@@ -2381,16 +2539,49 @@ final class AVPlayerHLSBridgeEngine: PlayerRenderingEngine {
         let isBaseLayerReady = playerViewController?.isReadyForDisplay == true
             || playerLayer?.isReadyForDisplay == true
         let isNativeHDRLayerReady = allowsNativeHDRVideoOverlay && nativeDolbyVideoOverlay.isReadyForDisplay
-        guard isBaseLayerReady || isNativeHDRLayerReady
+        // A layer can retain `isReadyForDisplay == true` across a long lock or an
+        // item replacement even while it has no fresh drawable. Pair it with a
+        // new video-output frame so first-frame and recovery state cannot expose
+        // a black AVPlayerLayer prematurely.
+        let hasFreshBaseVideoFrame = sampledRenderedVideoTime(cachesFrameImage: true) != nil
+        guard (isBaseLayerReady && hasFreshBaseVideoFrame) || isNativeHDRLayerReady
         else { return }
         didReportFirstFrame = true
         cancelTerminalStallWatchdog()
         cancelFirstFrameWatchdog()
         removePeriodicTimeObserver()
+        scheduleRecoveryFrameCacheSeed()
         let resolvedTime = currentTime ?? displayTime(fromPlayerTime: player.currentTime().seconds)
         onFirstFrame?(resolvedTime.isFinite ? max(resolvedTime, 0) : 0)
         restoreSteadyStateBufferingAfterFirstFrame()
         scheduleStartupBitRateLiftIfNeeded()
+    }
+
+    private func scheduleRecoveryFrameCacheSeed() {
+        recoveryFrameCacheTask?.cancel()
+        let generation = playbackGeneration
+        let item = playerItem
+        recoveryFrameCacheTask = Task { @MainActor [weak self, weak item] in
+            // The output may not be readable in the same run loop as the layer's
+            // first drawable. A few short retries provide a frame for lock-screen
+            // recovery without continuously converting video frames to UIImage.
+            for delay: UInt64 in [40_000_000, 140_000_000, 420_000_000, 900_000_000] {
+                try? await Task.sleep(nanoseconds: delay)
+                guard let self,
+                      !Task.isCancelled,
+                      self.isCurrentPlaybackGeneration(generation),
+                      self.playerItem === item,
+                      self.player.currentItem === item
+                else { return }
+                if let image = self.currentVideoFrameImage(), !image.biliLooksLikeBlackFrame {
+                    self.lastVideoFrameImage = image
+                    self.recoveryFrameCacheTask = nil
+                    return
+                }
+            }
+            guard let self, self.isCurrentPlaybackGeneration(generation) else { return }
+            self.recoveryFrameCacheTask = nil
+        }
     }
 
     private func scheduleFirstFrameWatchdogIfNeeded(reason: String) {
@@ -6322,18 +6513,27 @@ private actor HLSSourcePreferenceCache {
                     return lhs.index < rhs.index
                 }
                 .map(\.url)
-            return demoteSessionAvoidedHosts(ordered)
+            return applyingCellularBiliTrafficCompatibility(to: demoteSessionAvoidedHosts(ordered))
         }
         guard let preferredURL = preferredURL(for: urls),
               let preferredIndex = urls.firstIndex(of: preferredURL),
               preferredIndex > 0
         else {
-            return demoteSessionAvoidedHosts(urls)
+            return applyingCellularBiliTrafficCompatibility(to: demoteSessionAvoidedHosts(urls))
         }
         var reordered = urls
         let preferred = reordered.remove(at: preferredIndex)
         reordered.insert(preferred, at: 0)
-        return demoteSessionAvoidedHosts(reordered)
+        return applyingCellularBiliTrafficCompatibility(to: demoteSessionAvoidedHosts(reordered))
+    }
+
+    private func applyingCellularBiliTrafficCompatibility(to urls: [URL]) -> [URL] {
+        guard CellularBiliTrafficCompatibilityExperiment.currentState.isActive else { return urls }
+
+        let availableURLs = urls.filter { !isSessionAvoided($0.host) }
+        let avoidedURLs = urls.filter { isSessionAvoided($0.host) }
+        return CellularBiliTrafficCompatibilityExperiment.prioritizedURLsForCurrentEnvironment(availableURLs)
+            + avoidedURLs
     }
 
     func recordPreferredURL(_ url: URL, for urls: [URL]) {

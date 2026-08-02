@@ -14,6 +14,7 @@ struct DynamicCommentRowItem: Identifiable, Equatable {
 
 struct DynamicCommentRowDisplayModel: Equatable {
     let authorName: String
+    let authorOwner: VideoOwner?
     let avatarURLString: String?
     let timeText: String
     let likeText: String
@@ -24,6 +25,7 @@ struct DynamicCommentRowDisplayModel: Equatable {
 
     init(comment: Comment) {
         authorName = Self.displayName(comment.member?.uname)
+        authorOwner = comment.member?.videoOwner
         avatarURLString = comment.member?.avatar
         timeText = BiliFormatters.relativeTime(comment.ctime)
         likeText = BiliFormatters.compactCount(comment.like)

@@ -7,6 +7,7 @@ struct BiliPlayerViewRenderContext {
     let playbackControlsVisibility: PlayerPlaybackControlsVisibilityModel
     let rotationTransitionSnapshotModel: PlayerRotationTransitionSnapshotModel
     let seekTransitionSnapshotModel: PlayerRotationTransitionSnapshotModel
+    let appBackgroundRecoverySnapshotModel: PlayerRotationTransitionSnapshotModel
     let rotationFallbackCoverURL: URL?
     let speedBoostModel: PlayerSpeedBoostModel
     let seekPreviewModel: PlayerSeekPreviewModel

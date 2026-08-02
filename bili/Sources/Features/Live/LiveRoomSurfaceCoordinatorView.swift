@@ -423,6 +423,7 @@ private struct LiveRoomSurfaceOnlyOverlay: View {
     @StateObject private var playbackControlsVisibility = PlayerPlaybackControlsVisibilityModel()
     @StateObject private var rotationTransitionSnapshotModel = PlayerRotationTransitionSnapshotModel()
     @StateObject private var seekTransitionSnapshotModel = PlayerRotationTransitionSnapshotModel()
+    @StateObject private var appBackgroundRecoverySnapshotModel = PlayerRotationTransitionSnapshotModel()
     @StateObject private var speedBoostModel = PlayerSpeedBoostModel()
     @StateObject private var seekPreviewModel = PlayerSeekPreviewModel()
     @StateObject private var playbackProgressCoordinator = PlayerPlaybackProgressCoordinator()
@@ -638,6 +639,7 @@ private struct LiveRoomSurfaceOnlyOverlay: View {
             playbackControlsVisibility: playbackControlsVisibility,
             rotationTransitionSnapshotModel: rotationTransitionSnapshotModel,
             seekTransitionSnapshotModel: seekTransitionSnapshotModel,
+            appBackgroundRecoverySnapshotModel: appBackgroundRecoverySnapshotModel,
             speedBoostModel: speedBoostModel,
             seekPreviewModel: seekPreviewModel,
             playbackProgressCoordinator: playbackProgressCoordinator,
@@ -663,9 +665,11 @@ private struct LiveRoomSurfaceOnlyOverlay: View {
             surfaceOverlay: nil,
             rotationSnapshot: nil,
             seekSnapshot: seekTransitionSnapshotModel.snapshot,
+            appBackgroundRecoverySnapshot: appBackgroundRecoverySnapshotModel.snapshot,
             rotationFallbackCoverURL: nil,
             rotationSnapshotOpacity: 0,
             seekSnapshotOpacity: seekTransitionSnapshotModel.opacity,
+            appBackgroundRecoverySnapshotOpacity: appBackgroundRecoverySnapshotModel.opacity,
             constrainsRotationSnapshotToVideoAspect: false,
             showsPlayerLoadingChrome: renderState.showsPlayerLoadingChrome,
             isBuffering: context.surfaceState.isBuffering,

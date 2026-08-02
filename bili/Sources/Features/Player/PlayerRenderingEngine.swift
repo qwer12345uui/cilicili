@@ -171,6 +171,7 @@ struct PlayerEngineDiagnostics: Equatable, Sendable {
     var localPlaylistURL: String?
     var sourceVideoHost: String?
     var sourceAudioHost: String?
+    var cellularBiliTrafficCompatibility: CellularBiliTrafficCompatibilityExperiment.RuntimeState = .inactive
     var hlsVideoVariantCount: Int
     var hlsVideoVariantQualities: [Int]
     var hlsVideoVariantDetails: [String]
@@ -201,6 +202,7 @@ struct PlayerEngineDiagnostics: Equatable, Sendable {
         localPlaylistURL: nil,
         sourceVideoHost: nil,
         sourceAudioHost: nil,
+        cellularBiliTrafficCompatibility: .inactive,
         hlsVideoVariantCount: 0,
         hlsVideoVariantQualities: [],
         hlsVideoVariantDetails: [],
@@ -428,6 +430,12 @@ protocol PlayerRenderingEngine: AnyObject {
     func detachSurface(_ surface: UIView)
     func refreshSurfaceLayout()
     func recoverSurface()
+    @discardableResult
+    func refreshVideoOutputForPlaybackRecovery() -> Bool
+    @discardableResult
+    func rebuildPlayerItemForPlaybackRecovery(at time: TimeInterval) -> TimeInterval?
+    @discardableResult
+    func warmPausedPlaybackForRecovery() -> Bool
     func setViewModel(_ viewModel: PlayerStateViewModel?)
     func setVideoGravity(_ gravity: AVLayerVideoGravity)
     func setContentOverlay(_ overlay: AnyView?)
@@ -438,6 +446,7 @@ protocol PlayerRenderingEngine: AnyObject {
     func prepare(source: PlayerStreamSource) async throws
     func play()
     func pause()
+    func pauseForAppBackground()
     func pauseForNavigation()
     func suspendForNavigation()
     func stop()
@@ -453,6 +462,7 @@ protocol PlayerRenderingEngine: AnyObject {
     func seek(by interval: TimeInterval, from currentTime: TimeInterval, duration: TimeInterval?) -> TimeInterval?
     func seekAfterUserScrub(toProgress progress: Double, duration: TimeInterval?) async -> TimeInterval?
     func snapshot(durationHint: TimeInterval?) -> PlayerPlaybackSnapshot
+    func currentRenderedVideoTime() -> TimeInterval?
     func currentVideoFrameImage() -> UIImage?
     func currentSurfaceSnapshotImage() -> UIImage?
     func pictureInPictureContentSource() -> AVPictureInPictureController.ContentSource?
@@ -462,6 +472,26 @@ protocol PlayerRenderingEngine: AnyObject {
 }
 
 extension PlayerRenderingEngine {
+    func pauseForAppBackground() {
+        pause()
+    }
+
+    @discardableResult
+    func refreshVideoOutputForPlaybackRecovery() -> Bool {
+        recoverSurface()
+        return false
+    }
+
+    @discardableResult
+    func rebuildPlayerItemForPlaybackRecovery(at _: TimeInterval) -> TimeInterval? {
+        nil
+    }
+
+    @discardableResult
+    func warmPausedPlaybackForRecovery() -> Bool {
+        false
+    }
+
     var presentationSize: CGSize { .zero }
 
     func setPictureInPictureEnabled(_: Bool) {}
@@ -487,6 +517,10 @@ extension PlayerRenderingEngine {
         nil
     }
 
+    func currentRenderedVideoTime() -> TimeInterval? {
+        nil
+    }
+
     func currentSurfaceSnapshotImage() -> UIImage? {
         nil
     }
@@ -496,6 +530,47 @@ extension PlayerRenderingEngine {
     func setDanmakuControls(isEnabled _: Bool, onToggle _: (() -> Void)?, onShowSettings _: (() -> Void)?) {}
 
     func setQualityControls(_: PlayerQualityControls?) {}
+}
+
+extension UIImage {
+    var biliLooksLikeBlackFrame: Bool {
+        guard let cgImage else { return false }
+        let width = 8
+        let height = 8
+        var pixels = [UInt8](repeating: 0, count: width * height * 4)
+        let colorSpace = CGColorSpaceCreateDeviceRGB()
+        let bitmapInfo = CGImageAlphaInfo.premultipliedLast.rawValue
+        guard let context = CGContext(
+            data: &pixels,
+            width: width,
+            height: height,
+            bitsPerComponent: 8,
+            bytesPerRow: width * 4,
+            space: colorSpace,
+            bitmapInfo: bitmapInfo
+        ) else {
+            return false
+        }
+
+        context.interpolationQuality = .low
+        context.draw(cgImage, in: CGRect(x: 0, y: 0, width: width, height: height))
+
+        var brightPixelCount = 0
+        var lumaSum = 0
+        for index in stride(from: 0, to: pixels.count, by: 4) {
+            let red = Int(pixels[index])
+            let green = Int(pixels[index + 1])
+            let blue = Int(pixels[index + 2])
+            let luma = (red * 299 + green * 587 + blue * 114) / 1000
+            lumaSum += luma
+            if luma > 18 {
+                brightPixelCount += 1
+            }
+        }
+
+        let averageLuma = Double(lumaSum) / Double(width * height)
+        return averageLuma < 10 && brightPixelCount <= 1
+    }
 }
 
 @MainActor

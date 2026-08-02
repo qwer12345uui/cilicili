@@ -4,17 +4,63 @@ struct UploaderContentView: View {
     @EnvironmentObject private var dependencies: AppDependencies
     let owner: VideoOwner
     @ObservedObject var viewModel: UploaderViewModel
+    let allowsPullToRefresh: Bool
+    let showsToolbarRefreshButton: Bool
 
     @State private var contentWidth: CGFloat = 0
     @State private var selectedSection: UploaderProfileSection
+    @State private var isRefreshingFromToolbar = false
 
-    init(owner: VideoOwner, viewModel: UploaderViewModel) {
+    init(
+        owner: VideoOwner,
+        viewModel: UploaderViewModel,
+        allowsPullToRefresh: Bool = true,
+        showsToolbarRefreshButton: Bool = false
+    ) {
         self.owner = owner
         self.viewModel = viewModel
+        self.allowsPullToRefresh = allowsPullToRefresh
+        self.showsToolbarRefreshButton = showsToolbarRefreshButton
         _selectedSection = State(initialValue: Self.initialSection)
     }
 
     var body: some View {
+        scrollContent
+            .toolbar {
+                if showsToolbarRefreshButton {
+                    ToolbarItem(placement: .topBarTrailing) {
+                        toolbarRefreshButton
+                    }
+                }
+            }
+            .task {
+                await viewModel.loadInitial()
+            }
+            .task(id: selectedSection) {
+                switch selectedSection {
+                case .videos:
+                    break
+                case .dynamics:
+                    await viewModel.loadDynamicsIfNeeded()
+                case .collections:
+                    await viewModel.loadSeasonSeriesIfNeeded()
+                }
+            }
+    }
+
+    @ViewBuilder
+    private var scrollContent: some View {
+        if allowsPullToRefresh {
+            baseScrollContent
+                .refreshable {
+                    await refreshSelectedSection()
+                }
+        } else {
+            baseScrollContent
+        }
+    }
+
+    private var baseScrollContent: some View {
         ScrollView {
             UploaderContentWidthReader()
 
@@ -35,22 +81,6 @@ struct UploaderContentView: View {
             .padding(.vertical, 12)
         }
         .onPreferenceChange(UploaderContentWidthPreferenceKey.self, perform: updateContentWidth)
-        .refreshable {
-            await refreshSelectedSection()
-        }
-        .task {
-            await viewModel.loadInitial()
-        }
-        .task(id: selectedSection) {
-            switch selectedSection {
-            case .videos:
-                break
-            case .dynamics:
-                await viewModel.loadDynamicsIfNeeded()
-            case .collections:
-                await viewModel.loadSeasonSeriesIfNeeded()
-            }
-        }
     }
 
     @ViewBuilder
@@ -80,6 +110,35 @@ struct UploaderContentView: View {
             await viewModel.refreshDynamics()
         case .collections:
             await viewModel.refreshSeasonSeries()
+        }
+    }
+
+    private var toolbarRefreshButton: some View {
+        Button {
+            refreshFromToolbar()
+        } label: {
+            Group {
+                if isRefreshingFromToolbar {
+                    ProgressView()
+                        .controlSize(.small)
+                } else {
+                    Image(systemName: "arrow.clockwise")
+                }
+            }
+            .frame(width: 32, height: 32)
+        }
+        .disabled(isRefreshingFromToolbar)
+        .buttonBorderShape(.circle)
+        .biliGlassButtonStyle()
+        .accessibilityLabel("刷新个人空间")
+    }
+
+    private func refreshFromToolbar() {
+        guard !isRefreshingFromToolbar else { return }
+        isRefreshingFromToolbar = true
+        Task {
+            await refreshSelectedSection()
+            isRefreshingFromToolbar = false
         }
     }
 

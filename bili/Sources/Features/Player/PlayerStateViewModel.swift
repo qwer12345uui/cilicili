@@ -55,11 +55,34 @@ private struct NavigationAudioSuspension {
 private struct PlayerNowPlayingMetadataFingerprint: Equatable {
     let playerID: ObjectIdentifier
     let title: String
+    let artist: String
     let artworkURL: URL?
     let durationSeconds: Int?
     let playbackRatePercent: Int
     let playbackState: MPNowPlayingPlaybackState
     let isLiveStream: Bool
+}
+
+enum PlayerSystemMediaPresentationPolicy {
+    static let publishesNowPlayingInfo = false
+}
+
+enum PlayerNowPlayingPublicationPolicy {
+    static func shouldPublish(
+        isActive: Bool,
+        wantsAutoplay: Bool,
+        isPlaying: Bool,
+        isTerminated: Bool,
+        hasPlaybackFailure: Bool
+    ) -> Bool {
+        guard PlayerSystemMediaPresentationPolicy.publishesNowPlayingInfo else {
+            return false
+        }
+        return !isTerminated
+            && !hasPlaybackFailure
+            && isActive
+            && (wantsAutoplay || isPlaying)
+    }
 }
 
 @MainActor
@@ -100,10 +123,15 @@ private final class PlayerRemoteControlSession {
 
     func clearIfCurrentPlayerID(_ playerID: ObjectIdentifier) {
         guard currentPlayerID == playerID else { return }
+        clear()
+    }
+
+    func clear() {
         currentPlayerID = nil
         resetDetailedMetadataCache()
         MPNowPlayingInfoCenter.default().nowPlayingInfo = nil
         MPNowPlayingInfoCenter.default().playbackState = .stopped
+        UIApplication.shared.endReceivingRemoteControlEvents()
     }
 
     private func publishNowPlayingMetadata(
@@ -118,6 +146,7 @@ private final class PlayerRemoteControlSession {
         let fingerprint = PlayerNowPlayingMetadataFingerprint(
             playerID: playerID,
             title: player.title,
+            artist: player.nowPlayingArtist,
             artworkURL: player.artworkURL,
             durationSeconds: duration.map { Int($0.rounded()) },
             playbackRatePercent: Int((player.playbackRate.rawValue * 100).rounded()),
@@ -132,7 +161,7 @@ private final class PlayerRemoteControlSession {
         let effectiveRate = playbackState == .playing ? max(player.playbackRate.rawValue, 0) : 0
         var info: [String: Any] = [
             MPMediaItemPropertyTitle: player.title.isEmpty ? "CiliCili" : player.title,
-            MPMediaItemPropertyArtist: "CiliCili",
+            MPMediaItemPropertyArtist: player.nowPlayingArtist,
             MPNowPlayingInfoPropertyPlaybackRate: effectiveRate,
             MPNowPlayingInfoPropertyDefaultPlaybackRate: max(player.playbackRate.rawValue, 0),
             MPNowPlayingInfoPropertyMediaType: MPNowPlayingInfoMediaType.audio.rawValue
@@ -251,6 +280,13 @@ private final class PlayerRemoteControlSession {
     }
 }
 
+@MainActor
+enum PlayerSystemMediaControls {
+    static func clear() {
+        PlayerRemoteControlSession.shared.clear()
+    }
+}
+
 enum PlayerScrubInteractionSource: String, Sendable {
     case nativeProgress = "native"
     case surfaceGesture = "surface"
@@ -305,7 +341,7 @@ final class PlayerPlaybackClock: ObservableObject {
 
     func updateSeekPreview(progress: Double, force: Bool = false) {
         let clamped = min(max(progress, 0), 1)
-        guard force || seekPreviewProgress.map({ abs($0 - clamped) >= 0.002 }) ?? true else { return }
+        guard force || seekPreviewProgress != clamped else { return }
         seekPreviewProgress = clamped
     }
 
@@ -317,6 +353,7 @@ final class PlayerPlaybackClock: ObservableObject {
 @MainActor
 final class PlayerStateViewModel: NSObject, ObservableObject {
     let title: String
+    let authorName: String?
     let artworkURL: URL?
     var onPlaybackFailure: ((String?) -> Void)?
     var onPlaybackFailureWithReason: ((String?, HLSBridgeFailureReason?) -> Void)?
@@ -341,6 +378,7 @@ final class PlayerStateViewModel: NSObject, ObservableObject {
     @Published private(set) var hasPresentedPlayback = false
     @Published private(set) var isPlaybackSurfaceReady = false
     @Published private(set) var isCurrentPlaybackSurfaceReadyForDisplay = false
+    @Published private(set) var isAwaitingAppBackgroundSurfaceRecovery = false
     @Published private(set) var activeSponsorBlockSegment: SponsorBlockSegment?
     @Published private(set) var prepareElapsedMilliseconds: Int?
     @Published private(set) var firstFrameElapsedMilliseconds: Int?
@@ -397,10 +435,19 @@ final class PlayerStateViewModel: NSObject, ObservableObject {
     private var resumeRecoveryWatchdogTask: Task<Void, Never>?
     private var deferredBufferingIndicatorTask: Task<Void, Never>?
     private var playbackRecoveryWatchdogTask: Task<Void, Never>?
+    private var appBackgroundResumeRecoveryTask: Task<Void, Never>?
+    private var appBackgroundResumeRecoveryGeneration = 0
     private var seekRecoveryWatchdogTask: Task<Void, Never>?
     private var speedBoostRecoveryTask: Task<Void, Never>?
     private var surfaceReadinessResetTask: Task<Void, Never>?
     private var shouldResumeAfterTransientSystemOverlay = false
+    private var shouldResumePlaybackAfterAppBackground = false
+    private var isPlaybackStoppedForAppBackground = false
+    private var didPrepareStoppedAppBackgroundPlayback = false
+    private var appBackgroundPlaybackRestoreTime: TimeInterval?
+    private var appBackgroundSurfaceRecoveryBaselineTime: TimeInterval?
+    private var appBackgroundSurfaceRecoveryLastRenderedTime: TimeInterval?
+    private var appBackgroundSurfaceRecoveryStableSampleCount = 0
     private var shouldResumePlaybackAfterUserScrub = false
     private var surfaceReadinessConfirmationTask: Task<Void, Never>?
     private var surfaceLayoutStabilizationTask: Task<Void, Never>?
@@ -452,6 +499,12 @@ final class PlayerStateViewModel: NSObject, ObservableObject {
     private let forcedPlaybackTimeForwardJumpTolerance: TimeInterval = 2.0
     private let maximumPlaybackRecoveryAttempts = 2
     private let deferredBufferingIndicatorDelayNanoseconds: UInt64 = 750_000_000
+    private let appBackgroundResumeRecoveryDelayNanoseconds: UInt64 = 900_000_000
+    private let appBackgroundVideoOutputRecoveryGraceDelayNanoseconds: UInt64 = 1_200_000_000
+    private let appBackgroundPlayerItemRecoveryGraceDelayNanoseconds: UInt64 = 1_500_000_000
+    private let stoppedAppBackgroundRefreshDelayNanoseconds: UInt64 = 650_000_000
+    private let stoppedAppBackgroundPlayerItemDelayNanoseconds: UInt64 = 850_000_000
+    private let stoppedAppBackgroundMediaRebuildDelayNanoseconds: UInt64 = 1_200_000_000
     private let seekCoalescingDelayNanoseconds: UInt64 = 45_000_000
     private let resumeRecoveryWatchdogDelayNanoseconds: UInt64 = 2_400_000_000
     private let seekRecoveryWatchdogDelayNanoseconds: UInt64 = 2_800_000_000
@@ -480,6 +533,7 @@ final class PlayerStateViewModel: NSObject, ObservableObject {
         audioStream: DASHStream? = nil,
         alternateVideoRenditions: [PlayerVideoRenditionSource] = [],
         title: String,
+        authorName: String? = nil,
         referer: String,
         durationHint: TimeInterval? = nil,
         isLiveStream: Bool = false,
@@ -496,6 +550,7 @@ final class PlayerStateViewModel: NSObject, ObservableObject {
     ) {
         let resolvedMetricsID = metricsID?.isEmpty == false ? metricsID! : UUID().uuidString
         self.title = title
+        self.authorName = authorName
         self.artworkURL = artworkURL
         self.metricsID = resolvedMetricsID
         self.streamSource = PlayerStreamSource(
@@ -556,6 +611,8 @@ final class PlayerStateViewModel: NSObject, ObservableObject {
         resumeRecoveryWatchdogTask = nil
         playbackRecoveryWatchdogTask?.cancel()
         playbackRecoveryWatchdogTask = nil
+        appBackgroundResumeRecoveryTask?.cancel()
+        appBackgroundResumeRecoveryTask = nil
         seekRecoveryWatchdogTask?.cancel()
         seekRecoveryWatchdogTask = nil
         speedBoostRecoveryTask?.cancel()
@@ -615,6 +672,11 @@ final class PlayerStateViewModel: NSObject, ObservableObject {
         isLiveStream
     }
 
+    var nowPlayingArtist: String {
+        let trimmedName = authorName?.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmedName?.isEmpty == false ? trimmedName! : "CiliCili"
+    }
+
     fileprivate var nowPlayingPlaybackState: MPNowPlayingPlaybackState {
         switch playbackPhase {
         case .ended, .failed:
@@ -626,6 +688,16 @@ final class PlayerStateViewModel: NSObject, ObservableObject {
         default:
             return (wantsAutoplay || isPlaying) ? .playing : .paused
         }
+    }
+
+    private var shouldPublishNowPlayingMetadata: Bool {
+        PlayerNowPlayingPublicationPolicy.shouldPublish(
+            isActive: ActivePlaybackCoordinator.shared.isActive(self),
+            wantsAutoplay: wantsAutoplay,
+            isPlaying: isPlaying,
+            isTerminated: isTerminated,
+            hasPlaybackFailure: errorMessage != nil
+        )
     }
 
     var currentProgress: Double {
@@ -1084,7 +1156,9 @@ final class PlayerStateViewModel: NSObject, ObservableObject {
     }
 
     private func confirmCurrentSurfaceReady(generation: Int) -> Bool {
-        guard hasCurrentSurface(generation: generation) else { return false }
+        guard !isAwaitingAppBackgroundSurfaceRecovery,
+              hasCurrentSurface(generation: generation)
+        else { return false }
         if let image = firstUsablePlaybackSnapshotImage(
             currentSurfaceSnapshotImage(),
             surfaceView?.makePlaybackTransitionSnapshotImage(),
@@ -1211,12 +1285,18 @@ final class PlayerStateViewModel: NSObject, ObservableObject {
         !isTerminated
             && surfaceView != nil
             && ActivePlaybackCoordinator.shared.isActive(self)
+            && allowsPlaybackInCurrentApplicationState
     }
 
     private func canActivatePlayback(generation: Int) -> Bool {
         !isTerminated
             && hasCurrentSurface(generation: generation)
             && ActivePlaybackCoordinator.shared.isActive(self)
+            && allowsPlaybackInCurrentApplicationState
+    }
+
+    private var allowsPlaybackInCurrentApplicationState: Bool {
+        UIApplication.shared.applicationState == .active || isPictureInPictureActive
     }
 
     private func markSurfaceLayoutRefreshed() {
@@ -1291,6 +1371,7 @@ final class PlayerStateViewModel: NSObject, ObservableObject {
         if timeObserver == nil {
             startTimeObserver()
         }
+
         if hasCurrentSurface(generation: baselineSurfaceGeneration) {
             engine.recoverSurface()
             refreshSurfaceLayout()
@@ -1320,33 +1401,341 @@ final class PlayerStateViewModel: NSObject, ObservableObject {
     func preservePlaybackThroughTransientSystemOverlay() {
         guard !isTerminated else { return }
         guard ActivePlaybackCoordinator.shared.isActive(self) else { return }
+        syncPictureInPictureState()
+        guard !isPictureInPictureActive else { return }
         let snapshot = playbackSnapshot()
-        let shouldResume = wantsAutoplay || isPlaying || snapshot.isPlaying
+        let wasPlaying = wantsAutoplay || isPlaying || snapshot.isPlaying
+        let shouldResume = shouldResumeAfterTransientSystemOverlay || wasPlaying
         shouldResumeAfterTransientSystemOverlay = shouldResumeAfterTransientSystemOverlay || shouldResume
-        guard shouldResume else { return }
-        wantsAutoplay = true
-        if engine.hasMedia, !snapshot.isPlaying {
-            engine.play()
-        }
+        guard wasPlaying else { return }
+        pause()
     }
 
-    func recoverPlaybackAfterTransientSystemOverlayIfNeeded() {
+    @discardableResult
+    func recoverPlaybackAfterTransientSystemOverlayIfNeeded() -> Bool {
         let shouldResume = shouldResumeAfterTransientSystemOverlay
         shouldResumeAfterTransientSystemOverlay = false
-        guard shouldResume else { return }
+        guard shouldResume else { return false }
         wantsAutoplay = true
         recoverPlaybackAfterAppResume()
+        return true
     }
 
     func cancelTransientSystemOverlayPlaybackPreservation() {
         shouldResumeAfterTransientSystemOverlay = false
     }
 
-    func pauseForAppBackground() {
-        guard !isTerminated else { return }
-        cancelTransientSystemOverlayPlaybackPreservation()
-        stopPictureInPictureIfNeeded()
-        pause()
+    @discardableResult
+    func pauseForAppBackground() -> Bool {
+        guard !isTerminated else { return false }
+        guard ActivePlaybackCoordinator.shared.isActive(self) else { return false }
+        syncPictureInPictureState()
+        guard !isPictureInPictureActive else { return false }
+
+        // Recorded video should not pretend to keep playing when iOS has moved
+        // the app off screen. Leave live playback on the existing resume path,
+        // but make normal video an explicit manual restart after foregrounding.
+        if !isLiveStream {
+            if isPlaybackStoppedForAppBackground {
+                return true
+            }
+            let snapshot = playbackSnapshot()
+            let shouldStop = wantsAutoplay
+                || isPlaying
+                || isPreparing
+                || snapshot.isPlaying
+                || engine.hasMedia
+            guard shouldStop else {
+                appBackgroundPlaybackRestoreTime = nil
+                cancelAppBackgroundSurfaceRecovery()
+                return false
+            }
+
+            let snapshotTime = snapshot.currentTime ?? currentTime
+            let restoreTime = snapshotTime.isFinite ? max(snapshotTime, 0) : nil
+            isPlaybackStoppedForAppBackground = true
+            didPrepareStoppedAppBackgroundPlayback = false
+            appBackgroundPlaybackRestoreTime = restoreTime
+            beginAppBackgroundSurfaceRecovery(at: restoreTime)
+            pause(
+                retainingAppBackgroundResumeIntent: false,
+                usesAppBackgroundPause: true,
+                preservesAppBackgroundSurfaceRecovery: true
+            )
+            PlayerMetricsLog.record(
+                .resumeDecision,
+                metricsID: metricsID,
+                title: title,
+                message: "appBackgroundStop mode=manual time=\(String(format: "%.2fs", restoreTime ?? currentTime))"
+            )
+            return true
+        }
+
+        if shouldResumePlaybackAfterAppBackground {
+            let snapshot = playbackSnapshot()
+            if wantsAutoplay || isPlaying || snapshot.isPlaying {
+                pause(retainingAppBackgroundResumeIntent: true)
+            }
+            return true
+        }
+        let snapshot = playbackSnapshot()
+        let shouldResume = wantsAutoplay
+            || isPlaying
+            || snapshot.isPlaying
+        guard shouldResume else {
+            appBackgroundPlaybackRestoreTime = nil
+            cancelAppBackgroundSurfaceRecovery()
+            return false
+        }
+        let snapshotTime = snapshot.currentTime ?? currentTime
+        let restoreTime = snapshotTime.isFinite ? max(snapshotTime, 0) : nil
+        appBackgroundPlaybackRestoreTime = restoreTime
+        beginAppBackgroundSurfaceRecovery(at: restoreTime)
+        shouldResumePlaybackAfterAppBackground = true
+        pause(retainingAppBackgroundResumeIntent: true)
+        return true
+    }
+
+    @discardableResult
+    func prepareStoppedPlaybackAfterAppBackgroundIfNeeded() -> Bool {
+        guard isPlaybackStoppedForAppBackground else { return false }
+        guard !isTerminated,
+              ActivePlaybackCoordinator.shared.isActive(self)
+        else { return false }
+        syncPictureInPictureState()
+        guard !isPictureInPictureActive else { return false }
+        guard !didPrepareStoppedAppBackgroundPlayback else { return true }
+        didPrepareStoppedAppBackgroundPlayback = true
+
+        if timeObserver == nil {
+            startTimeObserver()
+        }
+        let restoreTime = max(
+            appBackgroundPlaybackRestoreTime
+                ?? engine.snapshot(durationHint: durationHint).currentTime
+                ?? currentTime,
+            0
+        )
+        if restoreTime > 0.25 {
+            updatePlaybackTime(restoreTime, force: true, countsAsNaturalPlayback: false)
+        }
+        guard !engine.needsMediaRecovery, engine.hasMedia else {
+            PlayerMetricsLog.record(
+                .playbackRecovery,
+                metricsID: metricsID,
+                title: title,
+                message: "stage=foregroundPausedMediaRebuild status=started target=\(String(format: "%.2fs", restoreTime))"
+            )
+            rebuildMediaAfterPlaybackInterruption()
+            return true
+        }
+
+        let didRefreshVideoOutput = engine.refreshVideoOutputForPlaybackRecovery()
+        let restoredTime = engine.seek(toTime: restoreTime) ?? restoreTime
+        let didWarmPausedPlayback = engine.warmPausedPlaybackForRecovery()
+        refreshSurfaceLayout()
+
+        // Keep the existing AVPlayerItem and its buffered ranges whenever the
+        // engine can refresh or preroll it. Replacing the item here discards the
+        // useful media that survived a short lock and moves all startup work to
+        // the user's later play tap.
+        if !didRefreshVideoOutput, !didWarmPausedPlayback {
+            guard let rebuiltTime = engine.rebuildPlayerItemForPlaybackRecovery(at: restoreTime) else {
+                PlayerMetricsLog.record(
+                    .playbackRecovery,
+                    metricsID: metricsID,
+                    title: title,
+                    message: "stage=foregroundPausedMediaRebuild status=started reason=warm-unavailable target=\(String(format: "%.2fs", restoreTime))"
+                )
+                rebuildMediaAfterPlaybackInterruption()
+                return true
+            }
+            appBackgroundSurfaceRecoveryBaselineTime = rebuiltTime
+            resetAppBackgroundSurfaceRecoverySamples()
+            updatePlaybackTime(rebuiltTime, force: true, countsAsNaturalPlayback: false)
+            _ = engine.warmPausedPlaybackForRecovery()
+            refreshSurfaceLayout()
+            PlayerMetricsLog.record(
+                .playbackRecovery,
+                metricsID: metricsID,
+                title: title,
+                message: "stage=foregroundPausedPlayerItem status=fallback bridge=reused target=\(String(format: "%.2fs", rebuiltTime))"
+            )
+            return true
+        }
+
+        appBackgroundSurfaceRecoveryBaselineTime = restoredTime
+        resetAppBackgroundSurfaceRecoverySamples()
+        updatePlaybackTime(restoredTime, force: true, countsAsNaturalPlayback: false)
+        PlayerMetricsLog.record(
+            .playbackRecovery,
+            metricsID: metricsID,
+            title: title,
+            message: "stage=foregroundPausedWarm status=ready item=retained output=\(didRefreshVideoOutput ? "refreshed" : "unchanged") preroll=\(didWarmPausedPlayback ? "started" : "unavailable") target=\(String(format: "%.2fs", restoredTime))"
+        )
+        return true
+    }
+
+    @discardableResult
+    func resumePlaybackAfterAppBackgroundIfNeeded() -> Bool {
+        guard shouldResumePlaybackAfterAppBackground else { return false }
+        shouldResumePlaybackAfterAppBackground = false
+        guard !isTerminated else {
+            cancelAppBackgroundSurfaceRecovery()
+            return false
+        }
+        guard ActivePlaybackCoordinator.shared.isActive(self) else {
+            cancelAppBackgroundSurfaceRecovery()
+            return false
+        }
+        syncPictureInPictureState()
+        guard !isPictureInPictureActive else {
+            cancelAppBackgroundSurfaceRecovery()
+            return false
+        }
+        guard errorMessage == nil else {
+            cancelAppBackgroundSurfaceRecovery()
+            return false
+        }
+
+        let restoreTime = max(
+            appBackgroundPlaybackRestoreTime
+                ?? engine.snapshot(durationHint: durationHint).currentTime
+                ?? currentTime,
+            0
+        )
+        appBackgroundPlaybackRestoreTime = nil
+        if restoreTime > 0.25 {
+            updatePlaybackTime(restoreTime, force: true, countsAsNaturalPlayback: false)
+        }
+        wantsAutoplay = true
+        if timeObserver == nil {
+            startTimeObserver()
+        }
+        if engine.needsMediaRecovery {
+            rebuildMediaAfterPlaybackInterruption()
+            return true
+        }
+        guard engine.hasMedia else {
+            prepareMediaAndPlay()
+            return true
+        }
+
+        // A long lock can suspend the decoder while the AVPlayerItem remains ready.
+        // Rebind the layer and seek back to the current frame before resuming, which
+        // makes AVPlayer request a fresh drawable without changing the media source.
+        engine.recoverSurface()
+        refreshSurfaceLayout()
+        if restoreTime > 0.25,
+           let restoredTime = engine.seek(toTime: restoreTime) {
+            updatePlaybackTime(restoredTime, force: true, countsAsNaturalPlayback: false)
+        }
+        startPreparedPlayback()
+        scheduleAppBackgroundResumeRecovery(from: restoreTime)
+        PlayerMetricsLog.record(
+            .resumeDecision,
+            metricsID: metricsID,
+            title: title,
+            message: "appBackgroundResume surface=rebound time=\(String(format: "%.2fs", restoreTime))"
+        )
+        return true
+    }
+
+    func isAppBackgroundSurfaceRecoveryReadyForReveal() -> Bool {
+        guard isAwaitingAppBackgroundSurfaceRecovery else {
+            return isCurrentPlaybackSurfaceReadyForDisplay
+        }
+        guard !isTerminated,
+              ActivePlaybackCoordinator.shared.isActive(self),
+              engine.hasMedia,
+              errorMessage == nil,
+              surfaceView != nil,
+              let renderedTime = engine.currentRenderedVideoTime(),
+              renderedTime.isFinite
+        else {
+            resetAppBackgroundSurfaceRecoverySamples()
+            return false
+        }
+
+        let baseline = appBackgroundSurfaceRecoveryBaselineTime ?? currentTime
+        guard renderedTime >= max(baseline - 0.5, 0) else {
+            resetAppBackgroundSurfaceRecoverySamples()
+            return false
+        }
+
+        if let previousRenderedTime = appBackgroundSurfaceRecoveryLastRenderedTime,
+           renderedTime > previousRenderedTime + 0.008 {
+            appBackgroundSurfaceRecoveryStableSampleCount += 1
+        } else if appBackgroundSurfaceRecoveryLastRenderedTime == nil {
+            appBackgroundSurfaceRecoveryStableSampleCount = 1
+        }
+        appBackgroundSurfaceRecoveryLastRenderedTime = renderedTime
+        return appBackgroundSurfaceRecoveryStableSampleCount >= 2
+    }
+
+    func isStoppedAppBackgroundSurfaceRecoveryReadyForReveal() -> Bool {
+        guard isAwaitingAppBackgroundSurfaceRecovery else {
+            return isCurrentPlaybackSurfaceReadyForDisplay
+        }
+        guard !isTerminated,
+              ActivePlaybackCoordinator.shared.isActive(self),
+              engine.hasMedia,
+              errorMessage == nil,
+              surfaceView != nil
+        else { return false }
+
+        if makeCurrentVisibleSurfaceTransitionSnapshot() != nil {
+            return true
+        }
+        guard let renderedTime = engine.currentRenderedVideoTime(),
+              renderedTime.isFinite
+        else { return false }
+        let baseline = appBackgroundSurfaceRecoveryBaselineTime ?? currentTime
+        return renderedTime >= max(baseline - 0.5, 0)
+    }
+
+    func finishAppBackgroundSurfaceRecoveryReveal() {
+        guard isAwaitingAppBackgroundSurfaceRecovery else { return }
+        isAwaitingAppBackgroundSurfaceRecovery = false
+        appBackgroundSurfaceRecoveryBaselineTime = nil
+        resetAppBackgroundSurfaceRecoverySamples()
+        guard !isTerminated, surfaceView != nil else { return }
+        currentPlaybackSurfaceReadyGeneration = surfaceAttachmentGeneration
+        isCurrentPlaybackSurfaceReadyForDisplay = true
+        isPlaybackSurfaceReady = true
+        isPreparing = false
+        isBuffering = false
+        if wantsAutoplay {
+            playbackPhase = .playing
+        } else {
+            playbackPhase = engine.hasMedia ? .paused : .idle
+        }
+        PlayerMetricsLog.record(
+            .resumeDecision,
+            metricsID: metricsID,
+            title: title,
+            message: "appBackgroundResume surface=visible"
+        )
+    }
+
+    func cancelAppBackgroundSurfaceRecovery() {
+        isAwaitingAppBackgroundSurfaceRecovery = false
+        appBackgroundSurfaceRecoveryBaselineTime = nil
+        resetAppBackgroundSurfaceRecoverySamples()
+    }
+
+    private func beginAppBackgroundSurfaceRecovery(at baselineTime: TimeInterval?) {
+        isAwaitingAppBackgroundSurfaceRecovery = hasPresentedPlayback
+        appBackgroundSurfaceRecoveryBaselineTime = baselineTime
+        resetAppBackgroundSurfaceRecoverySamples()
+        guard isAwaitingAppBackgroundSurfaceRecovery else { return }
+        currentPlaybackSurfaceReadyGeneration = nil
+        isCurrentPlaybackSurfaceReadyForDisplay = false
+    }
+
+    private func resetAppBackgroundSurfaceRecoverySamples() {
+        appBackgroundSurfaceRecoveryLastRenderedTime = nil
+        appBackgroundSurfaceRecoveryStableSampleCount = 0
     }
 
     private func schedulePlaybackRecoveryWatchdog(reason: PlaybackRecoveryWatchdogReason) {
@@ -1393,6 +1782,287 @@ final class PlayerStateViewModel: NSObject, ObservableObject {
                 surfaceGeneration: baselineSurfaceGeneration
             )
         }
+    }
+
+    private func scheduleAppBackgroundResumeRecovery(from baselineTime: TimeInterval) {
+        cancelAppBackgroundResumeRecovery()
+        let recoveryGeneration = appBackgroundResumeRecoveryGeneration
+        let baselineMediaPreparationGeneration = mediaPreparationGeneration
+        let baselineSurfaceGeneration = surfaceAttachmentGeneration
+        appBackgroundResumeRecoveryTask = Task { @MainActor [weak self] in
+            guard let self else { return }
+            try? await Task.sleep(nanoseconds: self.appBackgroundResumeRecoveryDelayNanoseconds)
+            guard !Task.isCancelled,
+                  self.canContinueAppBackgroundResumeRecovery(
+                    mediaPreparationGeneration: baselineMediaPreparationGeneration,
+                    surfaceGeneration: baselineSurfaceGeneration
+                  )
+            else {
+                self.clearAppBackgroundResumeRecoveryTaskIfCurrent(generation: recoveryGeneration)
+                return
+            }
+
+            if self.isAppBackgroundSurfaceRecoveryReadyForReveal() {
+                self.clearAppBackgroundResumeRecoveryTaskIfCurrent(generation: recoveryGeneration)
+                return
+            }
+
+            let currentPlaybackTime = self.engine.snapshot(durationHint: self.durationHint).currentTime ?? self.currentTime
+            guard self.isAwaitingAppBackgroundSurfaceRecovery
+                    || abs(currentPlaybackTime - baselineTime) < 0.25
+            else {
+                self.clearAppBackgroundResumeRecoveryTaskIfCurrent(generation: recoveryGeneration)
+                return
+            }
+
+            let didRefreshVideoOutput = self.engine.refreshVideoOutputForPlaybackRecovery()
+            self.resetAppBackgroundSurfaceRecoverySamples()
+            self.refreshSurfaceLayout()
+            if baselineTime > 0.25,
+               let restoredTime = self.engine.seek(toTime: baselineTime) {
+                self.updatePlaybackTime(restoredTime, force: true, countsAsNaturalPlayback: false)
+            }
+            if self.canActivatePlayback(generation: baselineSurfaceGeneration) {
+                self.engine.play()
+                self.engine.setPlaybackRate(self.playbackRate.rawValue)
+            }
+            PlayerMetricsLog.record(
+                .playbackRecovery,
+                metricsID: self.metricsID,
+                title: self.title,
+                message: "stage=videoOutputRefresh status=\(didRefreshVideoOutput ? "applied" : "unavailable") reason=app-background-resume baseline=\(String(format: "%.2fs", baselineTime))"
+            )
+
+            try? await Task.sleep(nanoseconds: self.appBackgroundVideoOutputRecoveryGraceDelayNanoseconds)
+            guard !Task.isCancelled,
+                  self.canContinueAppBackgroundResumeRecovery(
+                    mediaPreparationGeneration: baselineMediaPreparationGeneration,
+                    surfaceGeneration: baselineSurfaceGeneration
+                  )
+            else {
+                self.clearAppBackgroundResumeRecoveryTaskIfCurrent(generation: recoveryGeneration)
+                return
+            }
+
+            if self.isAppBackgroundSurfaceRecoveryReadyForReveal() {
+                self.clearAppBackgroundResumeRecoveryTaskIfCurrent(generation: recoveryGeneration)
+                return
+            }
+
+            let playbackTimeAfterRefresh = self.engine.snapshot(durationHint: self.durationHint).currentTime ?? self.currentTime
+            guard self.isAwaitingAppBackgroundSurfaceRecovery
+                    || abs(playbackTimeAfterRefresh - baselineTime) < 0.25
+            else {
+                self.clearAppBackgroundResumeRecoveryTaskIfCurrent(generation: recoveryGeneration)
+                return
+            }
+
+            guard let restoredTime = self.engine.rebuildPlayerItemForPlaybackRecovery(at: baselineTime) else {
+                self.startFullAppBackgroundMediaRebuild(
+                    reason: "player-item-unavailable",
+                    baselineTime: baselineTime,
+                    recoveryGeneration: recoveryGeneration
+                )
+                return
+            }
+            self.appBackgroundSurfaceRecoveryBaselineTime = restoredTime
+            self.resetAppBackgroundSurfaceRecoverySamples()
+            self.updatePlaybackTime(restoredTime, force: true, countsAsNaturalPlayback: false)
+            self.refreshSurfaceLayout()
+            if self.canActivatePlayback(generation: baselineSurfaceGeneration) {
+                self.engine.play()
+                self.engine.setPlaybackRate(self.playbackRate.rawValue)
+            }
+            PlayerMetricsLog.record(
+                .playbackRecovery,
+                metricsID: self.metricsID,
+                title: self.title,
+                message: "stage=playerItemRebuild status=applied bridge=reused target=\(String(format: "%.2fs", restoredTime))"
+            )
+
+            try? await Task.sleep(nanoseconds: self.appBackgroundPlayerItemRecoveryGraceDelayNanoseconds)
+            guard !Task.isCancelled,
+                  self.canContinueAppBackgroundResumeRecovery(
+                    mediaPreparationGeneration: baselineMediaPreparationGeneration,
+                    surfaceGeneration: baselineSurfaceGeneration
+                  )
+            else {
+                self.clearAppBackgroundResumeRecoveryTaskIfCurrent(generation: recoveryGeneration)
+                return
+            }
+
+            if self.isAppBackgroundSurfaceRecoveryReadyForReveal() {
+                self.clearAppBackgroundResumeRecoveryTaskIfCurrent(generation: recoveryGeneration)
+                return
+            }
+
+            let playbackTimeAfterItemRebuild = self.engine.snapshot(durationHint: self.durationHint).currentTime ?? self.currentTime
+            guard self.isAwaitingAppBackgroundSurfaceRecovery
+                    || abs(playbackTimeAfterItemRebuild - restoredTime) < 0.25
+            else {
+                self.clearAppBackgroundResumeRecoveryTaskIfCurrent(generation: recoveryGeneration)
+                return
+            }
+
+            self.startFullAppBackgroundMediaRebuild(
+                reason: "player-item-no-frame",
+                baselineTime: restoredTime,
+                recoveryGeneration: recoveryGeneration
+            )
+        }
+    }
+
+    private func scheduleStoppedAppBackgroundResumeRecovery(from baselineTime: TimeInterval) {
+        cancelAppBackgroundResumeRecovery()
+        playbackRecoveryWatchdogTask?.cancel()
+        playbackRecoveryWatchdogTask = nil
+        let recoveryGeneration = appBackgroundResumeRecoveryGeneration
+        let baselineMediaPreparationGeneration = mediaPreparationGeneration
+        let baselineSurfaceGeneration = surfaceAttachmentGeneration
+        let isHDR = streamSource.dynamicRange.isHDR
+        let refreshDelay = isHDR ? 1_400_000_000 : stoppedAppBackgroundRefreshDelayNanoseconds
+        let itemDelay = isHDR ? 1_800_000_000 : stoppedAppBackgroundPlayerItemDelayNanoseconds
+        let mediaDelay = isHDR ? 2_400_000_000 : stoppedAppBackgroundMediaRebuildDelayNanoseconds
+
+        appBackgroundResumeRecoveryTask = Task { @MainActor [weak self] in
+            guard let self else { return }
+            try? await Task.sleep(nanoseconds: refreshDelay)
+            guard !Task.isCancelled,
+                  self.canContinueAppBackgroundResumeRecovery(
+                    mediaPreparationGeneration: baselineMediaPreparationGeneration,
+                    surfaceGeneration: baselineSurfaceGeneration
+                  )
+            else {
+                self.clearAppBackgroundResumeRecoveryTaskIfCurrent(generation: recoveryGeneration)
+                return
+            }
+            if self.hasPlaybackAdvancedAfterStoppedBackgroundResume(from: baselineTime) {
+                self.clearAppBackgroundResumeRecoveryTaskIfCurrent(generation: recoveryGeneration)
+                return
+            }
+
+            let didRefreshVideoOutput = self.engine.refreshVideoOutputForPlaybackRecovery()
+            self.refreshSurfaceLayout()
+            if baselineTime > 0.25,
+               let restoredTime = self.engine.seek(toTime: baselineTime) {
+                self.updatePlaybackTime(restoredTime, force: true, countsAsNaturalPlayback: false)
+            }
+            if self.canActivatePlayback(generation: baselineSurfaceGeneration) {
+                self.engine.play()
+                self.engine.setPlaybackRate(self.playbackRate.rawValue)
+            }
+            PlayerMetricsLog.record(
+                .playbackRecovery,
+                metricsID: self.metricsID,
+                title: self.title,
+                message: "stage=manualResumeVideoOutput status=\(didRefreshVideoOutput ? "applied" : "unavailable") baseline=\(String(format: "%.2fs", baselineTime))"
+            )
+
+            try? await Task.sleep(nanoseconds: itemDelay)
+            guard !Task.isCancelled,
+                  self.canContinueAppBackgroundResumeRecovery(
+                    mediaPreparationGeneration: baselineMediaPreparationGeneration,
+                    surfaceGeneration: baselineSurfaceGeneration
+                  )
+            else {
+                self.clearAppBackgroundResumeRecoveryTaskIfCurrent(generation: recoveryGeneration)
+                return
+            }
+            if self.hasPlaybackAdvancedAfterStoppedBackgroundResume(from: baselineTime) {
+                self.clearAppBackgroundResumeRecoveryTaskIfCurrent(generation: recoveryGeneration)
+                return
+            }
+
+            guard let restoredTime = self.engine.rebuildPlayerItemForPlaybackRecovery(at: baselineTime) else {
+                self.startFullAppBackgroundMediaRebuild(
+                    reason: "manual-resume-player-item-unavailable",
+                    baselineTime: baselineTime,
+                    recoveryGeneration: recoveryGeneration
+                )
+                return
+            }
+            self.updatePlaybackTime(restoredTime, force: true, countsAsNaturalPlayback: false)
+            self.refreshSurfaceLayout()
+            if self.canActivatePlayback(generation: baselineSurfaceGeneration) {
+                self.engine.play()
+                self.engine.setPlaybackRate(self.playbackRate.rawValue)
+            }
+            PlayerMetricsLog.record(
+                .playbackRecovery,
+                metricsID: self.metricsID,
+                title: self.title,
+                message: "stage=manualResumePlayerItem status=applied bridge=reused target=\(String(format: "%.2fs", restoredTime))"
+            )
+
+            try? await Task.sleep(nanoseconds: mediaDelay)
+            guard !Task.isCancelled,
+                  self.canContinueAppBackgroundResumeRecovery(
+                    mediaPreparationGeneration: baselineMediaPreparationGeneration,
+                    surfaceGeneration: baselineSurfaceGeneration
+                  )
+            else {
+                self.clearAppBackgroundResumeRecoveryTaskIfCurrent(generation: recoveryGeneration)
+                return
+            }
+            if self.hasPlaybackAdvancedAfterStoppedBackgroundResume(from: restoredTime) {
+                self.clearAppBackgroundResumeRecoveryTaskIfCurrent(generation: recoveryGeneration)
+                return
+            }
+            self.startFullAppBackgroundMediaRebuild(
+                reason: "manual-resume-player-item-no-frame",
+                baselineTime: restoredTime,
+                recoveryGeneration: recoveryGeneration
+            )
+        }
+    }
+
+    private func hasPlaybackAdvancedAfterStoppedBackgroundResume(from baselineTime: TimeInterval) -> Bool {
+        if let renderedTime = engine.currentRenderedVideoTime(),
+           renderedTime.isFinite,
+           renderedTime > baselineTime + 0.008 {
+            return true
+        }
+        let playbackTime = engine.snapshot(durationHint: durationHint).currentTime ?? currentTime
+        return playbackTime.isFinite && playbackTime > baselineTime + 0.2
+    }
+
+    private func startFullAppBackgroundMediaRebuild(
+        reason: String,
+        baselineTime: TimeInterval,
+        recoveryGeneration: Int
+    ) {
+        clearAppBackgroundResumeRecoveryTaskIfCurrent(generation: recoveryGeneration)
+        PlayerMetricsLog.record(
+            .playbackRecovery,
+            metricsID: metricsID,
+            title: title,
+            message: "stage=mediaRebuild status=started reason=app-background-\(reason) baseline=\(String(format: "%.2fs", baselineTime))"
+        )
+        rebuildMediaAfterPlaybackInterruption()
+    }
+
+    private func cancelAppBackgroundResumeRecovery() {
+        appBackgroundResumeRecoveryGeneration &+= 1
+        appBackgroundResumeRecoveryTask?.cancel()
+        appBackgroundResumeRecoveryTask = nil
+    }
+
+    private func clearAppBackgroundResumeRecoveryTaskIfCurrent(generation: Int) {
+        guard generation == appBackgroundResumeRecoveryGeneration else { return }
+        appBackgroundResumeRecoveryTask = nil
+    }
+
+    private func canContinueAppBackgroundResumeRecovery(
+        mediaPreparationGeneration: Int,
+        surfaceGeneration: Int
+    ) -> Bool {
+        !isTerminated
+            && wantsAutoplay
+            && engine.hasMedia
+            && errorMessage == nil
+            && !isUserSeeking
+            && self.mediaPreparationGeneration == mediaPreparationGeneration
+            && canActivatePlayback(generation: surfaceGeneration)
     }
 
     private func performPlaybackRecovery(
@@ -1544,6 +2214,7 @@ final class PlayerStateViewModel: NSObject, ObservableObject {
     private func rebuildMediaAfterPlaybackInterruption() {
         guard !isTerminated else { return }
         guard mediaPreparationTask == nil else { return }
+        cancelAppBackgroundResumeRecovery()
         let baselineSurfaceGeneration = surfaceAttachmentGeneration
         guard hasCurrentSurface(generation: baselineSurfaceGeneration),
               ActivePlaybackCoordinator.shared.isActive(self)
@@ -1595,6 +2266,31 @@ final class PlayerStateViewModel: NSObject, ObservableObject {
 
     func play() {
         guard !isTerminated else { return }
+        syncPictureInPictureState()
+        guard allowsPlaybackInCurrentApplicationState else {
+            _ = pauseForAppBackground()
+            return
+        }
+        let isRestartingStoppedBackgroundPlayback = isPlaybackStoppedForAppBackground
+        let stoppedBackgroundResumeTime: TimeInterval? = isRestartingStoppedBackgroundPlayback
+            ? max(
+                appBackgroundPlaybackRestoreTime
+                    ?? engine.snapshot(durationHint: durationHint).currentTime
+                    ?? currentTime,
+                0
+            )
+            : nil
+        if isRestartingStoppedBackgroundPlayback {
+            _ = prepareStoppedPlaybackAfterAppBackgroundIfNeeded()
+        }
+        shouldResumePlaybackAfterAppBackground = false
+        appBackgroundPlaybackRestoreTime = nil
+        isPlaybackStoppedForAppBackground = false
+        didPrepareStoppedAppBackgroundPlayback = false
+        if !isRestartingStoppedBackgroundPlayback {
+            cancelAppBackgroundSurfaceRecovery()
+        }
+        cancelAppBackgroundResumeRecovery()
         if showsExplicitPlaybackStartControl {
             isAwaitingInitialManualPlayback = false
             isAwaitingRelatedVideoReturnPlayback = false
@@ -1612,6 +2308,7 @@ final class PlayerStateViewModel: NSObject, ObservableObject {
                 reason: nil
             )
             isPreparing = false
+            syncRemotePlaybackControls()
             return
         }
 
@@ -1619,8 +2316,17 @@ final class PlayerStateViewModel: NSObject, ObservableObject {
             prepareMediaAndPlay()
             return
         }
+        if mediaPreparationTask != nil {
+            isPreparing = true
+            isBuffering = hasPresentedPlayback
+            playbackPhase = hasPresentedPlayback ? .buffering : .preparing
+            return
+        }
 
         startPreparedPlayback()
+        if let stoppedBackgroundResumeTime {
+            scheduleStoppedAppBackgroundResumeRecovery(from: stoppedBackgroundResumeTime)
+        }
     }
 
     func resumePlaybackAfterUserSeek() {
@@ -1689,7 +2395,25 @@ final class PlayerStateViewModel: NSObject, ObservableObject {
     }
 
     func pause() {
+        isPlaybackStoppedForAppBackground = false
+        didPrepareStoppedAppBackgroundPlayback = false
+        pause(retainingAppBackgroundResumeIntent: false)
+    }
+
+    private func pause(
+        retainingAppBackgroundResumeIntent: Bool,
+        usesAppBackgroundPause: Bool = false,
+        preservesAppBackgroundSurfaceRecovery: Bool = false
+    ) {
         guard !isTerminated else { return }
+        if !retainingAppBackgroundResumeIntent {
+            shouldResumePlaybackAfterAppBackground = false
+            if !preservesAppBackgroundSurfaceRecovery {
+                appBackgroundPlaybackRestoreTime = nil
+                cancelAppBackgroundSurfaceRecovery()
+            }
+        }
+        cancelAppBackgroundResumeRecovery()
         cancelScrubSeekTasks(resetUserSeeking: true)
         wantsAutoplay = false
         cancelDeferredBufferingIndicator()
@@ -1697,7 +2421,11 @@ final class PlayerStateViewModel: NSObject, ObservableObject {
         cancelSeekRecoveryTracking()
         playbackRecoveryWatchdogTask?.cancel()
         playbackRecoveryWatchdogTask = nil
-        engine.pause()
+        if retainingAppBackgroundResumeIntent || usesAppBackgroundPause {
+            engine.pauseForAppBackground()
+        } else {
+            engine.pause()
+        }
         isPlaying = false
         isBuffering = false
         playbackPhase = .paused
@@ -1708,6 +2436,12 @@ final class PlayerStateViewModel: NSObject, ObservableObject {
 
     func pauseForNavigation() {
         guard !isTerminated else { return }
+        isPlaybackStoppedForAppBackground = false
+        didPrepareStoppedAppBackgroundPlayback = false
+        shouldResumePlaybackAfterAppBackground = false
+        appBackgroundPlaybackRestoreTime = nil
+        cancelAppBackgroundSurfaceRecovery()
+        cancelAppBackgroundResumeRecovery()
         silenceAudioForNavigationIfNeeded()
         cancelScrubSeekTasks(resetUserSeeking: true)
         mediaPreparationTask?.cancel()
@@ -1738,9 +2472,13 @@ final class PlayerStateViewModel: NSObject, ObservableObject {
 
     func prepareForVisualPlaybackTransition() {
         guard !isTerminated else { return }
+        shouldResumePlaybackAfterAppBackground = false
+        appBackgroundPlaybackRestoreTime = nil
+        cancelAppBackgroundSurfaceRecovery()
         silenceAudioForNavigationIfNeeded()
         cancelScrubSeekTasks(resetUserSeeking: true)
         ActivePlaybackCoordinator.shared.deactivate(self)
+        PlayerRemoteControlSession.shared.clearIfCurrent(self)
         wantsAutoplay = false
         cancelDeferredBufferingIndicator()
         cancelStartupResumeRecoveryTracking()
@@ -1794,6 +2532,7 @@ final class PlayerStateViewModel: NSObject, ObservableObject {
             isPlaying = false
             isBuffering = false
             playbackPhase = engine.hasMedia ? .paused : .idle
+            syncRemotePlaybackControls()
             rescheduleTimeObserverIfNeeded()
         }
     }
@@ -1832,8 +2571,14 @@ final class PlayerStateViewModel: NSObject, ObservableObject {
         }
         isStopping = true
         isTerminated = true
+        isPlaybackStoppedForAppBackground = false
+        didPrepareStoppedAppBackgroundPlayback = false
+        shouldResumePlaybackAfterAppBackground = false
+        appBackgroundPlaybackRestoreTime = nil
+        cancelAppBackgroundSurfaceRecovery()
         engineCallbackGeneration &+= 1
         mediaPreparationGeneration &+= 1
+        cancelAppBackgroundResumeRecovery()
         cancelScrubSeekTasks(resetUserSeeking: true)
         cancelDeferredBufferingIndicator()
         mediaPreparationTask?.cancel()
@@ -2580,7 +3325,7 @@ final class PlayerStateViewModel: NSObject, ObservableObject {
         isPictureInPictureEnabled = isEnabled
         cancelPictureInPictureStartRetryTask()
         engine.setPictureInPictureEnabled(isEnabled)
-        pictureInPictureController?.canStartPictureInPictureAutomaticallyFromInline = isEnabled
+        pictureInPictureController?.canStartPictureInPictureAutomaticallyFromInline = false
         surfaceView?.setPictureInPictureEnabled(isEnabled)
         applyPictureInPicturePreferenceToNativePlaybackController()
         if !isEnabled {
@@ -2712,7 +3457,10 @@ final class PlayerStateViewModel: NSObject, ObservableObject {
         if isPreparing {
             isPreparing = false
         }
-        if isBuffering, hasPresentedPlayback, snapshot.isPlaying {
+        if isBuffering,
+           hasPresentedPlayback,
+           snapshot.isPlaying,
+           !isAwaitingAppBackgroundSurfaceRecovery {
             isBuffering = false
         }
         refreshPlaybackState()
@@ -2902,8 +3650,10 @@ final class PlayerStateViewModel: NSObject, ObservableObject {
         guard canActivatePlayback() else { return }
         wantsAutoplay = true
         isPreparing = false
-        isBuffering = !hasPresentedPlayback
-        playbackPhase = hasPresentedPlayback ? .playing : .waitingForFirstFrame
+        isBuffering = !hasPresentedPlayback || isAwaitingAppBackgroundSurfaceRecovery
+        playbackPhase = hasPresentedPlayback && !isAwaitingAppBackgroundSurfaceRecovery
+            ? .playing
+            : (hasPresentedPlayback ? .buffering : .waitingForFirstFrame)
         loadingProgress = max(loadingProgress, 0.78)
         isPlaying = true
         if !hasPresentedPlayback {
@@ -3239,6 +3989,7 @@ final class PlayerStateViewModel: NSObject, ObservableObject {
             wantsAutoplay = false
             playbackPhase = .failed(playbackErrorMessage)
             invalidatePictureInPicturePlaybackState()
+            syncRemotePlaybackControls()
             return
         }
 
@@ -3251,7 +4002,10 @@ final class PlayerStateViewModel: NSObject, ObservableObject {
             if isPreparing {
                 isPreparing = false
             }
-            if isBuffering, hasPresentedPlayback, snapshot.isPlaying {
+            if isBuffering,
+               hasPresentedPlayback,
+               snapshot.isPlaying,
+               !isAwaitingAppBackgroundSurfaceRecovery {
                 isBuffering = false
             }
         }
@@ -3304,6 +4058,11 @@ final class PlayerStateViewModel: NSObject, ObservableObject {
     private func updatePhaseFromSnapshot(_ snapshot: PlayerPlaybackSnapshot) {
         guard errorMessage == nil else {
             playbackPhase = .failed(errorMessage)
+            return
+        }
+        if isAwaitingAppBackgroundSurfaceRecovery {
+            isBuffering = true
+            playbackPhase = .buffering
             return
         }
         if isPreparing {
@@ -3504,7 +4263,7 @@ final class PlayerStateViewModel: NSObject, ObservableObject {
         }
         if countsAsNaturalPlayback, normalizedTime > 0 {
             cancelDeferredBufferingIndicator()
-            if hasPresentedPlayback {
+            if hasPresentedPlayback, !isAwaitingAppBackgroundSurfaceRecovery {
                 isBuffering = false
                 loadingProgress = 1
             }
@@ -3625,6 +4384,7 @@ final class PlayerStateViewModel: NSObject, ObservableObject {
 
     private func markPlaybackSurfaceReady() {
         let shouldNotifyFirstFrame = !hasPresentedPlayback
+        let wasAwaitingAppBackgroundSurfaceRecovery = isAwaitingAppBackgroundSurfaceRecovery
         cancelDeferredBufferingIndicator()
         playbackRecoveryWatchdogTask?.cancel()
         playbackRecoveryWatchdogTask = nil
@@ -3649,6 +4409,16 @@ final class PlayerStateViewModel: NSObject, ObservableObject {
         engine.setTemporaryAudioSuppressed(false)
         loadingProgress = 1
         isPreparing = false
+        if wasAwaitingAppBackgroundSurfaceRecovery {
+            // `AVPlayerLayer.isReadyForDisplay` can remain true after an item was
+            // rebuilt following a long lock. Do not reveal the layer until the
+            // video output has supplied fresh, advancing media timestamps.
+            currentPlaybackSurfaceReadyGeneration = nil
+            isCurrentPlaybackSurfaceReadyForDisplay = false
+            isBuffering = true
+            playbackPhase = .buffering
+            return
+        }
         isBuffering = false
         playbackPhase = .playing
     }
@@ -3751,6 +4521,10 @@ final class PlayerStateViewModel: NSObject, ObservableObject {
     }
 
     private func syncRemotePlaybackControls(forceNowPlayingTimeUpdate: Bool = false) {
+        guard shouldPublishNowPlayingMetadata else {
+            PlayerRemoteControlSession.shared.clearIfCurrent(self)
+            return
+        }
         PlayerRemoteControlSession.shared.activate(
             for: self,
             forceNowPlayingTimeUpdate: forceNowPlayingTimeUpdate
@@ -3850,8 +4624,11 @@ final class PlayerStateViewModel: NSObject, ObservableObject {
             errorMessage = nil
             lastFailureReason = nil
             isPreparing = false
-            if hasPresentedPlayback {
+            if hasPresentedPlayback, !isAwaitingAppBackgroundSurfaceRecovery {
                 markPlaybackSurfaceReady()
+            } else if hasPresentedPlayback {
+                isBuffering = true
+                playbackPhase = .buffering
             } else {
                 isBuffering = true
                 loadingProgress = max(loadingProgress, 0.86)
@@ -3982,6 +4759,7 @@ final class PlayerStateViewModel: NSObject, ObservableObject {
 
     private var shouldPreservePlaybackDuringTransientSystemOverlay: Bool {
         shouldResumeAfterTransientSystemOverlay
+            && isPictureInPictureActive
             && wantsAutoplay
             && UIApplication.shared.applicationState != .active
     }
@@ -4632,7 +5410,7 @@ final class PlayerStateViewModel: NSObject, ObservableObject {
 
         let controller = AVPictureInPictureController(contentSource: contentSource)
         controller.delegate = self
-        controller.canStartPictureInPictureAutomaticallyFromInline = true
+        controller.canStartPictureInPictureAutomaticallyFromInline = false
         pictureInPictureController = controller
         didConfigurePictureInPicture = true
     }
@@ -4642,7 +5420,7 @@ final class PlayerStateViewModel: NSObject, ObservableObject {
         let isSupportedAndEnabled = isPictureInPictureEnabled
             && AVPictureInPictureController.isPictureInPictureSupported()
         nativePlaybackController.allowsPictureInPicturePlayback = isSupportedAndEnabled
-        nativePlaybackController.canStartPictureInPictureAutomaticallyFromInline = isSupportedAndEnabled
+        nativePlaybackController.canStartPictureInPictureAutomaticallyFromInline = false
     }
 
     private func invalidatePictureInPicturePlaybackState() {
@@ -4721,47 +5499,6 @@ private struct PendingSeekRecoveryMetric {
     let targetProgress: Double?
     let startedAt: CFTimeInterval
     let engineElapsedMilliseconds: Double?
-}
-
-private extension UIImage {
-    var biliLooksLikeBlackFrame: Bool {
-        guard let cgImage else { return false }
-        let width = 8
-        let height = 8
-        var pixels = [UInt8](repeating: 0, count: width * height * 4)
-        let colorSpace = CGColorSpaceCreateDeviceRGB()
-        let bitmapInfo = CGImageAlphaInfo.premultipliedLast.rawValue
-        guard let context = CGContext(
-            data: &pixels,
-            width: width,
-            height: height,
-            bitsPerComponent: 8,
-            bytesPerRow: width * 4,
-            space: colorSpace,
-            bitmapInfo: bitmapInfo
-        ) else {
-            return false
-        }
-
-        context.interpolationQuality = .low
-        context.draw(cgImage, in: CGRect(x: 0, y: 0, width: width, height: height))
-
-        var brightPixelCount = 0
-        var lumaSum = 0
-        for index in stride(from: 0, to: pixels.count, by: 4) {
-            let red = Int(pixels[index])
-            let green = Int(pixels[index + 1])
-            let blue = Int(pixels[index + 2])
-            let luma = (red * 299 + green * 587 + blue * 114) / 1000
-            lumaSum += luma
-            if luma > 18 {
-                brightPixelCount += 1
-            }
-        }
-
-        let averageLuma = Double(lumaSum) / Double(width * height)
-        return averageLuma < 10 && brightPixelCount <= 1
-    }
 }
 
 extension PlayerStateViewModel: AVPictureInPictureControllerDelegate {

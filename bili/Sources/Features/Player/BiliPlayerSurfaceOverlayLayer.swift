@@ -36,6 +36,17 @@ struct BiliPlayerSurfaceOverlayLayer: View {
                 .zIndex(5)
             }
 
+            if state.showsAppBackgroundRecoverySnapshot {
+                PlayerRotationTransitionSnapshotView(
+                    snapshot: state.appBackgroundRecoverySnapshot,
+                    fallbackCoverURL: nil,
+                    constrainsToVideoAspect: state.constrainsRotationSnapshotToVideoAspect
+                )
+                .background(Color.black)
+                .opacity(state.appBackgroundRecoverySnapshotOpacity)
+                .zIndex(6)
+            }
+
             if state.showsRotationSnapshot {
                 PlayerRotationTransitionSnapshotView(
                     snapshot: state.rotationSnapshot,
@@ -96,5 +107,10 @@ private extension BiliPlayerSurfaceChromeState {
     var showsRotationSnapshot: Bool {
         rotationSnapshotOpacity > 0
             && rotationSnapshot != nil
+    }
+
+    var showsAppBackgroundRecoverySnapshot: Bool {
+        appBackgroundRecoverySnapshotOpacity > 0
+            && appBackgroundRecoverySnapshot != nil
     }
 }

@@ -2949,6 +2949,22 @@ nonisolated struct CommentMember: Decodable, Hashable {
         avatar = try container.decodeIfPresent(String.self, forKey: .avatar)
         levelInfo = try container.decodeIfPresent(CommentLevelInfo.self, forKey: .levelInfo)
     }
+
+    nonisolated var videoOwner: VideoOwner? {
+        guard let numericMID else { return nil }
+        let trimmedName = uname?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return VideoOwner(
+            mid: numericMID,
+            name: trimmedName.isEmpty ? "用户 \(numericMID)" : trimmedName,
+            face: avatar
+        )
+    }
+
+    private nonisolated var numericMID: Int? {
+        let rawMID = mid?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        guard let numericMID = Int(rawMID), numericMID > 0 else { return nil }
+        return numericMID
+    }
 }
 
 nonisolated struct CommentLevelInfo: Decodable, Hashable {

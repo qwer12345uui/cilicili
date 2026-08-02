@@ -6,6 +6,7 @@ import SwiftUI
 /// 外层 `VideoDetailView`），UIKit 容器只负责通过 binding 置位触发。
 struct VideoDetailShellRepresentable: UIViewControllerRepresentable {
     @EnvironmentObject private var dependencies: AppDependencies
+    @Environment(\.openVideoOwnerRouteAction) private var openVideoOwnerRoute
     @ObservedObject var viewModel: VideoDetailViewModel
     @ObservedObject var fullscreenCoordinator: VideoDetailFullscreenCoordinator
     @ObservedObject var runtimeSettings: VideoDetailRuntimeSettingsStore
@@ -27,6 +28,7 @@ struct VideoDetailShellRepresentable: UIViewControllerRepresentable {
             fullscreenCoordinator: fullscreenCoordinator,
             runtimeSettings: runtimeSettings,
             dependencies: dependencies,
+            openVideoOwnerRoute: openVideoOwnerRoute,
             selectedContentTab: $selectedContentTab,
             onShowNetworkDiagnostics: { isShowingNetworkDiagnostics = true },
             onShowFavoriteFolders: { isShowingFavoriteFolders = true },

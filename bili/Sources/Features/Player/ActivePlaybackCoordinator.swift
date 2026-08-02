@@ -54,6 +54,12 @@ final class ActivePlaybackCoordinator {
     }
 
     @discardableResult
+    func pauseActivePlaybackForAppBackground() -> Bool {
+        cleanupRegisteredPlayers()
+        return activePlayer?.pauseForAppBackground() ?? false
+    }
+
+    @discardableResult
     func resumeActivePlaybackAfterCancelledNavigation() -> Bool {
         activePlayer?.restoreAudioAfterCancelledNavigation() ?? false
     }

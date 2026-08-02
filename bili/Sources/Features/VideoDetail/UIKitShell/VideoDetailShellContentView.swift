@@ -28,7 +28,7 @@ struct VideoDetailShellContentView: View {
         }
     }
 
-    let viewModel: VideoDetailViewModel
+    @ObservedObject var viewModel: VideoDetailViewModel
     @ObservedObject var runtimeSettings: VideoDetailRuntimeSettingsStore
     @ObservedObject var state: State
     let layoutWidth: CGFloat
@@ -37,6 +37,7 @@ struct VideoDetailShellContentView: View {
     let onShowFavoriteFolders: () -> Void
     let onShowCoinPicker: () -> Void
     let onReply: (Comment) -> Void
+    let openVideoOwnerRoute: ((VideoOwner) -> Void)?
     let onSelectedTabChange: (VideoDetailContentTab) -> Void
     let onScrollOffsetChange: (VideoDetailContentTab, CGFloat) -> Void
 
@@ -51,6 +52,7 @@ struct VideoDetailShellContentView: View {
             onShowFavoriteFolders: onShowFavoriteFolders,
             onShowCoinPicker: onShowCoinPicker,
             onReply: onReply,
+            openVideoOwnerRoute: openVideoOwnerRoute,
             onSelectedTabChange: onSelectedTabChange,
             onScrollOffsetChange: onScrollOffsetChange
         )
@@ -67,6 +69,7 @@ private struct VideoDetailShellContentBody: View {
     let onShowFavoriteFolders: () -> Void
     let onShowCoinPicker: () -> Void
     let onReply: (Comment) -> Void
+    let openVideoOwnerRoute: ((VideoOwner) -> Void)?
     let onSelectedTabChange: (VideoDetailContentTab) -> Void
     let onScrollOffsetChange: (VideoDetailContentTab, CGFloat) -> Void
 
@@ -96,6 +99,8 @@ private struct VideoDetailShellContentBody: View {
             }
         )
         .allowsHitTesting(!contentActionsSuppressed)
+        .environment(\.openVideoOwnerRouteAction, openVideoOwnerRoute)
+        .environment(\.commentContentOwnerMID, viewModel.detail.owner?.mid)
         .onChange(of: selectedContentTab) { _, tab in
             onSelectedTabChange(tab)
         }

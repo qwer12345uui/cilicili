@@ -11,12 +11,15 @@ struct CommentReplyRootView: View {
 
     var body: some View {
         HStack(alignment: .top, spacing: 10) {
-            CommentAvatar(urlString: display.avatarURLString, size: 40)
+            CommentAvatar(
+                urlString: display.avatarURLString,
+                owner: display.authorOwner,
+                size: 40
+            )
 
             VStack(alignment: .leading, spacing: 6) {
                 HStack(alignment: .firstTextBaseline, spacing: 6) {
-                    Text(display.authorName)
-                        .appTypography(.commentAuthor, fallback: .subheadline.weight(.semibold))
+                    CommentAuthorIdentity(name: display.authorName, owner: display.authorOwner)
                         .foregroundStyle(.secondary)
 
                     if !display.timeText.isEmpty {

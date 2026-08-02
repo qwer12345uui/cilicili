@@ -102,6 +102,11 @@ enum PlayerPerformanceOverlayDiagnosticsCopyTextFormatter {
         lines.append("usesLocalHLSBridge: \(diagnostics.usesLocalHLSBridge ? "true" : "false")")
         appendOptional("localPlaylist", diagnostics.localPlaylistURL, to: &lines)
         lines.append("sourceHosts: \(redactedSourceHosts(videoHost: diagnostics.sourceVideoHost, audioHost: diagnostics.sourceAudioHost))")
+        lines.append("cellularBiliTrafficCompatibility: \(diagnostics.cellularBiliTrafficCompatibility.diagnosticSummary)")
+        lines.append("sourceHostClasses: \(CellularBiliTrafficCompatibilityExperiment.sourceHostSummary(videoHost: diagnostics.sourceVideoHost, audioHost: diagnostics.sourceAudioHost))")
+        if diagnostics.cellularBiliTrafficCompatibility.isActive {
+            lines.append("externalMediaRoute: \(CellularBiliTrafficCompatibilityExperiment.hasExternalMediaHost(videoHost: diagnostics.sourceVideoHost, audioHost: diagnostics.sourceAudioHost) ? "active" : "none")")
+        }
         lines.append("hlsVariants: \(PlaybackNetworkDiagnosticFormat.hlsVariantText(diagnostics))")
         if !diagnostics.hlsVideoVariantDetails.isEmpty {
             lines.append("hlsVariantDetails: \(diagnostics.hlsVideoVariantDetails.joined(separator: " | "))")

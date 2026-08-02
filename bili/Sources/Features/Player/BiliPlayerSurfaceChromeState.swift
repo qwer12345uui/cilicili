@@ -6,9 +6,11 @@ struct BiliPlayerSurfaceChromeState {
     let surfaceOverlay: AnyView?
     let rotationSnapshot: PlaybackTransitionSnapshot?
     let seekSnapshot: PlaybackTransitionSnapshot?
+    let appBackgroundRecoverySnapshot: PlaybackTransitionSnapshot?
     let rotationFallbackCoverURL: URL?
     let rotationSnapshotOpacity: Double
     let seekSnapshotOpacity: Double
+    let appBackgroundRecoverySnapshotOpacity: Double
     let constrainsRotationSnapshotToVideoAspect: Bool
     let showsPlayerLoadingChrome: Bool
     let isBuffering: Bool

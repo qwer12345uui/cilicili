@@ -498,8 +498,7 @@ final class VideoSurfaceContainerView: UIView {
         nativePlayerViewController.videoGravity = .resizeAspect
         nativePlayerViewController.allowsPictureInPicturePlayback = isPictureInPictureEnabled
             && AVPictureInPictureController.isPictureInPictureSupported()
-        nativePlayerViewController.canStartPictureInPictureAutomaticallyFromInline = isPictureInPictureEnabled
-            && AVPictureInPictureController.isPictureInPictureSupported()
+        nativePlayerViewController.canStartPictureInPictureAutomaticallyFromInline = false
         nativePlayerViewController.requiresLinearPlayback = false
         nativePlayerViewController.updatesNowPlayingInfoCenter = false
         nativePlayerViewController.view.backgroundColor = .black

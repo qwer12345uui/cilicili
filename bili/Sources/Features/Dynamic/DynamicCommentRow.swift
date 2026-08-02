@@ -19,7 +19,11 @@ struct DynamicCommentRow: View {
 
     var body: some View {
         HStack(alignment: .top, spacing: 10) {
-            DynamicCommentAvatar(urlString: display.avatarURLString, size: 38)
+            DynamicCommentAvatar(
+                urlString: display.avatarURLString,
+                owner: display.authorOwner,
+                size: 38
+            )
 
             DynamicCommentRowContent(comment: comment, display: display, showReplies: showReplies)
             .frame(maxWidth: .infinity, alignment: .leading)

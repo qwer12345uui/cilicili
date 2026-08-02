@@ -33,7 +33,7 @@ struct CommentRepliesSheet: View {
     }
 
     var body: some View {
-        NavigationStack {
+        CommentOwnerProfileNavigationContainer {
             CommentRepliesSheetContentHost(
                 rootComment: rootComment,
                 store: store,

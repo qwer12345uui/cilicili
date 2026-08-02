@@ -9,6 +9,20 @@ extension PlaybackNetworkDiagnosticsTextBuilder {
         lines.append("播放自动优化：\(libraryStore.playbackAutoOptimizationMode.title)")
         lines.append("视频 Host：\(variant?.videoURL?.host ?? "未获取")")
         lines.append("音频 Host：\(variant?.audioURL?.host ?? "未获取")")
+        let compatibilityState = CellularBiliTrafficCompatibilityExperiment.RuntimeState(
+            isEnabled: libraryStore.cellularBiliTrafficCompatibilityExperimentEnabled,
+            isCellularNetwork: NetworkPathSnapshot.shared.usesCellular
+        )
+        let sourceDiagnostics = playerViewModel?.engineDiagnostics
+        lines.append("B站定向流量兼容：\(compatibilityState.userFacingStatus)")
+        lines.append("媒体域名归类：\(CellularBiliTrafficCompatibilityExperiment.sourceHostSummary(videoHost: sourceDiagnostics?.sourceVideoHost, audioHost: sourceDiagnostics?.sourceAudioHost))")
+        if compatibilityState.isActive,
+           CellularBiliTrafficCompatibilityExperiment.hasExternalMediaHost(
+            videoHost: sourceDiagnostics?.sourceVideoHost,
+            audioHost: sourceDiagnostics?.sourceAudioHost
+           ) {
+            lines.append("外部媒体线路：当前使用，可能是没有 B站候选或播放兜底；请以运营商账单为准。")
+        }
 
         if let currentHostSnapshot {
             lines.append("当前 Host 历史：\(PlaybackNetworkDiagnosticFormat.playbackURLPreferenceSummary(currentHostSnapshot))")

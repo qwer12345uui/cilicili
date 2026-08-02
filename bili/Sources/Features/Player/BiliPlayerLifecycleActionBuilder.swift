@@ -6,6 +6,7 @@ struct BiliPlayerLifecycleActionBuilder {
     let surfaceState: PlayerSurfaceStateModel
     let playbackControlsVisibility: PlayerPlaybackControlsVisibilityModel
     let rotationTransitionSnapshotModel: PlayerRotationTransitionSnapshotModel
+    let appBackgroundRecoverySnapshotModel: PlayerRotationTransitionSnapshotModel
     let speedBoostModel: PlayerSpeedBoostModel
     let playbackProgressCoordinator: PlayerPlaybackProgressCoordinator
     let progressReporter: PlayerPlaybackProgressReporter
@@ -19,7 +20,6 @@ struct BiliPlayerLifecycleActionBuilder {
         BiliPlayerLifecycleActions(
             onAppear: handleAppear,
             onScenePhaseChanged: handleScenePhaseChange,
-            onDidBecomeActive: handleDidBecomeActive,
             onDisappear: handleDisappear,
             onFullscreenActiveChanged: handleFullscreenActiveChange,
             onPresentationChanged: handlePresentationChange,
@@ -76,16 +76,16 @@ struct BiliPlayerLifecycleActionBuilder {
             handleActivePlaybackRecovery()
         } else if phase == .inactive {
             speedBoostActions.end(reason: .systemInterrupted)
-            guard allowsPlaybackActivation else { return }
-            viewModel.preservePlaybackThroughTransientSystemOverlay()
+            holdAppBackgroundRecoverySnapshotIfPossible()
         } else if phase == .background {
             speedBoostActions.end(reason: .background)
-            if allowsPlaybackActivation {
-                if isPictureInPictureEnabled {
-                    viewModel.preservePlaybackThroughTransientSystemOverlay()
-                } else {
-                    viewModel.pauseForAppBackground()
-                }
+            // UIKit may send `.inactive` for Control Center and other temporary
+            // overlays. Match the player lifecycle used by PiliPlus: only pause
+            // after the app has actually entered the background.
+            if viewModel.pauseForAppBackground() {
+                // Prefer the frame captured during `.inactive`: on physical devices
+                // the player layer can already be blank by `didEnterBackground`.
+                holdAppBackgroundRecoverySnapshotIfPossible()
             }
             Task {
                 await VideoPreloadCenter.shared.cancelAll()
@@ -97,14 +97,9 @@ struct BiliPlayerLifecycleActionBuilder {
         }
     }
 
-    private func handleDidBecomeActive() {
-        guard !viewModel.isTerminated else { return }
-        guard allowsPlaybackActivation else { return }
-        handleActivePlaybackRecovery()
-    }
-
     private func handleDisappear() {
         speedBoostActions.end(reason: viewModel.isTerminated ? .terminated : .disappear)
+        appBackgroundRecoverySnapshotModel.release(immediate: true)
         progressReporter.stop()
         visibilityActions.cancelAutoHide()
         rotationTransitionSnapshotModel.release(immediate: true)
@@ -200,10 +195,33 @@ struct BiliPlayerLifecycleActionBuilder {
         )
     }
 
+    private func holdAppBackgroundRecoverySnapshotIfPossible() {
+        guard !viewModel.isTerminated,
+              ActivePlaybackCoordinator.shared.isActive(viewModel),
+              viewModel.hasPresentedPlayback
+        else { return }
+
+        appBackgroundRecoverySnapshotModel.hold(
+            hasPresentedPlayback: true,
+            surfaceLayoutGeneration: viewModel.surfaceLayoutGeneration,
+            makeSnapshot: { [viewModel] in
+                viewModel.makeCurrentVideoFrameTransitionSnapshot()
+                    ?? viewModel.makePlaybackTransitionSnapshot()
+            }
+        )
+    }
+
     private func handleActivePlaybackRecovery() {
         let shouldHandlePictureInPicture = isPictureInPictureEnabled
         let canActivatePlayback = allowsPlaybackActivation
-        Task { @MainActor [viewModel] in
+        let appBackgroundRecoverySnapshotModel = appBackgroundRecoverySnapshotModel
+        if viewModel.isAwaitingAppBackgroundSurfaceRecovery {
+            // The global application delegate can pause playback even when this
+            // SwiftUI host misses the preceding inactive notification. The engine
+            // keeps the last valid frame, so establish the visual hold before play.
+            holdAppBackgroundRecoverySnapshotIfPossible()
+        }
+        Task { @MainActor [viewModel, appBackgroundRecoverySnapshotModel] in
             guard !viewModel.isTerminated else { return }
             guard canActivatePlayback else { return }
             if shouldHandlePictureInPicture {
@@ -212,8 +230,47 @@ struct BiliPlayerLifecycleActionBuilder {
                     return
                 }
             }
-            viewModel.recoverPlaybackAfterTransientSystemOverlayIfNeeded()
-            viewModel.recoverPlaybackAfterAppResume()
+            if viewModel.prepareStoppedPlaybackAfterAppBackgroundIfNeeded() {
+                appBackgroundRecoverySnapshotModel.releaseForAppBackgroundPlaybackRecovery(
+                    isReadyForReveal: {
+                        viewModel.isStoppedAppBackgroundSurfaceRecoveryReadyForReveal()
+                    },
+                    shouldKeepWaiting: {
+                        !viewModel.isTerminated
+                            && viewModel.errorMessage == nil
+                            && viewModel.isAwaitingAppBackgroundSurfaceRecovery
+                            && ActivePlaybackCoordinator.shared.isActive(viewModel)
+                    },
+                    onReleased: {
+                        viewModel.finishAppBackgroundSurfaceRecoveryReveal()
+                    }
+                )
+                return
+            }
+            let didResume = viewModel.resumePlaybackAfterAppBackgroundIfNeeded()
+            guard didResume else {
+                // More than one foreground notification can reach the same
+                // player during scene restoration. Keep a held frame while the
+                // first recovery task is still waiting for a fresh drawable.
+                guard !viewModel.isAwaitingAppBackgroundSurfaceRecovery else { return }
+                viewModel.recoverPlaybackAfterAppResume()
+                appBackgroundRecoverySnapshotModel.release(immediate: true)
+                return
+            }
+            appBackgroundRecoverySnapshotModel.releaseForAppBackgroundPlaybackRecovery(
+                isReadyForReveal: {
+                    viewModel.isAppBackgroundSurfaceRecoveryReadyForReveal()
+                },
+                shouldKeepWaiting: {
+                    !viewModel.isTerminated
+                        && viewModel.errorMessage == nil
+                        && viewModel.wantsAutoplay
+                        && ActivePlaybackCoordinator.shared.isActive(viewModel)
+                },
+                onReleased: {
+                    viewModel.finishAppBackgroundSurfaceRecoveryReveal()
+                }
+            )
         }
     }
 

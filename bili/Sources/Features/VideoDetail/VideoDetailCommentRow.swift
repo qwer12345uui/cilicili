@@ -24,7 +24,11 @@ struct CommentRow: View, Equatable {
 
     var body: some View {
         HStack(alignment: .top, spacing: 10) {
-            CommentAvatar(urlString: display.avatarURLString, size: 38)
+            CommentAvatar(
+                urlString: display.avatarURLString,
+                owner: display.authorOwner,
+                size: 38
+            )
 
             VStack(alignment: .leading, spacing: 5) {
                 CommentRowHeader(display: display)

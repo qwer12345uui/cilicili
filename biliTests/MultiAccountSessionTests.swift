@@ -4,6 +4,27 @@ import XCTest
 
 @MainActor
 final class MultiAccountSessionTests: XCTestCase {
+    func testUploaderDynamicCookiePrefersTheAssignedAccountSession() {
+        let cookie = BiliAPIClient.uploaderDynamicCookieHeader(
+            isLoggedIn: true,
+            authenticatedCookieHeader: "SESSDATA=dynamic-session; DedeUserID=2002",
+            anonymousCookieHeader: "buvid3=anonymous-device"
+        )
+
+        XCTAssertTrue(cookie.contains("SESSDATA=dynamic-session"))
+        XCTAssertFalse(cookie.contains("buvid3=anonymous-device"))
+    }
+
+    func testUploaderDynamicCookieFallsBackToAnonymousSessionWhenLoggedOut() {
+        let cookie = BiliAPIClient.uploaderDynamicCookieHeader(
+            isLoggedIn: false,
+            authenticatedCookieHeader: "",
+            anonymousCookieHeader: "buvid3=anonymous-device"
+        )
+
+        XCTAssertEqual(cookie, "buvid3=anonymous-device")
+    }
+
     func testExperimentDefaultsOffAndPersists() {
         let suiteName = "cc.bili.tests.multi-account.defaults.\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suiteName)!

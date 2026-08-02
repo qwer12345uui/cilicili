@@ -18,14 +18,17 @@ extension VideoDetailViewModel {
         }
         guard comments.isEmpty, !commentState.isLoading else { return }
         cancelCommentsLoadingTask()
+        let waitsForPlaybackStart = waitForPlaybackStart
+            && !isAwaitingInitialManualPlayback
+            && !isAwaitingRelatedVideoReturnPlayback
         let token = UUID()
         commentsLoadingToken = token
-        commentsLoadingTask = Task(priority: waitForPlaybackStart ? .utility : .userInitiated) { [weak self] in
+        commentsLoadingTask = Task(priority: waitsForPlaybackStart ? .utility : .userInitiated) { [weak self] in
             guard let self else { return }
             defer {
                 self.clearCommentsLoadingTaskIfCurrent(token)
             }
-            if waitForPlaybackStart {
+            if waitsForPlaybackStart {
                 guard let release = await self.waitForPlaybackStartupRelease(acceptsFailure: true),
                       !Task.isCancelled,
                       !self.isPlaybackInvalidatedForNavigation

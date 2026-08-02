@@ -42,10 +42,8 @@ private struct DynamicCommentRowHeader: View {
 
     var body: some View {
         HStack(alignment: .firstTextBaseline, spacing: 6) {
-            Text(display.authorName)
-                .appTypography(.commentAuthor, fallback: .subheadline.weight(.semibold))
+            CommentAuthorIdentity(name: display.authorName, owner: display.authorOwner)
                 .foregroundStyle(.primary)
-                .lineLimit(1)
 
             if !display.timeText.isEmpty {
                 Text(display.timeText)

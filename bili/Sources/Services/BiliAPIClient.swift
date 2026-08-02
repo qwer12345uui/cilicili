@@ -132,6 +132,7 @@ nonisolated final class BiliAPIClient {
     private static let primaryAppRecommendProfile: BiliAppSigner.Profile = .androidHD
     private static let mobileUserAgent = "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1"
     private static let webUserAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+    private static let uploaderDynamicWebUserAgent = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/15.2 Safari/605.1.15"
     private static let recommendLogger = Logger(subsystem: "cc.bili", category: "HomeRecommend")
     private let session: URLSession
     private let sessionStore: SessionStore
@@ -149,6 +150,14 @@ nonisolated final class BiliAPIClient {
         default:
             return false
         }
+    }
+
+    nonisolated static func uploaderDynamicCookieHeader(
+        isLoggedIn: Bool,
+        authenticatedCookieHeader: String,
+        anonymousCookieHeader: String
+    ) -> String {
+        isLoggedIn ? authenticatedCookieHeader : anonymousCookieHeader
     }
 
     private struct RequestSnapshot: Sendable {
@@ -4993,6 +5002,39 @@ nonisolated final class BiliAPIClient {
 
     func fetchUploaderDynamicFeed(mid: Int, offset: String? = nil) async throws -> DynamicFeedData {
         guard mid > 0 else { throw BiliAPIError.api(code: -1, message: "UP 主 UID 无效") }
+        let snapshot = await requestSnapshot(purpose: .dynamicFeed)
+        let cookieHeader = Self.uploaderDynamicCookieHeader(
+            isLoggedIn: snapshot.isLoggedIn,
+            authenticatedCookieHeader: snapshot.cookieHeader,
+            anonymousCookieHeader: snapshot.anonymousCookieHeader
+        )
+
+        do {
+            return try await requestUploaderDynamicFeed(
+                mid: mid,
+                offset: offset,
+                cookieHeader: cookieHeader
+            )
+        } catch let error as BiliAPIError {
+            guard case .api(let code, _) = error, code == -352 else {
+                throw error
+            }
+
+            // Bilibili rotates WBI keys independently; retry once with a fresh signature.
+            await state.clearWBIKeys()
+            return try await requestUploaderDynamicFeed(
+                mid: mid,
+                offset: offset,
+                cookieHeader: cookieHeader
+            )
+        }
+    }
+
+    private func requestUploaderDynamicFeed(
+        mid: Int,
+        offset: String?,
+        cookieHeader: String
+    ) async throws -> DynamicFeedData {
         let keys = try await fetchWBIKeys(priority: .utility)
         let signed = WBISigner.sign([
             "offset": offset ?? "",
@@ -5012,8 +5054,8 @@ nonisolated final class BiliAPIClient {
             path: "/x/polymer/web-dynamic/v1/feed/space",
             query: signed,
             referer: "https://space.bilibili.com/\(mid)/dynamic",
-            userAgent: Self.webUserAgent,
-            cookieHeader: await anonymousCookieHeader(),
+            userAgent: Self.uploaderDynamicWebUserAgent,
+            cookieHeader: cookieHeader,
             additionalHeaders: ["Origin": "https://space.bilibili.com"],
             cachePolicy: .reloadIgnoringLocalCacheData
         )

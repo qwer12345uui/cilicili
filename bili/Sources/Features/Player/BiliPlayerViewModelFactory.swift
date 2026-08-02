@@ -37,6 +37,7 @@ enum BiliPlayerViewModelFactory {
             videoStream: playVariant.videoStream,
             audioStream: playVariant.audioStream,
             title: title,
+            authorName: historyVideo?.owner?.name,
             referer: referer,
             durationHint: duration,
             resumeTime: resumeTime ?? 0,

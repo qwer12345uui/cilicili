@@ -3,13 +3,42 @@ import SwiftUI
 struct UploaderView: View {
     @EnvironmentObject private var dependencies: AppDependencies
     let owner: VideoOwner
+    let hidesRootTabBar: Bool
+    let allowsPullToRefresh: Bool
+    let showsToolbarRefreshButton: Bool
 
     @StateObject private var holder = UploaderViewModelHolder()
 
+    init(
+        owner: VideoOwner,
+        hidesRootTabBar: Bool = true,
+        allowsPullToRefresh: Bool = true,
+        showsToolbarRefreshButton: Bool = false
+    ) {
+        self.owner = owner
+        self.hidesRootTabBar = hidesRootTabBar
+        self.allowsPullToRefresh = allowsPullToRefresh
+        self.showsToolbarRefreshButton = showsToolbarRefreshButton
+    }
+
+    @ViewBuilder
     var body: some View {
+        if hidesRootTabBar {
+            content.hidesRootTabBarOnPush()
+        } else {
+            content
+        }
+    }
+
+    private var content: some View {
         Group {
             if let viewModel = holder.viewModel {
-                UploaderContentView(owner: owner, viewModel: viewModel)
+                UploaderContentView(
+                    owner: owner,
+                    viewModel: viewModel,
+                    allowsPullToRefresh: allowsPullToRefresh,
+                    showsToolbarRefreshButton: showsToolbarRefreshButton
+                )
             } else {
                 UploaderInitialLoadingView()
             }
@@ -19,7 +48,6 @@ struct UploaderView: View {
         }
         .navigationTitle("")
         .navigationBarTitleDisplayMode(.inline)
-        .hidesRootTabBarOnPush()
     }
 }
 

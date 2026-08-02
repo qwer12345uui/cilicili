@@ -115,6 +115,7 @@ final class VideoDetailShellViewController: UIViewController {
         fullscreenCoordinator: VideoDetailFullscreenCoordinator,
         runtimeSettings: VideoDetailRuntimeSettingsStore,
         dependencies: AppDependencies,
+        openVideoOwnerRoute: ((VideoOwner) -> Void)?,
         selectedContentTab: Binding<VideoDetailContentTab>,
         onShowNetworkDiagnostics: @escaping () -> Void,
         onShowFavoriteFolders: @escaping () -> Void,
@@ -142,6 +143,7 @@ final class VideoDetailShellViewController: UIViewController {
                 onShowFavoriteFolders: onShowFavoriteFolders,
                 onShowCoinPicker: onShowCoinPicker,
                 onReply: onReply,
+                openVideoOwnerRoute: openVideoOwnerRoute,
                 onSelectedTabChange: { _ in },
                 onScrollOffsetChange: { _, _ in }
             )
@@ -158,6 +160,7 @@ final class VideoDetailShellViewController: UIViewController {
             onShowFavoriteFolders: onShowFavoriteFolders,
             onShowCoinPicker: onShowCoinPicker,
             onReply: onReply,
+            openVideoOwnerRoute: openVideoOwnerRoute,
             onSelectedTabChange: { [weak self] tab in
                 self?.handleSelectedTabChange(tab)
             },

@@ -23,5 +23,6 @@ struct VideoDetailEmbeddedCommentsSection: View {
             autoLoads: true,
             actions: renderPack.actions
         )
+        .environment(\.commentContentOwnerMID, viewModel.detail.owner?.mid)
     }
 }

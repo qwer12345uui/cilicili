@@ -403,24 +403,26 @@ enum PlaybackCDNPreference: String, CaseIterable, Identifiable, Codable, Sendabl
         let candidates = ([primary].compactMap { $0 } + backups).removingDuplicateURLs()
         guard !candidates.isEmpty else { return (primary, backups) }
 
+        let ordered: [URL]
         switch self {
         case .automatic:
-            let ordered = PlaybackURLPreferenceStore.shared.orderedURLs(candidates)
-            return (ordered.first, Array(ordered.dropFirst()))
+            ordered = PlaybackURLPreferenceStore.shared.orderedURLs(candidates)
         case .baseURL:
-            return (candidates.first, Array(candidates.dropFirst()))
+            ordered = candidates
         case .backupURL:
             let backupFirst = backups.removingDuplicateURLs() + [primary].compactMap { $0 }
-            let ordered = backupFirst.removingDuplicateURLs()
-            return (ordered.first, Array(ordered.dropFirst()))
+            ordered = backupFirst.removingDuplicateURLs()
         default:
-            guard let host
-            else {
-                return (candidates.first, Array(candidates.dropFirst()))
+            if let host {
+                ordered = Self.manualHostURLs(host: host, candidates: candidates)
+            } else {
+                ordered = candidates
             }
-            let ordered = Self.manualHostURLs(host: host, candidates: candidates)
-            return (ordered.first, Array(ordered.dropFirst()))
         }
+
+        let compatibleOrder = CellularBiliTrafficCompatibilityExperiment
+            .prioritizedURLsForCurrentEnvironment(ordered)
+        return (compatibleOrder.first, Array(compatibleOrder.dropFirst()))
     }
 
     nonisolated private static func manualHostURLs(host: String, candidates: [URL]) -> [URL] {

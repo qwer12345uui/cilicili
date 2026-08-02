@@ -22,7 +22,7 @@ struct PortraitCommentsSheet: View {
     }
 
     var body: some View {
-        NavigationStack {
+        CommentOwnerProfileNavigationContainer {
             PortraitCommentsSheetContent(
                 store: store,
                 actions: actions,

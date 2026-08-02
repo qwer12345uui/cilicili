@@ -5,7 +5,6 @@ import UIKit
 struct BiliPlayerLifecycleActions {
     let onAppear: () -> Void
     let onScenePhaseChanged: (ScenePhase) -> Void
-    let onDidBecomeActive: () -> Void
     let onDisappear: () -> Void
     let onFullscreenActiveChanged: () -> Void
     let onPresentationChanged: () -> Void
@@ -16,7 +15,7 @@ struct BiliPlayerLifecycleActions {
 
 private struct BiliPlayerLifecycleHostModifier: ViewModifier {
     @Environment(\.scenePhase) private var scenePhase
-    @State private var lastActiveRecoveryEventAt: TimeInterval = 0
+    @State private var lastDeliveredScenePhase: ScenePhase?
 
     let isFullscreenActive: Bool
     let presentation: BiliPlayerPresentation
@@ -27,18 +26,25 @@ private struct BiliPlayerLifecycleHostModifier: ViewModifier {
 
     func body(content: Content) -> some View {
         content
-            .onAppear(perform: actions.onAppear)
-            .onChange(of: scenePhase) { _, phase in
-                handleScenePhaseChanged(phase)
+            .onAppear {
+                let phase = currentApplicationScenePhase
+                lastDeliveredScenePhase = phase
+                actions.onAppear()
+                if phase != .active {
+                    actions.onScenePhaseChanged(phase)
+                }
             }
             .onReceive(NotificationCenter.default.publisher(for: UIApplication.willResignActiveNotification)) { _ in
-                handleWillResignActive()
+                deliver(.inactive)
             }
             .onReceive(NotificationCenter.default.publisher(for: UIApplication.didEnterBackgroundNotification)) { _ in
-                handleDidEnterBackground()
+                deliver(.background)
             }
             .onReceive(NotificationCenter.default.publisher(for: UIApplication.didBecomeActiveNotification)) { _ in
-                handleDidBecomeActive()
+                deliver(.active)
+            }
+            .onChange(of: scenePhase) { _, phase in
+                deliver(phase)
             }
             .onDisappear(perform: actions.onDisappear)
             .onChange(of: isFullscreenActive) { _, _ in
@@ -58,33 +64,21 @@ private struct BiliPlayerLifecycleHostModifier: ViewModifier {
             }
     }
 
-    private func handleScenePhaseChanged(_ phase: ScenePhase) {
-        guard phase == .active else {
-            actions.onScenePhaseChanged(phase)
-            return
-        }
-        guard shouldDeliverActiveRecoveryEvent() else { return }
+    private func deliver(_ phase: ScenePhase) {
+        guard lastDeliveredScenePhase != phase else { return }
+        lastDeliveredScenePhase = phase
         actions.onScenePhaseChanged(phase)
     }
 
-    private func handleWillResignActive() {
-        actions.onScenePhaseChanged(.inactive)
-    }
-
-    private func handleDidEnterBackground() {
-        actions.onScenePhaseChanged(.background)
-    }
-
-    private func handleDidBecomeActive() {
-        guard shouldDeliverActiveRecoveryEvent() else { return }
-        actions.onDidBecomeActive()
-    }
-
-    private func shouldDeliverActiveRecoveryEvent() -> Bool {
-        let now = Date.timeIntervalSinceReferenceDate
-        guard now - lastActiveRecoveryEventAt > 0.35 else { return false }
-        lastActiveRecoveryEventAt = now
-        return true
+    private var currentApplicationScenePhase: ScenePhase {
+        switch UIApplication.shared.applicationState {
+        case .active:
+            .active
+        case .background:
+            .background
+        default:
+            .inactive
+        }
     }
 }
 
