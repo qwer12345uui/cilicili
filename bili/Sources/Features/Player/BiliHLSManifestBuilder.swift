@@ -36,13 +36,20 @@ enum BiliHLSManifestBuilder {
         includesAlternateVideoRenditions: Bool = true,
         onRemoteFailure: HLSRemoteFailureHandler? = nil
     ) async throws -> BiliHLSPlaybackManifest {
+        if source.playbackContentMode == .audioOnly {
+            return try await makeAudioOnlyManifest(
+                source: source,
+                shouldValidateHardwareDecoding: shouldValidateHardwareDecoding,
+                onRemoteFailure: onRemoteFailure
+            )
+        }
         guard let videoURL = source.videoURL else {
             PlayerMetricsLog.logger.error("hlsManifestRejected reason=missingVideoURL")
             throw BiliHLSManifestBuilderError.missingVideoURL
         }
         guard let audioURL = source.audioURL else {
             return try await makeProgressiveManifest(
-                videoURL: videoURL,
+                mediaURL: videoURL,
                 source: source,
                 shouldValidateHardwareDecoding: shouldValidateHardwareDecoding
             )
@@ -104,6 +111,61 @@ enum BiliHLSManifestBuilder {
         )
     }
 
+    private static func makeAudioOnlyManifest(
+        source: PlayerStreamSource,
+        shouldValidateHardwareDecoding: Bool,
+        onRemoteFailure: HLSRemoteFailureHandler?
+    ) async throws -> BiliHLSPlaybackManifest {
+        guard let audioURL = source.audioURL else {
+            PlayerMetricsLog.logger.error("hlsManifestRejected reason=missingAudioURL")
+            throw BiliHLSManifestBuilderError.missingAudioURL
+        }
+        if shouldValidateHardwareDecoding {
+            try validateHardwareDecoding(for: source)
+        }
+
+        guard let audioStream = source.audioStream,
+              audioStream.segmentBase?.indexByteRange != nil
+        else {
+            return try await makeProgressiveManifest(
+                mediaURL: audioURL,
+                source: source,
+                shouldValidateHardwareDecoding: false
+            )
+        }
+
+        let headers = source.httpHeaders
+        do {
+            let bridge = try await LocalHLSBridge.makeAudioOnly(
+                audioTrack: HLSBridgeTrack(
+                    url: audioURL,
+                    fallbackURLs: audioStream.fallbackPlayURLs(
+                        cdnPreference: source.cdnPreference,
+                        selectedURL: audioURL
+                    ),
+                    stream: audioStream,
+                    mediaType: .audio
+                ),
+                durationHint: source.durationHint,
+                headers: headers,
+                metricsID: source.metricsID,
+                onRemoteFailure: onRemoteFailure
+            )
+            return BiliHLSPlaybackManifest(
+                masterPlaylistURL: bridge.masterPlaylistURL,
+                bridge: bridge,
+                progressiveLoader: nil,
+                headers: headers,
+                mediaTimeOffset: bridge.mediaTimeOffset
+            )
+        } catch {
+            PlayerMetricsLog.logger.error(
+                "hlsAudioOnlyManifestFailed error=\(error.localizedDescription, privacy: .public)"
+            )
+            throw BiliHLSManifestBuilderError.manifestGenerationFailed(error.localizedDescription)
+        }
+    }
+
     static func httpHeaders(referer: String, cookieHeader: String? = nil) -> [String: String] {
         var headers = [
             "User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 26_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.0 Mobile/15E148 Safari/604.1",
@@ -119,7 +181,7 @@ enum BiliHLSManifestBuilder {
     }
 
     private static func makeProgressiveManifest(
-        videoURL: URL,
+        mediaURL: URL,
         source: PlayerStreamSource,
         shouldValidateHardwareDecoding: Bool = true
     ) async throws -> BiliHLSPlaybackManifest {
@@ -127,7 +189,7 @@ enum BiliHLSManifestBuilder {
             try validateHardwareDecoding(for: source)
         }
         let headers = source.httpHeaders
-        let loader = BiliHeaderResourceLoaderDelegate(originalURL: videoURL, headers: headers)
+        let loader = BiliHeaderResourceLoaderDelegate(originalURL: mediaURL, headers: headers)
         return BiliHLSPlaybackManifest(
             masterPlaylistURL: loader.assetURL,
             bridge: nil,
@@ -138,23 +200,25 @@ enum BiliHLSManifestBuilder {
     }
 
     private static func validateHardwareDecoding(for source: PlayerStreamSource) throws {
-        if let videoStream = source.videoStream {
-            guard videoStream.isHardwareDecodingCompatibleVideo else {
-                PlayerMetricsLog.logger.error(
-                    "hlsManifestRejected media=video codec=\(videoStream.codecs ?? "-", privacy: .public) codecid=\(videoStream.codecid ?? -1, privacy: .public)"
-                )
+        if source.playbackContentMode == .video {
+            if let videoStream = source.videoStream {
+                guard videoStream.isHardwareDecodingCompatibleVideo else {
+                    PlayerMetricsLog.logger.error(
+                        "hlsManifestRejected media=video codec=\(videoStream.codecs ?? "-", privacy: .public) codecid=\(videoStream.codecid ?? -1, privacy: .public)"
+                    )
+                    throw BiliHLSManifestBuilderError.unsupportedCodec
+                }
+            } else if source.audioURL != nil {
+                PlayerMetricsLog.logger.error("hlsManifestRejected media=video codec=missing")
                 throw BiliHLSManifestBuilderError.unsupportedCodec
             }
-        } else if source.audioURL != nil {
-            PlayerMetricsLog.logger.error("hlsManifestRejected media=video codec=missing")
-            throw BiliHLSManifestBuilderError.unsupportedCodec
-        }
-        for rendition in source.alternateVideoRenditions {
-            guard rendition.videoStream.isHardwareDecodingCompatibleVideo else {
-                PlayerMetricsLog.logger.error(
-                    "hlsManifestRejected media=alternateVideo codec=\(rendition.videoStream.codecs ?? "-", privacy: .public) codecid=\(rendition.videoStream.codecid ?? -1, privacy: .public)"
-                )
-                throw BiliHLSManifestBuilderError.unsupportedCodec
+            for rendition in source.alternateVideoRenditions {
+                guard rendition.videoStream.isHardwareDecodingCompatibleVideo else {
+                    PlayerMetricsLog.logger.error(
+                        "hlsManifestRejected media=alternateVideo codec=\(rendition.videoStream.codecs ?? "-", privacy: .public) codecid=\(rendition.videoStream.codecid ?? -1, privacy: .public)"
+                    )
+                    throw BiliHLSManifestBuilderError.unsupportedCodec
+                }
             }
         }
 

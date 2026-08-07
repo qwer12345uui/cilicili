@@ -51,6 +51,7 @@ struct CommentAvatar: View {
 
 struct CommentAuthorIdentity: View {
     @Environment(\.commentContentOwnerMID) private var contentOwnerMID
+    @Environment(\.appThemeTintColor) private var appTintColor
 
     let name: String
     let owner: VideoOwner?
@@ -67,7 +68,7 @@ struct CommentAuthorIdentity: View {
                 .lineLimit(1)
 
             if showsUPBadge {
-                BilibiliUPBadge(size: 13)
+                BilibiliUPBadge(size: 16, color: appTintColor)
                     .alignmentGuide(.firstTextBaseline) { dimensions in
                         dimensions[.bottom] - 3
                     }

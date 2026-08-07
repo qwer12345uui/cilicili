@@ -4,6 +4,7 @@ import Foundation
 struct PlayerSurfaceSnapshot: Equatable {
     var isPlaying = false
     var canSeek = false
+    var duration: TimeInterval?
     var playbackRate: BiliPlaybackRate = .x10
     var isPreparing = true
     var isBuffering = false
@@ -15,12 +16,14 @@ struct PlayerSurfaceSnapshot: Equatable {
     var isPictureInPictureSupported = false
     var isPictureInPictureActive = false
     var usesNativePlaybackControls = false
+    var showsExplicitPlaybackStartControl = false
 
     @MainActor
     init(viewModel: PlayerStateViewModel? = nil) {
         guard let viewModel else { return }
         isPlaying = viewModel.isPlaying
         canSeek = viewModel.canSeek
+        duration = viewModel.duration
         playbackRate = viewModel.playbackRate
         isPreparing = viewModel.isPreparing
         isBuffering = viewModel.isBuffering
@@ -32,6 +35,7 @@ struct PlayerSurfaceSnapshot: Equatable {
         isPictureInPictureSupported = viewModel.isPictureInPictureSupported
         isPictureInPictureActive = viewModel.isPictureInPictureActive
         usesNativePlaybackControls = viewModel.usesNativePlaybackControls
+        showsExplicitPlaybackStartControl = viewModel.showsExplicitPlaybackStartControl
     }
 }
 
@@ -50,6 +54,7 @@ final class PlayerSurfaceStateModel: ObservableObject {
 
     var isPlaying: Bool { snapshot.isPlaying }
     var canSeek: Bool { snapshot.canSeek }
+    var duration: TimeInterval? { snapshot.duration }
     var playbackRate: BiliPlaybackRate { snapshot.playbackRate }
     var isPreparing: Bool { snapshot.isPreparing }
     var isBuffering: Bool { snapshot.isBuffering }
@@ -61,6 +66,7 @@ final class PlayerSurfaceStateModel: ObservableObject {
     var isPictureInPictureSupported: Bool { snapshot.isPictureInPictureSupported }
     var isPictureInPictureActive: Bool { snapshot.isPictureInPictureActive }
     var usesNativePlaybackControls: Bool { snapshot.usesNativePlaybackControls }
+    var showsExplicitPlaybackStartControl: Bool { snapshot.showsExplicitPlaybackStartControl }
 
     func bind(viewModel: PlayerStateViewModel) {
         guard self.viewModel !== viewModel else {
@@ -87,6 +93,16 @@ final class PlayerSurfaceStateModel: ObservableObject {
             .store(in: &cancellables)
 
         viewModel.$duration
+            .removeDuplicates()
+            .sink { _ in refresh() }
+            .store(in: &cancellables)
+
+        viewModel.$isAwaitingInitialManualPlayback
+            .removeDuplicates()
+            .sink { _ in refresh() }
+            .store(in: &cancellables)
+
+        viewModel.$isAwaitingRelatedVideoReturnPlayback
             .removeDuplicates()
             .sink { _ in refresh() }
             .store(in: &cancellables)

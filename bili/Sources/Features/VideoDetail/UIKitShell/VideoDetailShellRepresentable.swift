@@ -2,8 +2,8 @@ import SwiftUI
 
 /// 把正式的 UIKit 详情页外壳 `VideoDetailShellViewController` 包回 SwiftUI。
 ///
-/// binding 与回调从 SwiftUI 侧透传，弹窗仍由现有 SwiftUI sheet 承载（挂在
-/// 外层 `VideoDetailView`），UIKit 容器只负责通过 binding 置位触发。
+/// binding 与内容区回调从 SwiftUI 侧透传；播放器竖屏“更多”菜单由 UIKit
+/// 外壳直接呈现，避免嵌套 HostingController 的 sheet 状态丢失。
 struct VideoDetailShellRepresentable: UIViewControllerRepresentable {
     @EnvironmentObject private var dependencies: AppDependencies
     @Environment(\.openVideoOwnerRouteAction) private var openVideoOwnerRoute
@@ -48,6 +48,6 @@ struct VideoDetailShellRepresentable: UIViewControllerRepresentable {
         _ uiViewController: VideoDetailShellViewController,
         coordinator _: Void
     ) {
-        uiViewController.releaseSystemBackGestureOwnership()
+        uiViewController.prepareForDismantle()
     }
 }

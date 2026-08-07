@@ -4,6 +4,7 @@ import UIKit
 
 struct BiliPlayerLifecycleActions {
     let onAppear: () -> Void
+    let onPlayerChanged: () -> Void
     let onScenePhaseChanged: (ScenePhase) -> Void
     let onDisappear: () -> Void
     let onFullscreenActiveChanged: () -> Void

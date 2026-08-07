@@ -128,7 +128,16 @@ private enum PlayerPerformanceOverlayLiveDiagnosticsRowBuilder {
 
         append(&rows, id: "video", title: "视频", value: nonEmpty(diagnosticsStore.videoTitle))
         append(&rows, id: "quality", title: "清晰度", value: variant.map(variantTitle) ?? "未选择")
-        append(&rows, id: "request", title: "请求流", value: requestedStreamTitle(for: variant))
+        append(
+            &rows,
+            id: "request",
+            title: "请求流",
+            value: requestedStreamTitle(
+                for: variant,
+                playbackContentMode: playerViewModel?.playbackContentMode ?? .video,
+                requestedAudioStream: playerViewModel?.requestedAudioStream
+            )
+        )
         append(&rows, id: "playurl", title: "取流", value: playURLTitle(for: diagnosticsStore), style: .secondary)
 
         guard let playerViewModel else {
@@ -137,6 +146,7 @@ private enum PlayerPerformanceOverlayLiveDiagnosticsRowBuilder {
         }
 
         let diagnostics = playerViewModel.engineDiagnostics
+        append(&rows, id: "content-mode", title: "模式", value: diagnostics.playbackContentMode.diagnosticTitle)
         append(&rows, id: "state", title: "状态", value: PlaybackNetworkPlayerDiagnosticSnapshot.playerStateTitle(playerViewModel))
         append(&rows, id: "phase", title: "阶段", value: playerViewModel.playbackPhase.diagnosticTitle, style: phaseStyle(playerViewModel.playbackPhase))
         append(&rows, id: "engine", title: "引擎", value: diagnostics.engineName)
@@ -245,8 +255,23 @@ private enum PlayerPerformanceOverlayLiveDiagnosticsRowBuilder {
         return parts.joined(separator: " · ")
     }
 
-    private static func requestedStreamTitle(for variant: PlayVariant?) -> String {
+    private static func requestedStreamTitle(
+        for variant: PlayVariant?,
+        playbackContentMode: PlayerPlaybackContentMode,
+        requestedAudioStream: DASHStream?
+    ) -> String {
         guard let variant else { return "未获取" }
+        if playbackContentMode == .audioOnly {
+            let audioStream = requestedAudioStream ?? variant.audioStream
+            var parts = ["仅音频"]
+            if let codec = PlaybackNetworkDiagnosticFormat.nilIfEmpty(audioStream?.codecLabel) {
+                parts.append(codec)
+            }
+            if let bandwidth = audioStream?.bandwidth, bandwidth > 0 {
+                parts.append(String(format: "%.2f Mbps", Double(bandwidth) / 1_000_000))
+            }
+            return parts.joined(separator: " · ")
+        }
         var parts = [
             dynamicRangeTitle(variant.dynamicRange),
             PlaybackNetworkDiagnosticFormat.nilIfEmpty(variant.codec) ?? "codec未知",
@@ -261,14 +286,21 @@ private enum PlayerPerformanceOverlayLiveDiagnosticsRowBuilder {
     }
 
     private static func playURLTitle(for diagnosticsStore: VideoDetailNetworkDiagnosticsRenderStore) -> String {
-        [
+        return [
             PlaybackNetworkDiagnosticFormat.playURLSourceTitle(diagnosticsStore.lastPlayURLSource),
             PlaybackNetworkDiagnosticFormat.formattedMilliseconds(diagnosticsStore.playURLElapsedMilliseconds)
         ].joined(separator: " · ")
     }
 
     private static func actualStreamTitle(for diagnostics: PlayerEngineDiagnostics) -> String {
-        [
+        if diagnostics.playbackContentMode == .audioOnly {
+            var parts = [PlaybackNetworkDiagnosticFormat.nilIfEmpty(diagnostics.codec) ?? "codec未知"]
+            if let bandwidth = diagnostics.bandwidth, bandwidth > 0 {
+                parts.append(String(format: "%.2f Mbps", Double(bandwidth) / 1_000_000))
+            }
+            return parts.joined(separator: " · ")
+        }
+        return [
             diagnostics.renderedDynamicRangeTitle,
             PlaybackNetworkDiagnosticFormat.nilIfEmpty(diagnostics.codec) ?? "codec未知",
             PlaybackNetworkDiagnosticFormat.nilIfEmpty(diagnostics.resolution) ?? "分辨率未知",
@@ -291,6 +323,12 @@ private enum PlayerPerformanceOverlayLiveDiagnosticsRowBuilder {
     }
 
     private static func codecIdentifierTitle(for diagnostics: PlayerEngineDiagnostics) -> String {
+        if diagnostics.playbackContentMode == .audioOnly {
+            return codecIdentifierText(
+                diagnostics.audioCodecIdentifier,
+                codecid: diagnostics.audioCodecid
+            ) ?? "A 未知"
+        }
         let video = codecIdentifierText(diagnostics.videoCodecIdentifier, codecid: diagnostics.videoCodecid)
             ?? "未知"
         guard let audio = codecIdentifierText(diagnostics.audioCodecIdentifier, codecid: diagnostics.audioCodecid) else {

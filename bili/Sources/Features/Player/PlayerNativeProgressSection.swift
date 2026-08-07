@@ -2,7 +2,7 @@ import SwiftUI
 
 struct PlayerNativeProgressSection: View {
     let metrics: PlayerNativeControlMetrics
-    @ObservedObject var clock: PlayerPlaybackClock
+    let clock: PlayerPlaybackClock
     let canSeek: Bool
     let sliderVisualScale: CGFloat
     let onScrubStart: (Double) -> Void

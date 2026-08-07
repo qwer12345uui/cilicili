@@ -35,7 +35,8 @@ extension VideoDetailViewModel {
             resumeCandidate: startupPreparation.resumeCandidate,
             resumeTime: startupPreparation.resumeTime,
             playbackRate: startupPreparation.playbackRate,
-            shouldAutoplay: startupPreparation.shouldAutoplay
+            shouldAutoplay: startupPreparation.shouldAutoplay,
+            playbackHandoffSource: startupPreparation.playbackHandoffSource
         )
         signpostMessage = "bvid=\(detail.bvid) ready autoplay=\(startupPreparation.shouldAutoplay)"
     }

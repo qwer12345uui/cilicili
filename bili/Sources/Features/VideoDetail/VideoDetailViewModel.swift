@@ -39,6 +39,28 @@ final class VideoDetailViewModel: ObservableObject {
     @Published var isSupplementingPlayQualities = false { didSet { scheduleRenderStoreSync(.playback) } }
     @Published var isSwitchingPlayQuality = false { didSet { scheduleRenderStoreSync(.playback) } }
     @Published var pendingPlayVariantID: String? { didSet { scheduleRenderStoreSync(.playback) } }
+    @Published var playbackContentMode: PlayerPlaybackContentMode = .video {
+        didSet { scheduleRenderStoreSync([.playback, .networkDiagnostics, .danmaku]) }
+    }
+    @Published var isSwitchingVideoListenMode = false {
+        didSet { scheduleRenderStoreSync(.playback) }
+    }
+    @Published var videoListenAudioVariants: [VideoListenAudioVariant] = []
+    @Published var selectedVideoListenAudioPreferenceKey: String?
+    var automaticVideoListenAudioVariantID: String?
+    var failedVideoListenAudioVariantIDs = Set<String>()
+    var pendingVideoListenPlaybackIntent: Bool?
+    @Published var videoListenPgcSeasonInfo: PgcSeasonInfo?
+    var videoListenPgcSeasonID: Int?
+    @Published var videoListenQueueSession: VideoListenQueueSession
+    var videoListenQueueTask: Task<Void, Never>?
+    var videoListenQueueTaskGeneration = 0
+    var videoListenContentSwitchTask: Task<Void, Never>?
+    @Published var videoListenSleepTimerOption: VideoListenSleepTimerOption = .off
+    @Published var videoListenSleepTimerDeadline: Date?
+    var videoListenSleepTimerTask: Task<Void, Never>?
+    let videoListenPlaybackSessionStore: VideoListenPlaybackSessionStore
+    var pendingVideoListenPlaybackSessionState: VideoListenPlaybackSessionState?
     @Published var interactionState = VideoInteractionState() {
         didSet {
             scheduleRenderStoreSync([.interaction, .description])
@@ -132,10 +154,16 @@ final class VideoDetailViewModel: ObservableObject {
         api: BiliAPIClient,
         libraryStore: LibraryStore,
         sessionStore: SessionStore,
-        sponsorBlockService: SponsorBlockService
+        sponsorBlockService: SponsorBlockService,
+        videoListenPlaybackSessionStore: VideoListenPlaybackSessionStore? = nil
     ) {
+        let resolvedVideoListenPlaybackSessionStore = videoListenPlaybackSessionStore
+            ?? VideoListenPlaybackSessionStore()
         self.detail = seedVideo
         self.selectedCID = seedVideo.historyCID ?? seedVideo.cid ?? seedVideo.pages?.first?.cid
+        self.videoListenQueueSession = VideoListenQueueSession(seedVideo: seedVideo)
+        self.videoListenPlaybackSessionStore = resolvedVideoListenPlaybackSessionStore
+        self.pendingVideoListenPlaybackSessionState = nil
         self.serviceDependencies = VideoDetailViewModelDependencies(
             api: api,
             libraryStore: libraryStore,
@@ -156,6 +184,9 @@ final class VideoDetailViewModel: ObservableObject {
     }
 
     deinit {
+        videoListenQueueTask?.cancel()
+        videoListenContentSwitchTask?.cancel()
+        videoListenSleepTimerTask?.cancel()
         cleanupStablePlaybackBeforeDeinit?()
         Self.stopPlaybackBeforeDeinit(
             playbackTransitionState: &playbackTransitionState,

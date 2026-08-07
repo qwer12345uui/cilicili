@@ -25,6 +25,7 @@ final class AVPlayerHLSBridgeEngine: PlayerRenderingEngine {
     }
 
     private let player = AVPlayer()
+    private weak var viewModel: PlayerStateViewModel?
     private var itemEndObserver: Any?
     private var itemFailedObserver: Any?
     private var itemStalledObserver: Any?
@@ -122,23 +123,25 @@ final class AVPlayerHLSBridgeEngine: PlayerRenderingEngine {
     }
 
     var diagnostics: PlayerEngineDiagnostics {
-        PlayerEngineDiagnostics(
+        let isAudioOnly = source?.playbackContentMode == .audioOnly
+        return PlayerEngineDiagnostics(
             engineName: "AVPlayer",
+            playbackContentMode: source?.playbackContentMode ?? .video,
             decodePath: .avPlayer,
             playbackPipeline: diagnosticsPlaybackPipeline,
-            codec: source?.videoStream?.codecLabel,
-            videoCodecIdentifier: source?.videoStream?.codecs,
+            codec: isAudioOnly ? source?.audioStream?.codecLabel : source?.videoStream?.codecLabel,
+            videoCodecIdentifier: isAudioOnly ? nil : source?.videoStream?.codecs,
             audioCodecIdentifier: source?.audioStream?.codecs,
-            videoCodecid: source?.videoStream?.codecid,
+            videoCodecid: isAudioOnly ? nil : source?.videoStream?.codecid,
             audioCodecid: source?.audioStream?.codecid,
-            resolution: source?.videoStream?.resolutionLabel,
-            frameRate: source?.videoStream?.displayFrameRate,
-            bandwidth: source?.videoStream?.bandwidth,
-            dynamicRange: source?.dynamicRange ?? .sdr,
+            resolution: isAudioOnly ? nil : source?.videoStream?.resolutionLabel,
+            frameRate: isAudioOnly ? nil : source?.videoStream?.displayFrameRate,
+            bandwidth: isAudioOnly ? source?.audioStream?.bandwidth : source?.videoStream?.bandwidth,
+            dynamicRange: isAudioOnly ? .sdr : (source?.dynamicRange ?? .sdr),
             isDASH: source?.audioURL != nil,
             usesLocalHLSBridge: hlsBridge != nil || liveHLSProxy != nil,
             localPlaylistURL: diagnosticsLocalPlaylistURL,
-            sourceVideoHost: source?.videoURL?.host,
+            sourceVideoHost: isAudioOnly ? nil : source?.videoURL?.host,
             sourceAudioHost: source?.audioURL?.host,
             cellularBiliTrafficCompatibility: CellularBiliTrafficCompatibilityExperiment.currentState,
             hlsVideoVariantCount: hlsBridge?.videoVariantCount ?? 0,
@@ -147,8 +150,12 @@ final class AVPlayerHLSBridgeEngine: PlayerRenderingEngine {
             preferredForwardBufferDuration: player.currentItem?.preferredForwardBufferDuration,
             maxBufferDuration: nil,
             asynchronousDecompressionEnabled: false,
-            hardwareDecodeRequested: source?.videoStream != nil || source?.audioURL != nil,
-            isHardwareDecodeCompatible: source?.videoStream?.isHardwareDecodingCompatibleVideo,
+            hardwareDecodeRequested: isAudioOnly
+                ? source?.audioStream != nil
+                : (source?.videoStream != nil || source?.audioURL != nil),
+            isHardwareDecodeCompatible: isAudioOnly
+                ? source?.audioStream?.isHardwareDecodingCompatibleAudio
+                : source?.videoStream?.isHardwareDecodingCompatibleVideo,
             environmentSummary: PlaybackEnvironment.current.diagnosticSummary,
             nativeHDRVideoLayerState: nativeDolbyVideoOverlay.stateRawValue,
             nativeHDRVideoLayerSummary: nativeDolbyVideoOverlay.diagnosticSummary
@@ -314,6 +321,10 @@ final class AVPlayerHLSBridgeEngine: PlayerRenderingEngine {
 
     @discardableResult
     func refreshVideoOutputForPlaybackRecovery() -> Bool {
+        guard source?.playbackContentMode != .audioOnly else {
+            recoverSurface()
+            return false
+        }
         guard !isStopped,
               let item = playerItem,
               player.currentItem === item
@@ -438,7 +449,9 @@ final class AVPlayerHLSBridgeEngine: PlayerRenderingEngine {
         return true
     }
 
-    func setViewModel(_: PlayerStateViewModel?) {}
+    func setViewModel(_ viewModel: PlayerStateViewModel?) {
+        self.viewModel = viewModel
+    }
 
     func setVideoGravity(_ gravity: AVLayerVideoGravity) {
         guard videoGravity != gravity else { return }
@@ -1160,6 +1173,10 @@ final class AVPlayerHLSBridgeEngine: PlayerRenderingEngine {
     }
 
     private func attachVideoOutput(to item: AVPlayerItem) {
+        guard source?.playbackContentMode != .audioOnly else {
+            videoOutput = nil
+            return
+        }
         let output = AVPlayerItemVideoOutput(pixelBufferAttributes: [
             kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA
         ])
@@ -1475,6 +1492,9 @@ final class AVPlayerHLSBridgeEngine: PlayerRenderingEngine {
     }
 
     private func deactivateAudioSessionIfPossible() {
+        guard let viewModel,
+              ActivePlaybackCoordinator.shared.isActive(viewModel)
+        else { return }
         do {
             try AVAudioSession.sharedInstance().setActive(false, options: [.notifyOthersOnDeactivation])
         } catch {
@@ -1799,7 +1819,7 @@ final class AVPlayerHLSBridgeEngine: PlayerRenderingEngine {
                 layer: .local,
                 category: .cancelled,
                 statusCode: nil,
-                urlHost: source.videoURL?.host?.lowercased(),
+                urlHost: sourceFailureHost(source),
                 rangeDescription: nil,
                 underlyingDescription: error.localizedDescription
             )
@@ -1815,7 +1835,7 @@ final class AVPlayerHLSBridgeEngine: PlayerRenderingEngine {
                 layer: .remoteRange,
                 category: HLSBridgeRemoteFailure.reason(for: urlError).category,
                 statusCode: nil,
-                urlHost: source.videoURL?.host?.lowercased(),
+                urlHost: sourceFailureHost(source),
                 rangeDescription: nil,
                 underlyingDescription: urlError.localizedDescription
             )
@@ -1823,7 +1843,7 @@ final class AVPlayerHLSBridgeEngine: PlayerRenderingEngine {
         let category: HLSBridgeRemoteFailureCategory
         if let engineError = error as? PlayerEngineError {
             switch engineError {
-            case .missingVideoURL:
+            case .missingVideoURL, .missingAudioURL:
                 category = .invalidResponse
             case .unsupportedMedia:
                 category = .hardwareDecodeRejected
@@ -1835,10 +1855,17 @@ final class AVPlayerHLSBridgeEngine: PlayerRenderingEngine {
             layer: .local,
             category: category,
             statusCode: nil,
-            urlHost: source.videoURL?.host?.lowercased(),
+            urlHost: sourceFailureHost(source),
             rangeDescription: nil,
             underlyingDescription: error.localizedDescription
         )
+    }
+
+    private func sourceFailureHost(_ source: PlayerStreamSource) -> String? {
+        let sourceURL = source.playbackContentMode == .audioOnly
+            ? source.audioURL
+            : source.videoURL
+        return sourceURL?.host?.lowercased()
     }
 
     private func shouldAttemptSameSourceRecovery(item: AVPlayerItem, errorMessage: String?) -> Bool {
@@ -2241,6 +2268,7 @@ final class AVPlayerHLSBridgeEngine: PlayerRenderingEngine {
     }
 
     private var shouldReportRenderedVideoTimeForSeekRecovery: Bool {
+        guard source?.playbackContentMode != .audioOnly else { return false }
         if isPerformingSeek || isSeekProtectionActive {
             return true
         }
@@ -2534,8 +2562,22 @@ final class AVPlayerHLSBridgeEngine: PlayerRenderingEngine {
         currentTime: TimeInterval? = nil,
         allowsNativeHDRVideoOverlay: Bool = false
     ) {
-        guard !isStopped, player.currentItem != nil else { return }
+        guard !isStopped, let item = player.currentItem else { return }
         guard !didReportFirstFrame else { return }
+        if source?.playbackContentMode == .audioOnly {
+            guard item.status == .readyToPlay,
+                  player.rate > 0 || player.timeControlStatus == .playing
+            else { return }
+            didReportFirstFrame = true
+            cancelTerminalStallWatchdog()
+            cancelFirstFrameWatchdog()
+            removePeriodicTimeObserver()
+            let resolvedTime = currentTime ?? displayTime(fromPlayerTime: player.currentTime().seconds)
+            onFirstFrame?(resolvedTime.isFinite ? max(resolvedTime, 0) : 0)
+            restoreSteadyStateBufferingAfterFirstFrame()
+            scheduleStartupBitRateLiftIfNeeded()
+            return
+        }
         let isBaseLayerReady = playerViewController?.isReadyForDisplay == true
             || playerLayer?.isReadyForDisplay == true
         let isNativeHDRLayerReady = allowsNativeHDRVideoOverlay && nativeDolbyVideoOverlay.isReadyForDisplay
@@ -2789,12 +2831,42 @@ final class AVPlayerHLSBridgeEngine: PlayerRenderingEngine {
         source: PlayerStreamSource,
         onRemoteFailure: HLSRemoteFailureHandler? = nil
     ) async throws -> PreparedPlayerItem {
-        guard let videoURL = source.videoURL else {
-            throw PlayerEngineError.missingVideoURL
-        }
         try enforceHardwareDecodingCompatibility(for: source)
 
         let headers = source.httpHeaders
+
+        if source.playbackContentMode == .audioOnly {
+            guard let audioURL = source.audioURL else {
+                throw BiliHLSManifestBuilderError.missingAudioURL
+            }
+            if source.audioStream?.segmentBase?.indexByteRange != nil {
+                let manifest = try await BiliHLSManifestBuilder.make(
+                    source: source,
+                    shouldValidateHardwareDecoding: true,
+                    includesAlternateVideoRenditions: false,
+                    onRemoteFailure: onRemoteFailure
+                )
+                let asset = AVURLAsset(url: manifest.masterPlaylistURL)
+                let item = AVPlayerItem(asset: asset)
+                item.preferredForwardBufferDuration = PlaybackEnvironment.current.startupForwardBufferDuration
+                return PreparedPlayerItem(
+                    item: item,
+                    bridge: manifest.bridge,
+                    liveProxy: nil,
+                    assets: [asset],
+                    isDirectLiveHLS: false
+                )
+            }
+
+            let asset = AVURLAsset(url: audioURL, options: ["AVURLAssetHTTPHeaderFieldsKey": headers])
+            let item = AVPlayerItem(asset: asset)
+            item.preferredForwardBufferDuration = PlaybackEnvironment.current.startupForwardBufferDuration
+            return PreparedPlayerItem(item: item, bridge: nil, liveProxy: nil, assets: [asset], isDirectLiveHLS: false)
+        }
+
+        guard let videoURL = source.videoURL else {
+            throw PlayerEngineError.missingVideoURL
+        }
 
         if source.audioURL != nil {
             if let videoStream = source.videoStream,
@@ -2851,16 +2923,18 @@ final class AVPlayerHLSBridgeEngine: PlayerRenderingEngine {
     }
 
     private nonisolated static func enforceHardwareDecodingCompatibility(for source: PlayerStreamSource) throws {
-        if let videoStream = source.videoStream {
-            guard videoStream.isHardwareDecodingCompatibleVideo else {
-                PlayerMetricsLog.logger.error(
-                    "hardwareDecodeRejected media=video codec=\(videoStream.codecs ?? "-", privacy: .public) codecid=\(videoStream.codecid ?? -1, privacy: .public)"
-                )
+        if source.playbackContentMode == .video {
+            if let videoStream = source.videoStream {
+                guard videoStream.isHardwareDecodingCompatibleVideo else {
+                    PlayerMetricsLog.logger.error(
+                        "hardwareDecodeRejected media=video codec=\(videoStream.codecs ?? "-", privacy: .public) codecid=\(videoStream.codecid ?? -1, privacy: .public)"
+                    )
+                    throw PlayerEngineError.unsupportedMedia
+                }
+            } else if source.audioURL != nil {
+                PlayerMetricsLog.logger.error("hardwareDecodeRejected media=video codec=missing")
                 throw PlayerEngineError.unsupportedMedia
             }
-        } else if source.audioURL != nil {
-            PlayerMetricsLog.logger.error("hardwareDecodeRejected media=video codec=missing")
-            throw PlayerEngineError.unsupportedMedia
         }
 
         if let audioStream = source.audioStream,
@@ -3610,6 +3684,57 @@ struct LocalHLSBridge: Sendable {
         )
     }
 
+    nonisolated static func makeAudioOnly(
+        audioTrack: HLSBridgeTrack,
+        durationHint: TimeInterval?,
+        headers: [String: String],
+        metricsID: String? = nil,
+        onRemoteFailure: HLSRemoteFailureHandler? = nil
+    ) async throws -> LocalHLSBridge {
+        let start = CACurrentMediaTime()
+        let rendition = try await makeRendition(
+            for: audioTrack,
+            durationHint: durationHint,
+            headers: headers,
+            metricsID: metricsID
+        )
+        let server = try LocalHLSProxyServer.make(
+            headers: headers,
+            metricsID: metricsID,
+            onRemoteFailure: onRemoteFailure
+        )
+        let renderedPlaylists = renderAudioOnlyPlaylists(
+            rendition: rendition,
+            baseURL: server.baseURL
+        )
+        server.updateRoutes(renderedPlaylists.routes)
+        try await server.start()
+        let elapsedMilliseconds = PlayerMetricsLog.elapsedMilliseconds(since: start)
+        PlayerMetricsLog.logger.info(
+            "audioOnlyHLSReady elapsedMs=\(elapsedMilliseconds, format: .fixed(precision: 1), privacy: .public) routes=\(renderedPlaylists.routes.count, privacy: .public) codec=\(rendition.codec, privacy: .public)"
+        )
+        await recordManifestStage(
+            metricsID: metricsID,
+            "audioOnly=ready \(formatMilliseconds(elapsedMilliseconds)) refs=\(rendition.references.count)"
+        )
+        return LocalHLSBridge(
+            masterPlaylistURL: renderedPlaylists.masterPlaylistURL,
+            mediaTimeOffset: 0,
+            videoClockDelay: 0,
+            videoVariantCount: 0,
+            videoVariantQualities: [],
+            videoVariantDetails: [],
+            routePlanCacheState: "audioOnly",
+            serverCacheState: "miss",
+            seekPlanner: HLSBridgeSeekPlanner(
+                video: nil,
+                audio: rendition.seekMap(includeExtraSegment: false),
+                headers: headers
+            ),
+            server: server
+        )
+    }
+
     @discardableResult
     nonisolated static func prebuildRoutePlan(
         videoTrack: HLSBridgeTrack,
@@ -3955,6 +4080,34 @@ struct LocalHLSBridge: Sendable {
             )
         ]
         rendition.registerRoutes(routePrefix: "video", into: &routes)
+        return HLSBridgeRenderedPlaylists(
+            masterPlaylistURL: masterPlaylistURL,
+            routes: routes
+        )
+    }
+
+    nonisolated static func renderAudioOnlyPlaylists(
+        rendition: HLSRendition,
+        baseURL: URL
+    ) -> HLSBridgeRenderedPlaylists {
+        let audioPlaylistURL = baseURL.appendingPathComponent("audio.m3u8")
+        let masterPlaylistURL = baseURL.appendingPathComponent("master.m3u8")
+        let masterPlaylist = """
+        #EXTM3U
+        #EXT-X-VERSION:7
+        #EXT-X-INDEPENDENT-SEGMENTS
+        #EXT-X-STREAM-INF:BANDWIDTH=\(rendition.bandwidth),CODECS="\(rendition.codec)"
+        \(audioPlaylistURL.absoluteString)
+        """
+
+        var routes: [String: HLSProxyRoute] = [
+            "/master.m3u8": .data(Data(masterPlaylist.utf8), contentType: "application/vnd.apple.mpegurl"),
+            "/audio.m3u8": .data(
+                Data(rendition.playlist(baseURL: baseURL, routePrefix: "audio").utf8),
+                contentType: "application/vnd.apple.mpegurl"
+            )
+        ]
+        rendition.registerRoutes(routePrefix: "audio", into: &routes)
         return HLSBridgeRenderedPlaylists(
             masterPlaylistURL: masterPlaylistURL,
             routes: routes
@@ -5289,25 +5442,26 @@ struct HLSBridgeRenderedPlaylists: Sendable {
 }
 
 private struct HLSBridgeSeekPlanner: Sendable {
-    let video: HLSBridgeSeekMap
+    let video: HLSBridgeSeekMap?
     let audio: HLSBridgeSeekMap
     let headers: [String: String]
 
     nonisolated func alignedSeekTime(near playbackTime: TimeInterval) -> TimeInterval? {
-        video.alignedSeekTime(near: playbackTime)
+        (video ?? audio).alignedSeekTime(near: playbackTime)
     }
 
     nonisolated func warm(around playbackTime: TimeInterval, metricsID: String?) async {
         guard !Task.isCancelled else { return }
         let start = CACurrentMediaTime()
-        let videoRanges = video.warmRanges(around: playbackTime)
+        let videoRanges = video?.warmRanges(around: playbackTime) ?? []
         let audioRanges = audio.warmRanges(around: playbackTime)
         guard !videoRanges.isEmpty || !audioRanges.isEmpty else { return }
 
         await withTaskGroup(of: Bool.self) { group in
             if !videoRanges.isEmpty, !Task.isCancelled {
                 group.addTask(priority: .utility) {
-                    await Self.warm(ranges: videoRanges, map: video, headers: headers)
+                    guard let video else { return false }
+                    return await Self.warm(ranges: videoRanges, map: video, headers: headers)
                 }
             }
             if !audioRanges.isEmpty, !Task.isCancelled {

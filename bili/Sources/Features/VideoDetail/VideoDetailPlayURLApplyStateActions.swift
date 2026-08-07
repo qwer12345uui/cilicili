@@ -11,6 +11,7 @@ extension VideoDetailViewModel {
 
         guard !variants.isEmpty else {
             currentPlayURLData = nil
+            clearVideoListenAudioVariants()
             playVariants = []
             selectedPlayVariant = nil
             playURLState = .failed(codecUnavailableMessage())

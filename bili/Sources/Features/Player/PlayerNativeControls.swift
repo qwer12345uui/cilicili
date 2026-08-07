@@ -1,7 +1,7 @@
 import SwiftUI
 
 struct PlayerNativePlaybackControls: View {
-    @ObservedObject var clock: PlayerPlaybackClock
+    let clock: PlayerPlaybackClock
     let metrics: PlayerNativeControlMetrics
     let layout: BiliPlayerControlLayout
     let canSeek: Bool
@@ -28,6 +28,7 @@ struct PlayerNativePlaybackControls: View {
                         onScrubEnded: actions.onScrubEnded,
                         onScrubCancelled: actions.onScrubCancelled
                     )
+                    .id(ObjectIdentifier(clock))
                 }
 
                 PlayerNativeControlButtonRow(

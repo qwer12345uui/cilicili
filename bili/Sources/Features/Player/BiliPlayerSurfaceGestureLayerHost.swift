@@ -61,6 +61,7 @@ struct BiliPlayerSurfaceGestureLayerHost<Content: View>: View {
                 seekPreviewModel.setCancellationPending(isPending)
             }
         )
+        .id(ObjectIdentifier(viewModel))
         .onDisappear {
             seekPreviewModel.endScrub()
             speedBoostActions.end(reason: .disappear)

@@ -6,8 +6,10 @@ struct BiliPlayerLifecycleActionBuilder {
     let surfaceState: PlayerSurfaceStateModel
     let playbackControlsVisibility: PlayerPlaybackControlsVisibilityModel
     let rotationTransitionSnapshotModel: PlayerRotationTransitionSnapshotModel
+    let seekTransitionSnapshotModel: PlayerRotationTransitionSnapshotModel
     let appBackgroundRecoverySnapshotModel: PlayerRotationTransitionSnapshotModel
     let speedBoostModel: PlayerSpeedBoostModel
+    let seekPreviewModel: PlayerSeekPreviewModel
     let playbackProgressCoordinator: PlayerPlaybackProgressCoordinator
     let progressReporter: PlayerPlaybackProgressReporter
     let progressContext: PlayerPlaybackProgressContext
@@ -15,10 +17,12 @@ struct BiliPlayerLifecycleActionBuilder {
     let isPictureInPictureEnabled: Bool
     let defaultPlaybackRate: Double
     let videoGravity: AVLayerVideoGravity
+    let resetPreparedScrubProgress: () -> Void
 
     var actions: BiliPlayerLifecycleActions {
         BiliPlayerLifecycleActions(
             onAppear: handleAppear,
+            onPlayerChanged: handlePlayerChange,
             onScenePhaseChanged: handleScenePhaseChange,
             onDisappear: handleDisappear,
             onFullscreenActiveChanged: handleFullscreenActiveChange,
@@ -64,6 +68,27 @@ struct BiliPlayerLifecycleActionBuilder {
         } else {
             visibilityActions.scheduleAutoHide()
         }
+    }
+
+    private func handlePlayerChange() {
+        speedBoostActions.end(reason: .playerChanged)
+        seekPreviewModel.endScrub()
+        seekTransitionSnapshotModel.release(immediate: true)
+        rotationTransitionSnapshotModel.release(immediate: true)
+        appBackgroundRecoverySnapshotModel.release(immediate: true)
+        resetPreparedScrubProgress()
+
+        surfaceState.bind(viewModel: viewModel)
+        progressReporter.start(clock: viewModel.playbackClock) { time in
+            playbackProgressCoordinator.saveProgress(time, context: progressContext)
+        }
+
+        guard !viewModel.isTerminated else { return }
+        viewModel.setPictureInPictureEnabled(isPictureInPictureEnabled)
+        if !isPictureInPictureEnabled {
+            viewModel.stopPictureInPictureIfNeeded()
+        }
+        applyVideoGravity()
     }
 
     private func handleScenePhaseChange(_ phase: ScenePhase) {

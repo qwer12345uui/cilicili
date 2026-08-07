@@ -3,7 +3,7 @@ import SwiftUI
 
 struct VideoDetailPerformanceOverlayContainer: View {
     @ObservedObject var store: VideoDetailNetworkDiagnosticsRenderStore
-    let experimentSnapshot: VideoDetailPerformanceExperimentSnapshot
+    @ObservedObject var experimentState: VideoDetailPerformanceExperimentState
     let panelWidth: CGFloat
     let maximumHeight: CGFloat
 
@@ -11,7 +11,7 @@ struct VideoDetailPerformanceOverlayContainer: View {
         PlayerPerformanceOverlay(
             diagnosticsStore: store,
             playerViewModel: store.playerViewModel,
-            experimentSnapshot: experimentSnapshot,
+            experimentSnapshot: experimentState.snapshot,
             panelWidth: panelWidth,
             maximumHeight: maximumHeight
         )

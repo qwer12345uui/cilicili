@@ -1,7 +1,10 @@
 import Foundation
 
 extension VideoDetailViewModel {
-    func beginPlaybackTransition(from player: PlayerStateViewModel?) {
+    func beginPlaybackTransition(
+        from player: PlayerStateViewModel?,
+        keepsPlaybackActive: Bool = false
+    ) {
         guard !isPlaybackInvalidatedForNavigation else {
             clearPlaybackTransitionPlayer()
             return
@@ -23,7 +26,9 @@ extension VideoDetailViewModel {
         }
         let snapshot = player.makePlaybackTransitionSnapshot()
         let fallbackCoverURL = playbackTransitionCoverURL()
-        player.prepareForVisualPlaybackTransition()
+        if !keepsPlaybackActive {
+            player.prepareForVisualPlaybackTransition()
+        }
         playbackTransitionPlayerViewModel = player
         playbackTransitionSnapshot = snapshot
         playbackTransitionFallbackCoverURL = fallbackCoverURL
@@ -32,7 +37,7 @@ extension VideoDetailViewModel {
             .qualitySupplement,
             metricsID: detail.bvid,
             title: detail.title,
-            message: "stagedStartup transitionHold snapshot=\(snapshot != nil ? "frame" : "none")"
+            message: "stagedStartup transitionHold snapshot=\(snapshot != nil ? "frame" : "none") audioHandoff=\(keepsPlaybackActive)"
         )
         releasePlaybackTransitionPlayer(after: Self.playbackTransitionMaximumRetainNanoseconds)
     }

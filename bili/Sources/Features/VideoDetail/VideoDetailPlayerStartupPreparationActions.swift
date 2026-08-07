@@ -4,7 +4,8 @@ extension VideoDetailViewModel {
     func stablePlayerStartupPreparation(
         resumeTimeOverride: TimeInterval?,
         shouldResumePlayback: Bool?,
-        playbackRateOverride: BiliPlaybackRate?
+        playbackRateOverride: BiliPlaybackRate?,
+        usesSeamlessPlaybackHandoff: Bool
     ) -> StablePlayerStartupPreparation {
         let previousPlayer = stablePlayerViewModel
         let localResumeTime = currentPlaybackResumeTime()
@@ -14,6 +15,7 @@ extension VideoDetailViewModel {
         )
         return StablePlayerStartupPreparation(
             previousPlayer: previousPlayer,
+            playbackHandoffSource: usesSeamlessPlaybackHandoff ? previousPlayer : nil,
             resumeCandidate: resumeCandidate,
             resumeTime: resumeCandidate.time,
             shouldAutoplay: shouldResumePlayback ?? currentPlaybackIntent(),
@@ -23,10 +25,14 @@ extension VideoDetailViewModel {
 
     func preparePreviousStablePlayerForReplacement(
         _ previousPlayer: PlayerStateViewModel?,
-        preservesPreviousPlayerUntilFirstFrame: Bool
+        preservesPreviousPlayerUntilFirstFrame: Bool,
+        keepsPreviousPlaybackActive: Bool
     ) {
         if preservesPreviousPlayerUntilFirstFrame {
-            beginPlaybackTransition(from: previousPlayer)
+            beginPlaybackTransition(
+                from: previousPlayer,
+                keepsPlaybackActive: keepsPreviousPlaybackActive
+            )
         } else {
             previousPlayer?.stop(reason: .replacedByAnotherPlayer)
             clearPlaybackTransitionPlayer()

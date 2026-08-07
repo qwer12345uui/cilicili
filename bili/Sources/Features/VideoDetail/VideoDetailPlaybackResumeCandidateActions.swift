@@ -49,6 +49,9 @@ extension VideoDetailViewModel {
     }
 
     func currentPlaybackIntent() -> Bool {
+        if let pendingVideoListenPlaybackIntent {
+            return pendingVideoListenPlaybackIntent
+        }
         guard let player = stablePlayerViewModel else {
             return libraryStore.videoDetailAutoplayEnabled
         }

@@ -6,26 +6,37 @@ extension VideoDetailViewModel {
         alternateVideoRenditions: [PlayerVideoRenditionSource],
         resumeTime: TimeInterval
     ) -> PlayerStateViewModel {
-        PlayerStateViewModel(
-            videoURL: variant.videoURL,
-            audioURL: variant.audioURL,
-            videoStream: variant.videoStream,
-            audioStream: variant.audioStream,
-            alternateVideoRenditions: alternateVideoRenditions,
-            title: detail.title,
+        let isAudioOnly = playbackContentMode == .audioOnly
+        let listenAudioVariant = isAudioOnly ? resolvedVideoListenAudioVariant : nil
+        let playbackTitle: String = {
+            guard isAudioOnly,
+                  (detail.pages?.count ?? 0) > 1,
+                  let part = selectedPage?.part?.trimmingCharacters(in: .whitespacesAndNewlines),
+                  !part.isEmpty
+            else { return detail.title }
+            return part
+        }()
+        return PlayerStateViewModel(
+            videoURL: isAudioOnly ? nil : variant.videoURL,
+            audioURL: listenAudioVariant?.url ?? variant.audioURL,
+            videoStream: isAudioOnly ? nil : variant.videoStream,
+            audioStream: listenAudioVariant?.stream ?? variant.audioStream,
+            alternateVideoRenditions: isAudioOnly ? [] : alternateVideoRenditions,
+            title: playbackTitle,
             authorName: detail.owner?.name,
             referer: "https://www.bilibili.com/video/\(detail.bvid)",
-            durationHint: detail.duration.map(TimeInterval.init),
+            durationHint: resumeDurationHint(for: selectedCID),
             resumeTime: resumeTime,
             startupResumePolicy: resumeTime > 0.25 ? .immediate : .deferred,
-            dynamicRange: variant.dynamicRange,
+            dynamicRange: isAudioOnly ? .sdr : variant.dynamicRange,
             cdnPreference: libraryStore.effectivePlaybackCDNPreference,
             metricsID: detail.bvid,
             httpHeaders: BiliHLSManifestBuilder.httpHeaders(
                 referer: "https://www.bilibili.com/video/\(detail.bvid)",
                 cookieHeader: sessionStore.cookieHeader()
             ),
-            artworkURL: playbackTransitionCoverURL()
+            artworkURL: playbackTransitionCoverURL(),
+            playbackContentMode: playbackContentMode
         )
     }
 
@@ -52,6 +63,12 @@ extension VideoDetailViewModel {
                   let variant = self.selectedPlayVariant
             else { return }
             self.finishPlaybackStartupWaiters(with: .failed)
+            if self.restoreCompatibleVideoListenAudioAfterFailure(message) {
+                return
+            }
+            if self.restoreVideoAfterVideoListenFailure(message) {
+                return
+            }
             self.handlePlaybackError(
                 message ?? PlayerEngineError.unsupportedMedia.localizedDescription,
                 reason: reason,
@@ -70,10 +87,40 @@ extension VideoDetailViewModel {
                   let playerViewModel,
                   self.stablePlayerViewModel === playerViewModel
             else { return }
+            self.isSwitchingVideoListenMode = false
             self.finishPlaybackStartupWaiters(with: .firstFrame)
             self.clearTransientPlaybackRecoveryMessageAfterFirstFrame()
             self.releasePlaybackTransitionPlayer(after: Self.playbackTransitionReleaseDelayNanoseconds)
+            self.updateVideoListenRemoteNavigationAvailability(for: playerViewModel)
+            self.scheduleVideoListenContinuationPreload()
         }
+        playerViewModel.onPlaybackEnded = { [weak self, weak playerViewModel] in
+            guard let self,
+                  let playerViewModel,
+                  self.stablePlayerViewModel === playerViewModel
+            else { return }
+            self.handleVideoListenPlaybackEnded()
+        }
+        playerViewModel.onNextTrackRequested = { [weak self, weak playerViewModel] in
+            guard let self,
+                  let playerViewModel,
+                  self.stablePlayerViewModel === playerViewModel
+            else { return }
+            self.advanceVideoListenPlayback(direction: .next, reason: .systemControl)
+        }
+        playerViewModel.onPreviousTrackRequested = { [weak self, weak playerViewModel] in
+            guard let self,
+                  let playerViewModel,
+                  self.stablePlayerViewModel === playerViewModel
+            else { return }
+            if playerViewModel.currentTime > 5 {
+                playerViewModel.seek(to: 0)
+                playerViewModel.play()
+                return
+            }
+            self.advanceVideoListenPlayback(direction: .previous, reason: .systemControl)
+        }
+        updateVideoListenRemoteNavigationAvailability(for: playerViewModel)
     }
 
     private func clearTransientPlaybackRecoveryMessageAfterFirstFrame() {

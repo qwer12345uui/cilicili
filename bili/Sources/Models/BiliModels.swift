@@ -1907,6 +1907,28 @@ nonisolated struct PlayURLData: Decodable, Sendable {
         return variants
     }
 
+    nonisolated func videoListenAudioVariants(
+        cdnPreference: PlaybackCDNPreference,
+        prefersBackupAudioURL: Bool = PlaybackAudioURLPolicy.stored()
+    ) -> [VideoListenAudioVariant] {
+        var seen = Set<String>()
+        return (dash?.audio ?? [])
+            .filter(\.isHardwareDecodingCompatibleAudio)
+            .compactMap { stream -> VideoListenAudioVariant? in
+                let preference: PlaybackCDNPreference = prefersBackupAudioURL ? .backupURL : cdnPreference
+                guard let url = stream.playURL(cdnPreference: preference) else { return nil }
+                let variant = VideoListenAudioVariant(stream: stream, url: url)
+                guard seen.insert(variant.id).inserted else { return nil }
+                return variant
+            }
+            .sorted { lhs, rhs in
+                if lhs.kind.sortRank != rhs.kind.sortRank {
+                    return lhs.kind.sortRank < rhs.kind.sortRank
+                }
+                return (lhs.stream.bandwidth ?? 0) > (rhs.stream.bandwidth ?? 0)
+            }
+    }
+
     nonisolated private func appendAdvertisedLockedVariants(
         orderedQualities: [Int],
         supportByQuality: [Int: PlaySupportFormat],
@@ -1988,6 +2010,102 @@ nonisolated struct PlayURLData: Decodable, Sendable {
         secondary?.forEach(append)
         primary?.forEach(append)
         return result.isEmpty ? nil : result
+    }
+}
+
+nonisolated enum VideoListenAudioKind: String, Hashable, Sendable {
+    case lossless
+    case dolby
+    case aac
+    case other
+
+    var sortRank: Int {
+        switch self {
+        case .lossless: return 0
+        case .dolby: return 1
+        case .aac: return 2
+        case .other: return 3
+        }
+    }
+}
+
+nonisolated struct VideoListenAudioVariant: Identifiable, Hashable, Sendable {
+    let stream: DASHStream
+    let url: URL
+
+    var kind: VideoListenAudioKind {
+        if stream.isLosslessAudioCodec {
+            return .lossless
+        }
+        if stream.isDolbyCompatibleAudioCodec {
+            return .dolby
+        }
+        if stream.isAACAudioCodec {
+            return .aac
+        }
+        return .other
+    }
+
+    var preferenceKey: String {
+        let codec = stream.codecs?.lowercased() ?? "unknown"
+        if let streamID = stream.id, streamID > 0 {
+            return "stream-\(streamID)-\(codec)"
+        }
+        return "codec-\(codec)"
+    }
+
+    var id: String { preferenceKey }
+
+    var title: String {
+        switch kind {
+        case .lossless:
+            return stream.codecLabel ?? "无损音频"
+        case .dolby:
+            return "杜比音频"
+        case .aac:
+            return "AAC"
+        case .other:
+            return stream.codecLabel ?? "音频"
+        }
+    }
+
+    var subtitle: String {
+        [bitrateTitle, stream.codecs]
+            .compactMap { value in
+                let trimmed = value?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+                return trimmed.isEmpty ? nil : trimmed
+            }
+            .joined(separator: " · ")
+    }
+
+    var systemImage: String {
+        switch kind {
+        case .lossless:
+            return "waveform.circle"
+        case .dolby:
+            return "dot.radiowaves.left.and.right"
+        case .aac:
+            return "waveform"
+        case .other:
+            return "speaker.wave.2"
+        }
+    }
+
+    var diagnosticSummary: String {
+        [title, bitrateTitle, stream.codecs]
+            .compactMap { value in
+                let trimmed = value?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+                return trimmed.isEmpty ? nil : trimmed
+            }
+            .joined(separator: " · ")
+    }
+
+    private var bitrateTitle: String? {
+        guard let bandwidth = stream.bandwidth, bandwidth > 0 else { return nil }
+        if bandwidth >= 1_000_000 {
+            return String(format: "%.2f Mbps", Double(bandwidth) / 1_000_000)
+        }
+        return "\(Int((Double(bandwidth) / 1_000).rounded())) kbps"
     }
 }
 
@@ -2541,6 +2659,12 @@ nonisolated struct DASHStream: Decodable, Hashable, Sendable {
         return lowered.contains("ec-3") || lowered.contains("ac-3")
     }
 
+    nonisolated var isLosslessAudioCodec: Bool {
+        guard let codecs, !codecs.isEmpty else { return false }
+        let lowered = codecs.lowercased()
+        return lowered.contains("flac") || lowered.contains("alac")
+    }
+
     nonisolated var audioPlaybackRank: Int {
         if isAACAudioCodec {
             return 0
@@ -2548,7 +2672,10 @@ nonisolated struct DASHStream: Decodable, Hashable, Sendable {
         if isDolbyCompatibleAudioCodec {
             return 1
         }
-        return 2
+        if isLosslessAudioCodec {
+            return 2
+        }
+        return 3
     }
 
     nonisolated static func codecLabel(for codecs: String?, codecid: Int? = nil) -> String? {
@@ -2564,6 +2691,19 @@ nonisolated struct DASHStream: Decodable, Hashable, Sendable {
             }
             if codecs.localizedCaseInsensitiveContains("avc") {
                 return "AVC"
+            }
+            if codecs.localizedCaseInsensitiveContains("mp4a") {
+                return "AAC"
+            }
+            if codecs.localizedCaseInsensitiveContains("ec-3")
+                || codecs.localizedCaseInsensitiveContains("ac-3") {
+                return "Dolby Audio"
+            }
+            if codecs.localizedCaseInsensitiveContains("flac") {
+                return "FLAC"
+            }
+            if codecs.localizedCaseInsensitiveContains("alac") {
+                return "ALAC"
             }
             return codecs
         }
@@ -2625,7 +2765,7 @@ nonisolated struct DASHStream: Decodable, Hashable, Sendable {
 
     nonisolated var isHardwareDecodingCompatibleAudio: Bool {
         if PlaybackCodecPolicy.requiresAACAudioPlayback {
-            return isAACAudioCodec || isDolbyCompatibleAudioCodec
+            return isAACAudioCodec || isDolbyCompatibleAudioCodec || isLosslessAudioCodec
         }
 
         if let codecs, !codecs.isEmpty {
@@ -7732,6 +7872,14 @@ nonisolated extension String {
 
         let pixelSize = min(RemoteImageQualityPreference.effectiveMaximumPixelLength(maxSide), 4096)
         return "\(normalized.biliImageBaseURL())?imageView2/2/w/\(pixelSize)/format/webp"
+    }
+
+    func biliImageOriginalURL() -> String {
+        let normalized = normalizedBiliURL()
+        guard normalized.contains("hdslb.com") else {
+            return normalized
+        }
+        return normalized.biliImageBaseURL()
     }
 
     func biliImageThumbnailURL(

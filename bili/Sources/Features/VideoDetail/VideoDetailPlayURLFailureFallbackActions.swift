@@ -39,7 +39,9 @@ extension VideoDetailViewModel {
     }
 
     func handlePlayURLFailure(_ error: Error) {
+        pendingVideoListenPlaybackIntent = nil
         currentPlayURLData = nil
+        clearVideoListenAudioVariants()
         playVariants = []
         selectedPlayVariant = nil
         isSupplementingPlayQualities = false

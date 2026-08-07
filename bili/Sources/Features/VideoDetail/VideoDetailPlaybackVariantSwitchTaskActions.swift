@@ -18,7 +18,9 @@ extension VideoDetailViewModel {
                 self.clearPlayVariantSwitchIfCurrent(token)
             }
             let didWarmVariant: Bool
-            if let cid {
+            if self.playbackContentMode == .audioOnly {
+                didWarmVariant = true
+            } else if let cid {
                 didWarmVariant = await VideoPreloadCenter.shared.warmVariantAndWaitCached(
                     variant,
                     bvid: bvid,
@@ -57,7 +59,9 @@ extension VideoDetailViewModel {
                 resumeTimeOverride: resumeTime,
                 shouldResumePlayback: shouldResumePlayback,
                 playbackRateOverride: playbackRate,
-                preservesPreviousPlayerUntilFirstFrame: true
+                preservesPreviousPlayerUntilFirstFrame: true,
+                usesSeamlessPlaybackHandoff: self.playbackContentMode == .audioOnly
+                    && shouldResumePlayback
             )
         }
     }

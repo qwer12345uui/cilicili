@@ -14,6 +14,7 @@ extension VideoDetailViewModel {
 
         let targetTime = min(max(progress, 0), 1) * duration
         lastUserSeekAt = Date()
+        guard playbackContentMode == .video else { return }
         let targetSegment = danmakuSegmentIndex(for: targetTime)
         let targetScheduleKey = danmakuScheduleKey(cid: cid, playbackTime: targetTime, segmentIndex: targetSegment)
         if lastDanmakuScheduleKey != targetScheduleKey {

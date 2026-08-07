@@ -14,6 +14,7 @@ enum PlayerSpeedBoostEndReason: String {
     case systemInterrupted
     case background
     case disappear
+    case playerChanged
     case terminated
 
     var isInterruption: Bool {
@@ -57,6 +58,7 @@ final class PlayerSpeedBoostModel: ObservableObject {
     @Published private(set) var displayedRate: BiliPlaybackRate = .x20
 
     private var state: PlayerSpeedBoostState?
+    private weak var boostedPlayerViewModel: PlayerStateViewModel?
     private var restoreTransitionTask: Task<Void, Never>?
     private var restoreTransitionGeneration = 0
     private let transitionDurationNanoseconds: UInt64 = 140_000_000
@@ -92,6 +94,7 @@ final class PlayerSpeedBoostModel: ObservableObject {
             restoredRate: previousRate,
             beganAt: beganAt
         )
+        boostedPlayerViewModel = playerViewModel
         displayedRate = .x20
         setPhase(.boosting)
         Haptics.medium()
@@ -111,25 +114,27 @@ final class PlayerSpeedBoostModel: ObservableObject {
     ) {
         guard let state else { return }
         self.state = nil
+        let boostedPlayerViewModel = self.boostedPlayerViewModel ?? playerViewModel
+        self.boostedPlayerViewModel = nil
         let releasedAt = CACurrentMediaTime()
         let holdElapsed = PlayerMetricsLog.elapsedMilliseconds(since: state.beganAt)
         displayedRate = state.restoredRate
         setPhase(.restoring)
 
-        guard !playerViewModel.isTerminated else {
-            playerViewModel.recordSpeedBoostMetric(
+        guard !boostedPlayerViewModel.isTerminated else {
+            boostedPlayerViewModel.recordSpeedBoostMetric(
                 "event=end phase=restoring reason=\(reason.rawValue) interrupted=true hold=\(String(format: "%.0fms", holdElapsed)) restoreSkipped=terminated"
             )
             scheduleIdleTransition()
             return
         }
-        playerViewModel.setPlaybackRate(state.restoredRate)
+        boostedPlayerViewModel.setPlaybackRate(state.restoredRate)
         let restoreElapsed = PlayerMetricsLog.elapsedMilliseconds(since: releasedAt)
-        playerViewModel.recordSpeedBoostMetric(
+        boostedPlayerViewModel.recordSpeedBoostMetric(
             "event=end phase=restoring reason=\(reason.rawValue) interrupted=\(reason.isInterruption) hold=\(String(format: "%.0fms", holdElapsed)) releaseToRestore=\(String(format: "%.0fms", restoreElapsed)) restore=\(state.restoredRate.title)"
         )
         if reason.shouldStabilizePlayback {
-            playerViewModel.stabilizePlaybackAfterSpeedBoost(
+            boostedPlayerViewModel.stabilizePlaybackAfterSpeedBoost(
                 restoredRate: state.restoredRate,
                 reason: reason.rawValue
             )

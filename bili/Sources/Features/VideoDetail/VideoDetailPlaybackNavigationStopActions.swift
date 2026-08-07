@@ -17,6 +17,8 @@ extension VideoDetailViewModel {
         pendingNavigationResumeTime = bestResumeTime > 0.25 ? bestResumeTime : nil
         shouldResumePlaybackAfterCancelledNavigation = suspendedState?.shouldResumePlayback
             ?? currentPlaybackIntent()
+        videoListenPlaybackSessionStore.removeState(for: detail)
+        pendingVideoListenPlaybackSessionState = nil
         hasPendingNavigationInterruption = true
     }
 
@@ -64,6 +66,7 @@ extension VideoDetailViewModel {
     }
 
     private func cancelPlaybackWorkForNavigation() {
+        cancelVideoListenQueueTasks(resetSession: false)
         cancelSupplementalWork()
         Self.cancelMediaWarmupsPreservingCache()
         cancelRelatedLoad()
@@ -84,6 +87,7 @@ extension VideoDetailViewModel {
 
     private func resetPlaybackLoadingStateForNavigation() {
         currentPlayURLData = nil
+        clearVideoListenAudioVariants()
         selectedPlayVariant = nil
         if state.isLoading {
             state = .idle
@@ -103,6 +107,8 @@ extension VideoDetailViewModel {
     }
 
     private func resetPlaybackRecoveryStateForNavigation() {
+        pendingVideoListenPlaybackIntent = nil
+        cancelVideoListenSleepTimer()
         playbackFallbackMessage = nil
         clearManualPlayVariantSelection()
         failedPlayVariantIDs.removeAll()

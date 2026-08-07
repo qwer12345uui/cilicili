@@ -2,7 +2,10 @@ import Foundation
 
 extension VideoDetailViewModel {
     func playerIdentity(for variant: PlayVariant) -> String {
-        "\(selectedCID ?? 0)-\(variant.id)"
+        let audioIdentity = playbackContentMode == .audioOnly
+            ? (resolvedVideoListenAudioVariant?.id ?? "audio-missing")
+            : "video-audio"
+        return "\(selectedCID ?? 0)-\(variant.id)-\(playbackContentMode.rawValue)-\(audioIdentity)"
     }
 
     var selectedPageNumber: Int? {

@@ -12,6 +12,7 @@ extension VideoDetailViewModel {
 
     func selectPage(_ page: VideoPage) {
         guard !isPlaybackTerminatedForNavigation else { return }
+        captureVideoListenPlaybackIntentForContentSwitch()
         isPlaybackInvalidatedForNavigation = false
         cancelBackgroundTasks()
         manuallySelectedPageCID = page.cid

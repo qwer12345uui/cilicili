@@ -14,6 +14,20 @@ struct PlayerVideoRenditionSource: Equatable, Sendable {
     let dynamicRange: BiliVideoDynamicRange
 }
 
+enum PlayerPlaybackContentMode: String, Equatable, Sendable {
+    case video
+    case audioOnly
+
+    var diagnosticTitle: String {
+        switch self {
+        case .video:
+            return "视频"
+        case .audioOnly:
+            return "听视频"
+        }
+    }
+}
+
 struct PlayerStreamSource: Equatable, Sendable {
     let metricsID: String
     let videoURL: URL?
@@ -31,6 +45,7 @@ struct PlayerStreamSource: Equatable, Sendable {
     let resumeTime: TimeInterval
     let dynamicRange: BiliVideoDynamicRange
     let cdnPreference: PlaybackCDNPreference
+    var playbackContentMode: PlayerPlaybackContentMode = .video
 
     var maximumVideoBandwidth: Int? {
         ([videoStream?.bandwidth] + alternateVideoRenditions.map { $0.videoStream.bandwidth })
@@ -56,7 +71,8 @@ struct PlayerStreamSource: Equatable, Sendable {
             liveHLSFormat: liveHLSFormat,
             resumeTime: max(resumeTime, 0),
             dynamicRange: dynamicRange,
-            cdnPreference: cdnPreference
+            cdnPreference: cdnPreference,
+            playbackContentMode: playbackContentMode
         )
     }
 }
@@ -155,6 +171,7 @@ struct PlayerEngineDiagnostics: Equatable, Sendable {
     }
 
     var engineName: String
+    var playbackContentMode: PlayerPlaybackContentMode = .video
     var decodePath: DecodePath
     var playbackPipeline: PlaybackPipeline
     var codec: String?
@@ -216,6 +233,9 @@ struct PlayerEngineDiagnostics: Equatable, Sendable {
 
     var compactDescription: String {
         var parts = [engineName, decodePath.title, playbackPipeline.title]
+        if playbackContentMode == .audioOnly {
+            parts.append(playbackContentMode.diagnosticTitle)
+        }
         if let codec, !codec.isEmpty {
             parts.append(codec)
         }
@@ -378,12 +398,15 @@ enum PlayerPlaybackPhase: Equatable, Sendable {
 
 enum PlayerEngineError: LocalizedError {
     case missingVideoURL
+    case missingAudioURL
     case unsupportedMedia
 
     var errorDescription: String? {
         switch self {
         case .missingVideoURL:
             return "没有可播放的视频地址"
+        case .missingAudioURL:
+            return "没有可播放的音频地址"
         case .unsupportedMedia:
             return "当前视频流暂不支持播放"
         }

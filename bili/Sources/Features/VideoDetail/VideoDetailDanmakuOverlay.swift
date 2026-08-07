@@ -16,6 +16,7 @@ struct VideoDetailDanmakuOverlay: View {
         DanmakuOverlayView(
             items: snapshot.items,
             itemsRevision: snapshot.itemsRevision,
+            currentTime: clock.currentTime,
             isPlaying: snapshot.isPlaying,
             playbackRate: snapshot.playbackRate,
             isEnabled: snapshot.isEnabled && isVisibleInCurrentOrientation,

@@ -5,8 +5,11 @@ import UIKit
 /// retains readable system glyphs without changing the page color scheme.
 @MainActor
 enum AppStatusBarCompatibility {
-    static func applyPlaybackPresentation(isHidden: Bool) {
-        UIApplication.shared.statusBarStyle = .lightContent
+    static func applyPlaybackPresentation(
+        isHidden: Bool,
+        style: UIStatusBarStyle = .lightContent
+    ) {
+        UIApplication.shared.statusBarStyle = style
         UIApplication.shared.setStatusBarHidden(isHidden, with: .none)
     }
 

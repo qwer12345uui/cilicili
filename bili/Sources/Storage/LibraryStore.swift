@@ -136,6 +136,8 @@ final class LibraryStore: ObservableObject {
     @Published private(set) var showsVideoDetailNetworkDiagnosticsButton: Bool
     @Published private(set) var showsVideoDetailPinnedProgressBar: Bool
     @Published private(set) var videoDetailAutoplayEnabled: Bool
+    @Published private(set) var videoListenPlaybackOrder: VideoListenPlaybackOrder
+    @Published private(set) var videoListenPlaylistSortOrder: VideoListenPlaylistSortOrder
     @Published private(set) var cellularBiliTrafficCompatibilityExperimentEnabled: Bool
     @Published private(set) var incognitoModeEnabled: Bool
     @Published private(set) var guestModeEnabled: Bool
@@ -148,6 +150,7 @@ final class LibraryStore: ObservableObject {
     @Published private(set) var videoCoverBottomScrimEnabled: Bool
     @Published private(set) var showsVideoCoverDurationBadges: Bool
     @Published private(set) var unifiedVideoCoverBorderExperimentEnabled: Bool
+    @Published private(set) var thumbnailLongPressPreviewExperimentEnabled: Bool
     @Published private(set) var homeNavigationModeSwitcherExperimentEnabled: Bool
     @Published private(set) var fastScrollImageLoadSuppressionExperimentEnabled: Bool
     @Published private(set) var remoteImageCDNFailoverExperimentEnabled: Bool
@@ -203,6 +206,8 @@ final class LibraryStore: ObservableObject {
     private static let showsVideoDetailNetworkDiagnosticsButtonKey = "cc.bili.videoDetail.showsNetworkDiagnosticsButton.v1"
     private static let showsVideoDetailPinnedProgressBarKey = "cc.bili.videoDetail.showsPinnedProgressBar.v1"
     private static let videoDetailAutoplayEnabledKey = "cc.bili.videoDetail.autoplayEnabled.v1"
+    private static let videoListenPlaybackOrderKey = "cc.bili.playback.videoListenPlaybackOrder.v1"
+    private static let videoListenPlaylistSortOrderKey = "cc.bili.playback.videoListenPlaylistSortOrder.v1"
     private static let cellularBiliTrafficCompatibilityExperimentEnabledKey = CellularBiliTrafficCompatibilityExperiment.storageKey
     private static let incognitoModeEnabledKey = "cc.bili.privacy.incognitoModeEnabled.v1"
     private static let guestModeEnabledKey = "cc.bili.privacy.guestModeEnabled.v1"
@@ -215,6 +220,7 @@ final class LibraryStore: ObservableObject {
     private static let videoCoverBottomScrimEnabledKey = VideoCoverBottomScrimSettings.storageKey
     private static let videoCoverDurationBadgesEnabledKey = VideoCoverDurationBadgeSettings.storageKey
     private static let unifiedVideoCoverBorderExperimentEnabledKey = "cc.bili.display.unifiedVideoCoverBorderExperimentEnabled.v1"
+    private static let thumbnailLongPressPreviewExperimentEnabledKey = "cc.bili.display.thumbnailLongPressPreviewExperimentEnabled.v1"
     private static let homeNavigationModeSwitcherExperimentEnabledKey = HomeNavigationModeSwitcherExperiment.storageKey
     private static let retiredExperimentKeys = [
         "cc.bili.playback.startupRequestSchedulingExperimentEnabled.v1",
@@ -230,10 +236,16 @@ final class LibraryStore: ObservableObject {
         "cc.bili.display.fixedVideoTitleTypographyExperimentEnabled.v1",
         "cc.bili.display.unifiedAppTypographyExperimentEnabled.v1",
         "cc.bili.display.highQualityImageViewerExperimentEnabled.v1",
+        "cc.bili.display.imageViewerGestureUpgradeExperimentEnabled.v1",
         "cc.bili.account.messageCenterExperimentEnabled.v1",
         "cc.bili.display.telegramTopEdgeBlurExperimentEnabled.v1",
         "cc.bili.display.uploaderProfileGlassSheetExperimentEnabled.v1",
         "cc.bili.display.uploaderProfileGlassSheetExperimentEnabled.v2",
+        "cc.bili.videoDetail.directUIKitSurfaceExperimentEnabled.v1",
+        "cc.bili.live.simpleLiveRoomLayoutExperimentEnabled.v1",
+        "cc.bili.playback.videoListenModeExperimentEnabled.v1",
+        "cc.bili.playback.officialListenerPlaylistExperimentEnabled.v1",
+        "cc.bili.playback.metalDanmakuRendererExperimentEnabled.v1",
     ]
     private static let fastScrollImageLoadSuppressionExperimentEnabledKey = "cc.bili.display.fastScrollImageLoadSuppressionExperimentEnabled.v1"
     private static let remoteImageCDNFailoverExperimentEnabledKey = RemoteImageCDNFailoverExperiment.storageKey
@@ -445,6 +457,12 @@ final class LibraryStore: ObservableObject {
         self.showsVideoDetailNetworkDiagnosticsButton = userDefaults.object(forKey: Self.showsVideoDetailNetworkDiagnosticsButtonKey) as? Bool ?? false
         self.showsVideoDetailPinnedProgressBar = userDefaults.object(forKey: Self.showsVideoDetailPinnedProgressBarKey) as? Bool ?? false
         self.videoDetailAutoplayEnabled = userDefaults.object(forKey: Self.videoDetailAutoplayEnabledKey) as? Bool ?? true
+        self.videoListenPlaybackOrder = userDefaults.string(
+            forKey: Self.videoListenPlaybackOrderKey
+        ).flatMap(VideoListenPlaybackOrder.init(rawValue:)) ?? .sequential
+        self.videoListenPlaylistSortOrder = userDefaults.string(
+            forKey: Self.videoListenPlaylistSortOrderKey
+        ).flatMap(VideoListenPlaylistSortOrder.init(rawValue:)) ?? .normal
         self.cellularBiliTrafficCompatibilityExperimentEnabled = userDefaults.object(
             forKey: Self.cellularBiliTrafficCompatibilityExperimentEnabledKey
         ) as? Bool ?? CellularBiliTrafficCompatibilityExperiment.defaultIsEnabled
@@ -472,6 +490,9 @@ final class LibraryStore: ObservableObject {
         self.unifiedVideoCoverBorderExperimentEnabled = userDefaults.object(
             forKey: Self.unifiedVideoCoverBorderExperimentEnabledKey
         ) as? Bool ?? VideoCoverBorderExperiment.defaultIsEnabled
+        self.thumbnailLongPressPreviewExperimentEnabled = userDefaults.object(
+            forKey: Self.thumbnailLongPressPreviewExperimentEnabledKey
+        ) as? Bool ?? ThumbnailLongPressPreviewExperiment.defaultIsEnabled
         self.homeNavigationModeSwitcherExperimentEnabled = userDefaults.object(
             forKey: Self.homeNavigationModeSwitcherExperimentEnabledKey
         ) as? Bool ?? HomeNavigationModeSwitcherExperiment.defaultIsEnabled
@@ -1011,6 +1032,16 @@ final class LibraryStore: ObservableObject {
         userDefaults.set(isEnabled, forKey: Self.videoDetailAutoplayEnabledKey)
     }
 
+    func setVideoListenPlaybackOrder(_ order: VideoListenPlaybackOrder) {
+        videoListenPlaybackOrder = order
+        userDefaults.set(order.rawValue, forKey: Self.videoListenPlaybackOrderKey)
+    }
+
+    func setVideoListenPlaylistSortOrder(_ order: VideoListenPlaylistSortOrder) {
+        videoListenPlaylistSortOrder = order
+        userDefaults.set(order.rawValue, forKey: Self.videoListenPlaylistSortOrderKey)
+    }
+
     func setCellularBiliTrafficCompatibilityExperimentEnabled(_ isEnabled: Bool) {
         cellularBiliTrafficCompatibilityExperimentEnabled = isEnabled
         userDefaults.set(isEnabled, forKey: Self.cellularBiliTrafficCompatibilityExperimentEnabledKey)
@@ -1073,6 +1104,11 @@ final class LibraryStore: ObservableObject {
     func setUnifiedVideoCoverBorderExperimentEnabled(_ isEnabled: Bool) {
         unifiedVideoCoverBorderExperimentEnabled = isEnabled
         userDefaults.set(isEnabled, forKey: Self.unifiedVideoCoverBorderExperimentEnabledKey)
+    }
+
+    func setThumbnailLongPressPreviewExperimentEnabled(_ isEnabled: Bool) {
+        thumbnailLongPressPreviewExperimentEnabled = isEnabled
+        userDefaults.set(isEnabled, forKey: Self.thumbnailLongPressPreviewExperimentEnabledKey)
     }
 
     func setHomeNavigationModeSwitcherExperimentEnabled(_ isEnabled: Bool) {

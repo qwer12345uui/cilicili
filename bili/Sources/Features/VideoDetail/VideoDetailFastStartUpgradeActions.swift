@@ -9,7 +9,8 @@ extension VideoDetailViewModel {
     ) {
         cancelFastStartUpgradeTask(advancesGeneration: false)
         let upgradeGeneration = advanceFastStartUpgradeGeneration()
-        guard !didSelectPlayVariantManually,
+        guard playbackContentMode == .video,
+              !didSelectPlayVariantManually,
               let cid,
               let startupVariant,
               let targetVariant,

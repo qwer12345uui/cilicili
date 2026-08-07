@@ -26,6 +26,22 @@ extension VideoDetailViewModel {
     }
 
     func switchPlayVariantInPlaceIfPossible(_ variant: PlayVariant) -> Bool {
+        if playbackContentMode == .audioOnly,
+           let playerViewModel = stablePlayerViewModel,
+           selectedPlayVariant?.audioURL == variant.audioURL,
+           selectedPlayVariant?.audioStream == variant.audioStream {
+            selectedPlayVariant = variant
+            stablePlayerIdentity = playerIdentity(for: variant)
+            playbackFallbackMessage = nil
+            observePlaybackErrors(playerViewModel, variant: variant)
+            logSelectedPlayVariant(
+                variant,
+                availableVariants: playVariants,
+                source: "audioOnlyQualitySelection"
+            )
+            return true
+        }
+
         guard let playerViewModel = stablePlayerViewModel,
               playerViewModel.engineDiagnostics.hlsVideoVariantCount > 1,
               playerViewModel.preferVideoRenditionInCurrentItem(variant)

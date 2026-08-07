@@ -10,6 +10,41 @@ nonisolated struct ZoomyViewerInitialImageLayout: Equatable {
     let usesLongImageScrolling: Bool
 }
 
+nonisolated enum ZoomyViewerImageQuality {
+    static func shouldKeepCurrent(
+        currentPixelSize: CGSize,
+        candidatePixelSize: CGSize
+    ) -> Bool {
+        guard currentPixelSize.width > 0,
+              currentPixelSize.height > 0,
+              candidatePixelSize.width > 0,
+              candidatePixelSize.height > 0
+        else { return false }
+
+        let currentAspectRatio = currentPixelSize.width / currentPixelSize.height
+        let candidateAspectRatio = candidatePixelSize.width / candidatePixelSize.height
+        let aspectRatioDifference = abs(currentAspectRatio - candidateAspectRatio)
+            / max(currentAspectRatio, candidateAspectRatio)
+        guard aspectRatioDifference < 0.04 else { return false }
+
+        let currentPixelCount = currentPixelSize.width * currentPixelSize.height
+        let candidatePixelCount = candidatePixelSize.width * candidatePixelSize.height
+        return currentPixelCount > candidatePixelCount * 1.01
+    }
+}
+
+nonisolated enum ZoomyViewerDismissGesturePolicy {
+    static func isDownwardVerticalPull(_ translation: CGSize) -> Bool {
+        translation.height > 0 && translation.height > abs(translation.width) * 1.15
+    }
+
+    static func shouldDismiss(translationY: CGFloat, velocityY: CGFloat) -> Bool {
+        let translationY = max(translationY, 0)
+        let projectedTranslationY = translationY + max(velocityY, 0) * 0.18
+        return translationY > 120 || projectedTranslationY > 220
+    }
+}
+
 nonisolated enum ZoomyViewerImageSizing {
     static let longImageHeightToWidthThreshold: CGFloat = 2.6
     private static let maximumDecodedPixelCount: CGFloat = 12_000_000
@@ -72,14 +107,15 @@ struct ZoomyFullScreenImageViewer: View {
     let viewerGroup: ZoomyImagePreviewGroup?
     let targetPixelSize: Int
     let onSelectedItemChanged: (ZoomyImagePreviewItem, UIImage?) -> Void
-    let onDismissDragChanged: (CGFloat) -> Void
+    let onDismissDragChanged: (CGFloat, CGFloat) -> Void
     let onImageUpdated: (UIImage) -> Void
     @Binding var isPresented: Bool
     @State private var selectedItemID: String
     @State private var dismissDragOffset: CGFloat = 0
-    @State private var dismissLockedItemID: String?
+    @State private var dismissGestureItemID: String?
     @State private var selectedSnapshot: ZoomyViewerMediaSnapshot?
     @State private var isSavingImage = false
+    @State private var isPreparingShare = false
     @State private var sharePayload: ZoomySharePayload?
     @State private var toastMessage: String?
     @State private var toastTask: Task<Void, Never>?
@@ -93,7 +129,7 @@ struct ZoomyFullScreenImageViewer: View {
         targetPixelSize: Int,
         isPresented: Binding<Bool>,
         onSelectedItemChanged: @escaping (ZoomyImagePreviewItem, UIImage?) -> Void,
-        onDismissDragChanged: @escaping (CGFloat) -> Void,
+        onDismissDragChanged: @escaping (CGFloat, CGFloat) -> Void,
         onImageUpdated: @escaping (UIImage) -> Void
     ) {
         self.initialImage = initialImage
@@ -110,16 +146,37 @@ struct ZoomyFullScreenImageViewer: View {
     }
 
     var body: some View {
+        viewerSurface
+            .onAppear {
+                syncSelectedItemContext()
+                prewarmNeighborImages()
+            }
+            .onChange(of: selectedItemID) { _, newItemID in
+                if let dismissGestureItemID, newItemID != dismissGestureItemID {
+                    selectedItemID = dismissGestureItemID
+                    return
+                }
+                syncSelectedItemContext()
+                prewarmNeighborImages()
+            }
+            .sheet(item: $sharePayload) { payload in
+                ZoomyActivityView(activityItems: payload.activityItems)
+            }
+            .onDisappear {
+                toastTask?.cancel()
+            }
+            .statusBarHidden(true)
+            .accessibilityLabel("图片预览")
+    }
+
+    private var viewerSurface: some View {
         ZStack {
             Color.black
                 .opacity(backgroundOpacity)
                 .ignoresSafeArea()
 
             ZStack {
-                if let dismissLockedItemID {
-                    imagePage(for: item(withID: dismissLockedItemID))
-                        .ignoresSafeArea()
-                } else if items.count > 1 {
+                if items.count > 1 {
                     TabView(selection: $selectedItemID) {
                         ForEach(items) { item in
                             imagePage(for: item)
@@ -128,39 +185,16 @@ struct ZoomyFullScreenImageViewer: View {
                     }
                     .tabViewStyle(.page(indexDisplayMode: .never))
                     .ignoresSafeArea()
-                    .allowsHitTesting(dismissLockedItemID == nil)
                 } else {
                     imagePage(for: items.first)
                         .ignoresSafeArea()
                 }
 
                 viewerControlContrastScrim
-
                 pageIndicator
             }
             .offset(y: dismissDragOffset)
         }
-        .simultaneousGesture(dismissDragGesture)
-        .onAppear {
-            syncSelectedItemContext()
-            prewarmNeighborImages()
-        }
-        .onChange(of: selectedItemID) { _, newItemID in
-            if let dismissLockedItemID, newItemID != dismissLockedItemID {
-                selectedItemID = dismissLockedItemID
-                return
-            }
-            syncSelectedItemContext()
-            prewarmNeighborImages()
-        }
-        .sheet(item: $sharePayload) { payload in
-            ZoomyActivityView(activityItems: payload.activityItems)
-        }
-        .onDisappear {
-            toastTask?.cancel()
-        }
-        .statusBarHidden(true)
-        .accessibilityLabel("图片预览")
     }
 
     private var backgroundOpacity: Double {
@@ -195,7 +229,7 @@ struct ZoomyFullScreenImageViewer: View {
             viewerActionButton(systemImage: "square.and.arrow.down", accessibilityLabel: "保存图片") {
                 saveCurrentImage()
             }
-            .disabled(selectedSnapshot == nil || isSavingImage)
+            .disabled(!canExportSelectedMedia || isSavingImage || isPreparingShare)
 
             if items.count > 1 {
                 ZoomyViewerPageControl(numberOfPages: items.count, currentPage: selectedIndex)
@@ -207,7 +241,7 @@ struct ZoomyFullScreenImageViewer: View {
             viewerActionButton(systemImage: "square.and.arrow.up", accessibilityLabel: "分享图片") {
                 shareCurrentImage()
             }
-            .disabled(selectedSnapshot == nil && selectedItem.displayURL == nil)
+            .disabled(!canExportSelectedMedia || isSavingImage || isPreparingShare)
         }
     }
 
@@ -258,45 +292,6 @@ struct ZoomyFullScreenImageViewer: View {
         return 1 - progress
     }
 
-    private var dismissDragGesture: some Gesture {
-        DragGesture(minimumDistance: 12, coordinateSpace: .local)
-            .onChanged { value in
-                guard !selectedMediaUsesLongImageScrolling else { return }
-                let verticalTravel = value.translation.height
-                let horizontalTravel = abs(value.translation.width)
-                guard verticalTravel > 0, verticalTravel > horizontalTravel * 1.15 else { return }
-                if dismissLockedItemID == nil {
-                    dismissLockedItemID = selectedItemID
-                }
-                dismissDragOffset = verticalTravel
-                onDismissDragChanged(verticalTravel)
-            }
-            .onEnded { value in
-                guard !selectedMediaUsesLongImageScrolling else { return }
-                let verticalTravel = value.translation.height
-                let horizontalTravel = abs(value.translation.width)
-                let predictedTravel = value.predictedEndTranslation.height
-                guard verticalTravel > 0, verticalTravel > horizontalTravel * 1.15 else {
-                    withAnimation(.spring(response: 0.25, dampingFraction: 0.88)) {
-                        dismissDragOffset = 0
-                        dismissLockedItemID = nil
-                        onDismissDragChanged(0)
-                    }
-                    return
-                }
-                if verticalTravel > 120 || predictedTravel > 220 {
-                    onDismissDragChanged(verticalTravel)
-                    isPresented = false
-                } else {
-                    withAnimation(.spring(response: 0.25, dampingFraction: 0.88)) {
-                        dismissDragOffset = 0
-                        dismissLockedItemID = nil
-                        onDismissDragChanged(0)
-                    }
-                }
-            }
-    }
-
     @ViewBuilder
     private func imagePage(for item: ZoomyImagePreviewItem?) -> some View {
         if let item {
@@ -306,9 +301,11 @@ struct ZoomyFullScreenImageViewer: View {
                 targetPixelSize: targetPixelSize,
                 isSelected: item.id == selectedItemID,
                 isPresented: $isPresented,
+                onDismissDragChanged: updateDismissDrag,
+                onDismissDragEnded: finishDismissDrag,
                 onMediaUpdated: { itemID, snapshot in
                     if let image = snapshot.image {
-                        viewerGroup?.setImage(image, for: itemID)
+                        viewerGroup?.setImage(image, for: itemID, quality: .viewer)
                     }
                     if itemID == selectedItemID {
                         updateSelectedMedia(itemID: itemID, snapshot: snapshot)
@@ -322,6 +319,8 @@ struct ZoomyFullScreenImageViewer: View {
                 targetPixelSize: targetPixelSize,
                 isSelected: true,
                 isPresented: $isPresented,
+                onDismissDragChanged: updateDismissDrag,
+                onDismissDragEnded: finishDismissDrag,
                 onMediaUpdated: { _, snapshot in
                     selectedSnapshot = snapshot
                     if let image = snapshot.image {
@@ -347,14 +346,11 @@ struct ZoomyFullScreenImageViewer: View {
         )
     }
 
-    private var selectedMediaUsesLongImageScrolling: Bool {
-        let imageAspectRatio: CGFloat? = selectedSnapshot?.image.flatMap { image in
-            guard image.size.width > 0, image.size.height > 0 else { return nil }
-            return image.size.width / image.size.height
+    private var canExportSelectedMedia: Bool {
+        if selectedItem.needsOriginalMedia {
+            return selectedSnapshot?.isFinal == true
         }
-        return ZoomyViewerImageSizing.usesLongImageScrolling(
-            widthToHeightAspectRatio: selectedItem.resolvedAspectRatio ?? imageAspectRatio
-        )
+        return selectedItem.displayURL != nil || selectedSnapshot?.isFinal == true
     }
 
     private func item(withID id: String) -> ZoomyImagePreviewItem? {
@@ -368,11 +364,57 @@ struct ZoomyFullScreenImageViewer: View {
         return viewerGroup?.image(for: item.id)
     }
 
+    private func updateDismissDrag(itemID: String, translationY: CGFloat) {
+        guard itemID == selectedItemID else { return }
+        if dismissGestureItemID == nil {
+            dismissGestureItemID = itemID
+        }
+        guard dismissGestureItemID == itemID else { return }
+        let translationY = max(translationY, 0)
+        dismissDragOffset = translationY
+        onDismissDragChanged(translationY, 1)
+    }
+
+    private func finishDismissDrag(
+        itemID: String,
+        translationY: CGFloat,
+        velocityY: CGFloat,
+        cancelled: Bool
+    ) {
+        guard dismissGestureItemID == itemID else {
+            resetDismissDrag()
+            return
+        }
+        dismissGestureItemID = nil
+        let translationY = max(translationY, 0)
+        if !cancelled,
+           ZoomyViewerDismissGesturePolicy.shouldDismiss(
+               translationY: translationY,
+               velocityY: velocityY
+           ) {
+            onDismissDragChanged(translationY, 1)
+            isPresented = false
+            return
+        }
+        resetDismissDrag()
+    }
+
+    private func resetDismissDrag() {
+        dismissGestureItemID = nil
+        withAnimation(.spring(response: 0.25, dampingFraction: 0.88)) {
+            dismissDragOffset = 0
+            onDismissDragChanged(0, 1)
+        }
+    }
+
     private func syncSelectedItemContext() {
         guard let item = items.first(where: { $0.id == selectedItemID }) else { return }
+        viewerGroup?.releaseViewerImages(except: item.id)
         let cachedImage = viewerGroup?.image(for: item.id)
         onSelectedItemChanged(item, cachedImage)
-        selectedSnapshot = item.needsOriginalMedia ? nil : cachedImage.map { ZoomyViewerMediaSnapshot(image: $0) }
+        selectedSnapshot = item.needsOriginalMedia
+            ? nil
+            : cachedImage.map { ZoomyViewerMediaSnapshot(image: $0, isFinal: false) }
         if let cachedImage {
             onImageUpdated(cachedImage)
         }
@@ -381,20 +423,32 @@ struct ZoomyFullScreenImageViewer: View {
     private func prewarmNeighborImages() {
         guard items.count > 1 else { return }
         let neighborIndices = [selectedIndex - 1, selectedIndex + 1]
-        let sources = neighborIndices.compactMap { index -> RemoteImageSource? in
+        let neighborItems = neighborIndices.compactMap { index -> ZoomyImagePreviewItem? in
             guard items.indices.contains(index),
                   !items[index].needsOriginalMedia,
-                  let url = items[index].displayURL
+                  items[index].displayURL != nil
             else { return nil }
-            return RemoteImageSource(url: url)
+            return items[index]
         }
-        guard !sources.isEmpty else { return }
+        guard !neighborItems.isEmpty else { return }
         Task(priority: .utility) {
-            await RemoteImageCache.shared.prefetch(
-                sources,
-                targetPixelSize: targetPixelSize,
-                maximumConcurrentLoads: 2
-            )
+            await withTaskGroup(of: Void.self) { group in
+                for item in neighborItems {
+                    guard let url = item.displayURL else { continue }
+                    let prewarmTargetPixelSize = ZoomyViewerImageSizing.targetPixelSize(
+                        baseTargetPixelSize: targetPixelSize,
+                        widthToHeightAspectRatio: item.resolvedAspectRatio
+                    )
+                    group.addTask {
+                        await RemoteImageCache.shared.prefetch(
+                            [RemoteImageSource(url: url)],
+                            targetPixelSize: prewarmTargetPixelSize,
+                            maximumConcurrentLoads: 1,
+                            decodePolicy: .highQualityViewer
+                        )
+                    }
+                }
+            }
         }
     }
 
@@ -410,15 +464,25 @@ struct ZoomyFullScreenImageViewer: View {
     }
 
     private func saveCurrentImage() {
-        guard let snapshot = selectedSnapshot else {
-            showToast("图片还在加载")
-            return
-        }
+        guard canExportSelectedMedia else { return }
         guard !isSavingImage else { return }
+        let item = selectedItem
+        let snapshot = selectedSnapshot
         isSavingImage = true
-        showToast("正在保存")
+        showToast("正在准备原图")
         Task { @MainActor in
-            let didSave = await ZoomyPhotoLibrarySaver.save(snapshot)
+            guard let exportSnapshot = await ZoomyViewerMediaLoader.exportSnapshot(
+                snapshot,
+                for: item
+            ) else {
+                isSavingImage = false
+                showToast("原图加载失败")
+                return
+            }
+            if item.id == selectedItemID {
+                selectedSnapshot = exportSnapshot
+            }
+            let didSave = await ZoomyPhotoLibrarySaver.save(exportSnapshot)
             isSavingImage = false
             if didSave {
                 Haptics.success()
@@ -430,16 +494,35 @@ struct ZoomyFullScreenImageViewer: View {
     }
 
     private func shareCurrentImage() {
-        let items = ZoomyShareItemBuilder.activityItems(
-            snapshot: selectedSnapshot,
-            item: selectedItem
-        )
-        guard !items.isEmpty else {
-            showToast("图片还在加载")
-            return
+        guard canExportSelectedMedia, !isPreparingShare else { return }
+        let item = selectedItem
+        let snapshot = selectedSnapshot
+        isPreparingShare = true
+        showToast("正在准备原图")
+        Task { @MainActor in
+            guard let exportSnapshot = await ZoomyViewerMediaLoader.exportSnapshot(
+                snapshot,
+                for: item
+            ) else {
+                isPreparingShare = false
+                showToast("原图加载失败")
+                return
+            }
+            if item.id == selectedItemID {
+                selectedSnapshot = exportSnapshot
+            }
+            let items = ZoomyShareItemBuilder.activityItems(
+                snapshot: exportSnapshot,
+                item: item
+            )
+            isPreparingShare = false
+            guard !items.isEmpty else {
+                showToast("分享准备失败")
+                return
+            }
+            Haptics.light()
+            sharePayload = ZoomySharePayload(activityItems: items)
         }
-        Haptics.light()
-        sharePayload = ZoomySharePayload(activityItems: items)
     }
 
     private func showToast(_ message: String) {
@@ -463,8 +546,11 @@ private struct ZoomyViewerImagePage: View {
     let targetPixelSize: Int
     let isSelected: Bool
     @Binding var isPresented: Bool
+    let onDismissDragChanged: (String, CGFloat) -> Void
+    let onDismissDragEnded: (String, CGFloat, CGFloat, Bool) -> Void
     let onMediaUpdated: (String, ZoomyViewerMediaSnapshot) -> Void
     @StateObject private var loader: ZoomyViewerImageLoader
+    @State private var retryRequestID = 0
 
     init(
         item: ZoomyImagePreviewItem,
@@ -472,6 +558,8 @@ private struct ZoomyViewerImagePage: View {
         targetPixelSize: Int,
         isSelected: Bool,
         isPresented: Binding<Bool>,
+        onDismissDragChanged: @escaping (String, CGFloat) -> Void,
+        onDismissDragEnded: @escaping (String, CGFloat, CGFloat, Bool) -> Void,
         onMediaUpdated: @escaping (String, ZoomyViewerMediaSnapshot) -> Void
     ) {
         self.item = item
@@ -479,6 +567,8 @@ private struct ZoomyViewerImagePage: View {
         self.targetPixelSize = targetPixelSize
         self.isSelected = isSelected
         _isPresented = isPresented
+        self.onDismissDragChanged = onDismissDragChanged
+        self.onDismissDragEnded = onDismissDragEnded
         self.onMediaUpdated = onMediaUpdated
         _loader = StateObject(wrappedValue: ZoomyViewerImageLoader(initialImage: initialImage))
     }
@@ -487,33 +577,52 @@ private struct ZoomyViewerImagePage: View {
         ZStack {
             if let livePhoto = loader.snapshot?.livePhoto,
                let image = loader.snapshot?.image {
-                ZoomyLivePhotoView(livePhoto: livePhoto, placeholderImage: image) {
+                ZoomyLivePhotoView(
+                    livePhoto: livePhoto,
+                    placeholderImage: image,
+                    isDismissGestureEnabled: isSelected
+                ) {
                     isPresented = false
+                } onDismissDragChanged: { translationY in
+                    onDismissDragChanged(item.id, translationY)
+                } onDismissDragEnded: { translationY, velocityY, cancelled in
+                    onDismissDragEnded(item.id, translationY, velocityY, cancelled)
                 }
                 .ignoresSafeArea()
                 .onAppear {
                     reportSnapshotIfNeeded()
                 }
             } else if let image = loader.snapshot?.image {
-                ZoomyZoomableImageView(image: image) {
+                ZoomyZoomableImageView(
+                    image: image,
+                    isDismissGestureEnabled: isSelected
+                ) {
                     isPresented = false
+                } onDismissDragChanged: { translationY in
+                    onDismissDragChanged(item.id, translationY)
+                } onDismissDragEnded: { translationY, velocityY, cancelled in
+                    onDismissDragEnded(item.id, translationY, velocityY, cancelled)
                 }
                 .ignoresSafeArea()
                 .onAppear {
                     reportSnapshotIfNeeded()
                 }
+            } else if loader.loadFailed {
+                failureIndicator
             } else {
                 loadingIndicator
             }
 
             if loader.isLoadingFinalMedia, loader.snapshot?.image != nil {
-                loadingIndicator
+                compactLoadingIndicator
+            } else if loader.loadFailed, loader.snapshot?.image != nil {
+                compactRetryButton
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .task(id: "\(item.displayURL?.absoluteString ?? item.id)|\(isSelected)") {
+        .task(id: "\(item.displayURL?.absoluteString ?? item.id)|\(isSelected)|\(retryRequestID)") {
             guard isSelected, isPresented else {
-                loader.cancelAndRelease()
+                loader.cancel()
                 return
             }
             await loader.load(
@@ -529,11 +638,11 @@ private struct ZoomyViewerImagePage: View {
         }
         .onChange(of: isPresented) { _, isPresented in
             if !isPresented {
-                loader.cancelAndRelease()
+                loader.cancel()
             }
         }
         .onDisappear {
-            loader.cancelAndRelease()
+            loader.cancel()
         }
     }
 
@@ -569,6 +678,72 @@ private struct ZoomyViewerImagePage: View {
                 .accessibilityLabel("正在加载原图")
         }
     }
+
+    private var compactLoadingIndicator: some View {
+        VStack {
+            HStack {
+                Spacer()
+                ProgressView()
+                    .progressViewStyle(.circular)
+                    .tint(.white)
+                    .frame(width: 38, height: 38)
+                    .videoCoverBadgeForeground(opacity: 0)
+                    .videoCoverBadgeBackground(style: .clear, in: Circle())
+                    .allowsHitTesting(false)
+                    .accessibilityLabel("正在加载原图")
+            }
+            Spacer()
+        }
+        .padding(.top, 18)
+        .padding(.trailing, 16)
+    }
+
+    private var compactRetryButton: some View {
+        VStack {
+            HStack {
+                Spacer()
+                Button(action: retryLoading) {
+                    Image(systemName: "arrow.clockwise")
+                        .font(.system(size: 15, weight: .semibold))
+                        .frame(width: 38, height: 38)
+                }
+                .buttonStyle(.plain)
+                .biliLiquidGlassForeground(shadowOpacity: 0.34)
+                .biliGlassEffect(tint: .black.opacity(0.24), interactive: true, in: Circle())
+                .accessibilityLabel("重新加载原图")
+            }
+            Spacer()
+        }
+        .padding(.top, 18)
+        .padding(.trailing, 16)
+    }
+
+    private var failureIndicator: some View {
+        VStack(spacing: 12) {
+            Image(systemName: "photo.badge.exclamationmark")
+                .font(.system(size: 30, weight: .medium))
+
+            Text("图片加载失败")
+                .font(.subheadline.weight(.semibold))
+
+            Button(action: retryLoading) {
+                Label("重新加载", systemImage: "arrow.clockwise")
+                    .font(.subheadline.weight(.semibold))
+                    .padding(.horizontal, 14)
+                    .frame(height: 38)
+            }
+            .buttonStyle(.plain)
+            .biliLiquidGlassForeground(shadowOpacity: 0.34)
+            .biliGlassEffect(tint: .black.opacity(0.24), interactive: true, in: Capsule())
+        }
+        .foregroundStyle(.white)
+        .accessibilityElement(children: .contain)
+    }
+
+    private func retryLoading() {
+        loader.prepareForRetry()
+        retryRequestID &+= 1
+    }
 }
 
 @MainActor
@@ -576,15 +751,13 @@ private final class ZoomyViewerImageLoader: ObservableObject {
     @Published private(set) var snapshot: ZoomyViewerMediaSnapshot?
     @Published private(set) var snapshotVersion = 0
     @Published private(set) var isLoadingFinalMedia = false
+    @Published private(set) var loadFailed = false
     private var task: Task<Void, Never>?
-    private let initialSnapshot: ZoomyViewerMediaSnapshot?
     private var loadGeneration = 0
-    private var hasFinalMedia = false
+    private var finalLoadIdentity: String?
 
     init(initialImage: UIImage?) {
-        let initialSnapshot = initialImage.map { ZoomyViewerMediaSnapshot(image: $0, isFinal: false) }
-        self.initialSnapshot = initialSnapshot
-        snapshot = initialSnapshot
+        snapshot = initialImage.map { ZoomyViewerMediaSnapshot(image: $0, isFinal: false) }
     }
 
     func load(
@@ -597,9 +770,17 @@ private final class ZoomyViewerImageLoader: ObservableObject {
         let url = item.displayURL
         guard let url else {
             isLoadingFinalMedia = false
+            loadFailed = true
+            return
+        }
+        let loadIdentity = "\(url.absoluteString)|\(targetPixelSize)"
+        if finalLoadIdentity == loadIdentity, snapshot?.isFinal == true {
+            isLoadingFinalMedia = false
+            loadFailed = false
             return
         }
         isLoadingFinalMedia = true
+        loadFailed = false
         task = Task(priority: .userInitiated) { [weak self] in
             let snapshot: ZoomyViewerMediaSnapshot?
             if item.isLiveImage, let liveVideoURL = item.liveVideoURL {
@@ -625,7 +806,7 @@ private final class ZoomyViewerImageLoader: ObservableObject {
             if let snapshot {
                 await MainActor.run {
                     guard self?.loadGeneration == generation else { return }
-                    self?.setSnapshot(snapshot)
+                    self?.setSnapshot(snapshot, loadIdentity: loadIdentity)
                 }
                 return
             }
@@ -641,12 +822,16 @@ private final class ZoomyViewerImageLoader: ObservableObject {
                 await MainActor.run {
                     guard self?.loadGeneration == generation else { return }
                     self?.isLoadingFinalMedia = false
+                    self?.loadFailed = true
                 }
                 return
             }
             await MainActor.run {
                 guard self?.loadGeneration == generation else { return }
-                self?.setSnapshot(ZoomyViewerMediaSnapshot(image: fallbackImage, isFinal: true))
+                self?.setSnapshot(
+                    ZoomyViewerMediaSnapshot(image: fallbackImage, isFinal: true),
+                    loadIdentity: loadIdentity
+                )
             }
         }
         await task?.value
@@ -658,21 +843,18 @@ private final class ZoomyViewerImageLoader: ObservableObject {
         isLoadingFinalMedia = false
     }
 
-    func cancelAndRelease() {
+    func prepareForRetry() {
         cancel()
-        loadGeneration &+= 1
-        guard hasFinalMedia else { return }
-        snapshot = initialSnapshot
-        snapshotVersion += 1
-        hasFinalMedia = false
-        isLoadingFinalMedia = false
+        loadFailed = false
     }
 
-    private func setSnapshot(_ snapshot: ZoomyViewerMediaSnapshot) {
-        self.snapshot = snapshot
+    private func setSnapshot(_ snapshot: ZoomyViewerMediaSnapshot, loadIdentity: String) {
+        let resolvedSnapshot = snapshot.preservingSharperDisplayImage(from: self.snapshot)
+        self.snapshot = resolvedSnapshot
         snapshotVersion += 1
-        hasFinalMedia = snapshot.isFinal
-        if snapshot.isFinal {
+        loadFailed = false
+        if resolvedSnapshot.isFinal {
+            finalLoadIdentity = loadIdentity
             isLoadingFinalMedia = false
         }
     }
@@ -703,6 +885,49 @@ private struct ZoomyViewerMediaSnapshot {
         self.isAnimatedGIF = isAnimatedGIF
         self.isLivePhoto = isLivePhoto || liveVideoFileURL != nil
         self.isFinal = isFinal
+    }
+
+    func replacingImageFileURL(_ imageFileURL: URL) -> Self {
+        Self(
+            image: image,
+            imageFileURL: imageFileURL,
+            liveVideoFileURL: liveVideoFileURL,
+            livePhoto: livePhoto,
+            isAnimatedGIF: isAnimatedGIF,
+            isLivePhoto: isLivePhoto,
+            isFinal: true
+        )
+    }
+
+    func preservingSharperDisplayImage(from current: Self?) -> Self {
+        guard !isAnimatedGIF,
+              !isLivePhoto,
+              let currentImage = current?.image,
+              let image,
+              ZoomyViewerImageQuality.shouldKeepCurrent(
+                  currentPixelSize: currentImage.zoomyPixelSize,
+                  candidatePixelSize: image.zoomyPixelSize
+              )
+        else { return self }
+
+        return Self(
+            image: currentImage,
+            imageFileURL: imageFileURL,
+            liveVideoFileURL: liveVideoFileURL,
+            livePhoto: livePhoto,
+            isAnimatedGIF: isAnimatedGIF,
+            isLivePhoto: isLivePhoto,
+            isFinal: isFinal
+        )
+    }
+}
+
+private extension UIImage {
+    var zoomyPixelSize: CGSize {
+        if let cgImage {
+            return CGSize(width: cgImage.width, height: cgImage.height)
+        }
+        return CGSize(width: size.width * scale, height: size.height * scale)
     }
 }
 
@@ -743,6 +968,10 @@ private enum ZoomyShareItemBuilder {
             }
         }
 
+        if let fileURL = snapshot.imageFileURL {
+            return [fileURL]
+        }
+
         if let image = snapshot.image {
             return [image]
         }
@@ -767,6 +996,11 @@ private enum ZoomyPhotoLibrarySaver {
                await saveImageFile(fileURL) {
                 return true
             }
+        }
+
+        if let fileURL = snapshot.imageFileURL,
+           await saveImageFile(fileURL) {
+            return true
         }
 
         if let image = snapshot.image {
@@ -877,6 +1111,41 @@ private enum ZoomyViewerMediaLoader {
     private static let maximumTemporaryFileAge: TimeInterval = 24 * 60 * 60
     private static let maximumTemporaryFileCount = 48
     private static let maximumTemporaryFileBytes = 160 * 1_024 * 1_024
+
+    static func exportSnapshot(
+        _ snapshot: ZoomyViewerMediaSnapshot?,
+        for item: ZoomyImagePreviewItem
+    ) async -> ZoomyViewerMediaSnapshot? {
+        if item.needsOriginalMedia {
+            guard let snapshot, snapshot.isFinal else { return nil }
+            return snapshot
+        }
+
+        if let snapshot, snapshot.isFinal, snapshot.imageFileURL != nil {
+            return snapshot
+        }
+
+        guard let url = item.displayURL else {
+            return snapshot?.isFinal == true ? snapshot : nil
+        }
+        do {
+            let fileURL = try await downloadTemporaryFile(
+                from: url,
+                acceptsVideo: false,
+                fallbackExtension: "jpg"
+            )
+            if let snapshot {
+                return snapshot.replacingImageFileURL(fileURL)
+            }
+            return ZoomyViewerMediaSnapshot(
+                image: nil,
+                imageFileURL: fileURL,
+                isFinal: true
+            )
+        } catch {
+            return nil
+        }
+    }
 
     static func loadStaticImage(
         url: URL,
@@ -1255,31 +1524,141 @@ private struct ZoomyViewerPageControl: UIViewRepresentable {
     }
 }
 
+private final class ZoomyDismissPanGestureController: NSObject, UIGestureRecognizerDelegate {
+    var canBegin: () -> Bool = { false }
+    var onChanged: (CGFloat) -> Void = { _ in }
+    var onEnded: (CGFloat, CGFloat, Bool) -> Void = { _, _, _ in }
+
+    private lazy var recognizer: UIPanGestureRecognizer = {
+        let recognizer = UIPanGestureRecognizer(target: self, action: #selector(handlePan(_:)))
+        recognizer.maximumNumberOfTouches = 1
+        recognizer.cancelsTouchesInView = true
+        recognizer.delegate = self
+        return recognizer
+    }()
+    private var prioritizedRecognizers = Set<ObjectIdentifier>()
+
+    func install(on view: UIView) {
+        guard recognizer.view !== view else { return }
+        recognizer.view?.removeGestureRecognizer(recognizer)
+        view.addGestureRecognizer(recognizer)
+        if let scrollView = view as? UIScrollView {
+            prioritize(over: scrollView.panGestureRecognizer)
+        }
+    }
+
+    func prioritizeAncestorPanGestures(from view: UIView) {
+        var ancestor = view.superview
+        while let current = ancestor {
+            if let scrollView = current as? UIScrollView {
+                prioritize(over: scrollView.panGestureRecognizer)
+            }
+            ancestor = current.superview
+        }
+    }
+
+    func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
+        guard gestureRecognizer === recognizer, canBegin() else { return false }
+        let velocity = recognizer.velocity(in: recognizer.view)
+        return ZoomyViewerDismissGesturePolicy.isDownwardVerticalPull(
+            CGSize(width: velocity.x, height: velocity.y)
+        )
+    }
+
+    func gestureRecognizer(
+        _: UIGestureRecognizer,
+        shouldRecognizeSimultaneouslyWith _: UIGestureRecognizer
+    ) -> Bool {
+        false
+    }
+
+    func gestureRecognizer(
+        _ gestureRecognizer: UIGestureRecognizer,
+        shouldBeRequiredToFailBy otherGestureRecognizer: UIGestureRecognizer
+    ) -> Bool {
+        gestureRecognizer === recognizer && otherGestureRecognizer is UIPanGestureRecognizer
+    }
+
+    @objc private func handlePan(_ recognizer: UIPanGestureRecognizer) {
+        let translationY = max(recognizer.translation(in: recognizer.view).y, 0)
+        switch recognizer.state {
+        case .began, .changed:
+            onChanged(translationY)
+        case .ended:
+            let velocityY = recognizer.velocity(in: recognizer.view).y
+            onEnded(translationY, velocityY, false)
+        case .cancelled, .failed:
+            onEnded(translationY, 0, true)
+        case .possible:
+            break
+        @unknown default:
+            onEnded(translationY, 0, true)
+        }
+    }
+
+    private func prioritize(over otherGestureRecognizer: UIGestureRecognizer) {
+        guard otherGestureRecognizer !== recognizer else { return }
+        guard recognizer.state == .possible,
+              otherGestureRecognizer.state == .possible
+        else { return }
+        let identifier = ObjectIdentifier(otherGestureRecognizer)
+        guard prioritizedRecognizers.insert(identifier).inserted else { return }
+        otherGestureRecognizer.require(toFail: recognizer)
+    }
+}
+
 private struct ZoomyLivePhotoView: UIViewRepresentable {
     let livePhoto: PHLivePhoto
     let placeholderImage: UIImage
+    let isDismissGestureEnabled: Bool
     let onTapExit: () -> Void
+    let onDismissDragChanged: (CGFloat) -> Void
+    let onDismissDragEnded: (CGFloat, CGFloat, Bool) -> Void
 
     func makeUIView(context _: Context) -> ZoomyLivePhotoHostView {
         let view = ZoomyLivePhotoHostView()
+        view.isDismissGestureEnabled = isDismissGestureEnabled
         view.onTapExit = onTapExit
+        view.onDismissDragChanged = onDismissDragChanged
+        view.onDismissDragEnded = onDismissDragEnded
         return view
     }
 
     func updateUIView(_ view: ZoomyLivePhotoHostView, context _: Context) {
+        view.isDismissGestureEnabled = isDismissGestureEnabled
         view.onTapExit = onTapExit
+        view.onDismissDragChanged = onDismissDragChanged
+        view.onDismissDragEnded = onDismissDragEnded
         view.setLivePhoto(livePhoto, placeholderImage: placeholderImage)
     }
 }
 
 private final class ZoomyLivePhotoHostView: UIView, UIScrollViewDelegate, UIGestureRecognizerDelegate {
+    var isDismissGestureEnabled = false
     var onTapExit: (() -> Void)?
+    var onDismissDragChanged: ((CGFloat) -> Void)?
+    var onDismissDragEnded: ((CGFloat, CGFloat, Bool) -> Void)?
 
     private let scrollView = UIScrollView()
     private let livePhotoView = PHLivePhotoView()
     private var currentLivePhotoIdentifier: ObjectIdentifier?
     private var placeholderImageSize: CGSize = .zero
     private var lastLayoutSize: CGSize = .zero
+    private lazy var dismissPanController: ZoomyDismissPanGestureController = {
+        let controller = ZoomyDismissPanGestureController()
+        controller.canBegin = { [weak self] in
+            guard let self else { return false }
+            return self.isDismissGestureEnabled
+                && self.scrollView.zoomScale <= self.scrollView.minimumZoomScale + 0.01
+        }
+        controller.onChanged = { [weak self] translationY in
+            self?.onDismissDragChanged?(translationY)
+        }
+        controller.onEnded = { [weak self] translationY, velocityY, cancelled in
+            self?.onDismissDragEnded?(translationY, velocityY, cancelled)
+        }
+        return controller
+    }()
 
     override init(frame: CGRect) {
         super.init(frame: frame)
@@ -1313,6 +1692,7 @@ private final class ZoomyLivePhotoHostView: UIView, UIScrollViewDelegate, UIGest
 
         scrollView.addGestureRecognizer(doubleTap)
         scrollView.addGestureRecognizer(tap)
+        dismissPanController.install(on: scrollView)
     }
 
     required init?(coder: NSCoder) {
@@ -1331,6 +1711,7 @@ private final class ZoomyLivePhotoHostView: UIView, UIScrollViewDelegate, UIGest
 
     override func layoutSubviews() {
         super.layoutSubviews()
+        dismissPanController.prioritizeAncestorPanGestures(from: self)
         scrollView.frame = bounds
         guard bounds.size != lastLayoutSize else {
             centerContent()
@@ -1422,32 +1803,61 @@ private final class ZoomyLivePhotoHostView: UIView, UIScrollViewDelegate, UIGest
             height: height
         )
     }
+
 }
 
 private struct ZoomyZoomableImageView: UIViewRepresentable {
     let image: UIImage
+    let isDismissGestureEnabled: Bool
     let onTapExit: () -> Void
+    let onDismissDragChanged: (CGFloat) -> Void
+    let onDismissDragEnded: (CGFloat, CGFloat, Bool) -> Void
 
     func makeUIView(context _: Context) -> ZoomyZoomableImageHostView {
         let view = ZoomyZoomableImageHostView()
+        view.isDismissGestureEnabled = isDismissGestureEnabled
         view.onTapExit = onTapExit
+        view.onDismissDragChanged = onDismissDragChanged
+        view.onDismissDragEnded = onDismissDragEnded
         return view
     }
 
     func updateUIView(_ view: ZoomyZoomableImageHostView, context _: Context) {
+        view.isDismissGestureEnabled = isDismissGestureEnabled
         view.onTapExit = onTapExit
+        view.onDismissDragChanged = onDismissDragChanged
+        view.onDismissDragEnded = onDismissDragEnded
         view.setImage(image)
     }
 }
 
 private final class ZoomyZoomableImageHostView: UIView, UIScrollViewDelegate, UIGestureRecognizerDelegate {
+    var isDismissGestureEnabled = false
     var onTapExit: (() -> Void)?
+    var onDismissDragChanged: ((CGFloat) -> Void)?
+    var onDismissDragEnded: ((CGFloat, CGFloat, Bool) -> Void)?
 
     private let scrollView = UIScrollView()
     private let imageView = UIImageView()
     private var currentImageIdentifier: ObjectIdentifier?
     private var lastLayoutSize: CGSize = .zero
     private var usesLongImageScrolling = false
+    private lazy var dismissPanController: ZoomyDismissPanGestureController = {
+        let controller = ZoomyDismissPanGestureController()
+        controller.canBegin = { [weak self] in
+            guard let self else { return false }
+            return self.isDismissGestureEnabled
+                && !self.usesLongImageScrolling
+                && self.scrollView.zoomScale <= self.scrollView.minimumZoomScale + 0.01
+        }
+        controller.onChanged = { [weak self] translationY in
+            self?.onDismissDragChanged?(translationY)
+        }
+        controller.onEnded = { [weak self] translationY, velocityY, cancelled in
+            self?.onDismissDragEnded?(translationY, velocityY, cancelled)
+        }
+        return controller
+    }()
 
     override init(frame: CGRect) {
         super.init(frame: frame)
@@ -1482,6 +1892,7 @@ private final class ZoomyZoomableImageHostView: UIView, UIScrollViewDelegate, UI
 
         scrollView.addGestureRecognizer(doubleTap)
         scrollView.addGestureRecognizer(tap)
+        dismissPanController.install(on: scrollView)
     }
 
     required init?(coder: NSCoder) {
@@ -1491,16 +1902,24 @@ private final class ZoomyZoomableImageHostView: UIView, UIScrollViewDelegate, UI
     func setImage(_ image: UIImage) {
         let identifier = ObjectIdentifier(image)
         guard currentImageIdentifier != identifier else { return }
+        let previousImage = imageView.image
+        let viewport = captureViewport()
         currentImageIdentifier = identifier
         imageView.image = image
         if image.images != nil {
             imageView.startAnimating()
         }
         resetZoomLayout()
+        if let viewport,
+           let previousImage,
+           aspectRatiosAreCompatible(previousImage.size, image.size) {
+            restoreViewport(viewport)
+        }
     }
 
     override func layoutSubviews() {
         super.layoutSubviews()
+        dismissPanController.prioritizeAncestorPanGestures(from: self)
         scrollView.frame = bounds
         guard bounds.size != lastLayoutSize else {
             centerImage()
@@ -1582,6 +2001,73 @@ private final class ZoomyZoomableImageHostView: UIView, UIScrollViewDelegate, UI
             bottom: usesLongImageScrolling ? 96 : verticalInset,
             right: horizontalInset
         )
+    }
+
+    private struct ViewportSnapshot {
+        let zoomScale: CGFloat
+        let normalizedCenter: CGPoint
+    }
+
+    private func captureViewport() -> ViewportSnapshot? {
+        guard imageView.image != nil,
+              imageView.bounds.width > 0,
+              imageView.bounds.height > 0
+        else { return nil }
+        let center = imageView.convert(
+            CGPoint(x: bounds.midX, y: bounds.midY),
+            from: self
+        )
+        return ViewportSnapshot(
+            zoomScale: scrollView.zoomScale,
+            normalizedCenter: CGPoint(
+                x: min(max(center.x / imageView.bounds.width, 0), 1),
+                y: min(max(center.y / imageView.bounds.height, 0), 1)
+            )
+        )
+    }
+
+    private func restoreViewport(_ viewport: ViewportSnapshot) {
+        let targetScale = min(
+            max(viewport.zoomScale, scrollView.minimumZoomScale),
+            scrollView.maximumZoomScale
+        )
+        scrollView.setZoomScale(targetScale, animated: false)
+        layoutIfNeeded()
+
+        let imagePoint = CGPoint(
+            x: imageView.bounds.width * viewport.normalizedCenter.x,
+            y: imageView.bounds.height * viewport.normalizedCenter.y
+        )
+        let scrollPoint = imageView.convert(imagePoint, to: scrollView)
+        let proposedOffset = CGPoint(
+            x: scrollPoint.x - scrollView.bounds.width * 0.5,
+            y: scrollPoint.y - scrollView.bounds.height * 0.5
+        )
+        scrollView.setContentOffset(clampedContentOffset(proposedOffset), animated: false)
+    }
+
+    private func clampedContentOffset(_ offset: CGPoint) -> CGPoint {
+        let minimumX = -scrollView.contentInset.left
+        let minimumY = -scrollView.contentInset.top
+        let maximumX = max(
+            minimumX,
+            scrollView.contentSize.width - scrollView.bounds.width + scrollView.contentInset.right
+        )
+        let maximumY = max(
+            minimumY,
+            scrollView.contentSize.height - scrollView.bounds.height + scrollView.contentInset.bottom
+        )
+        return CGPoint(
+            x: min(max(offset.x, minimumX), maximumX),
+            y: min(max(offset.y, minimumY), maximumY)
+        )
+    }
+
+    private func aspectRatiosAreCompatible(_ lhs: CGSize, _ rhs: CGSize) -> Bool {
+        guard lhs.width > 0, lhs.height > 0, rhs.width > 0, rhs.height > 0 else { return false }
+        let lhsRatio = lhs.width / lhs.height
+        let rhsRatio = rhs.width / rhs.height
+        return abs(lhsRatio - rhsRatio) / max(lhsRatio, rhsRatio) < 0.04
     }
 
     private func zoomRect(for scale: CGFloat, centeredAt center: CGPoint) -> CGRect {

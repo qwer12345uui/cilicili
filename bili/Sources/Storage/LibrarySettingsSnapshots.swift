@@ -124,6 +124,9 @@ final class PullRefreshRuntimeSettingsStore: ObservableObject {
 struct VideoDetailRuntimeSettingsSnapshot: Equatable {
     var playerPerformanceOverlayEnabled = false
     var videoRotationFrameReportOverlayEnabled = false
+    var pictureInPictureEnabled = false
+    var appTintColorHex = LibraryStore.defaultAppTintColorHex
+    var defaultPlaybackRate = 1.0
     var showsNetworkDiagnosticsButton = false
     var showsPinnedProgressBar = false
     var preferredVideoQuality: Int? = LibraryStore.defaultPreferredVideoQuality
@@ -140,6 +143,9 @@ final class VideoDetailRuntimeSettingsStore: ObservableObject {
 
     var playerPerformanceOverlayEnabled: Bool { snapshot.playerPerformanceOverlayEnabled }
     var videoRotationFrameReportOverlayEnabled: Bool { snapshot.videoRotationFrameReportOverlayEnabled }
+    var pictureInPictureEnabled: Bool { snapshot.pictureInPictureEnabled }
+    var appTintColor: Color { AppThemeTintColor.color(for: snapshot.appTintColorHex) }
+    var defaultPlaybackRate: Double { snapshot.defaultPlaybackRate }
     var showsNetworkDiagnosticsButton: Bool { snapshot.showsNetworkDiagnosticsButton }
     var showsPinnedProgressBar: Bool { snapshot.showsPinnedProgressBar }
     var preferredVideoQuality: Int? { snapshot.preferredVideoQuality }
@@ -166,6 +172,9 @@ final class VideoDetailRuntimeSettingsStore: ObservableObject {
         let next = VideoDetailRuntimeSettingsSnapshot(
             playerPerformanceOverlayEnabled: libraryStore.playerPerformanceOverlayEnabled,
             videoRotationFrameReportOverlayEnabled: libraryStore.videoRotationFrameReportOverlayEnabled,
+            pictureInPictureEnabled: libraryStore.pictureInPictureEnabled,
+            appTintColorHex: libraryStore.appTintColorHex,
+            defaultPlaybackRate: libraryStore.defaultPlaybackRate,
             showsNetworkDiagnosticsButton: libraryStore.showsVideoDetailNetworkDiagnosticsButton,
             showsPinnedProgressBar: libraryStore.showsVideoDetailPinnedProgressBar,
             preferredVideoQuality: libraryStore.effectivePreferredVideoQuality,

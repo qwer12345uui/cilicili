@@ -39,17 +39,21 @@ final class VideoDetailShellSurfaceHost: UIView {
     private let overlayState: VideoDetailShellOverlayState
     private let experimentState: VideoDetailPerformanceExperimentState
     private let libraryStore: LibraryStore
-    private let surfaceHostView: UIKitPlayerSurfaceHostView
+    private let surfaceHostView: any VideoDetailPlayerSurfaceHostingView
     private let overlayHostingController: UIHostingController<PlayerOverlayHostRoot>
     private var cancellables = Set<AnyCancellable>()
     private var rotationChromePrewarmGeneration = 0
     private var isRotationChromePrewarming = false
     private var rotationChromePrewarmOriginalLandscape: Bool?
+    private var isTornDown = false
 
     init(
         playerViewModel: PlayerStateViewModel,
         detailViewModel: VideoDetailViewModel,
         dependencies: AppDependencies,
+        runtimeSettings: VideoDetailRuntimeSettingsStore,
+        onShowMoreControls: @escaping (@escaping () -> Void) -> Void,
+        onDismissMoreControls: @escaping () -> Void,
         onRequestFullscreen: @escaping () -> Void,
         onExitFullscreen: @escaping () -> Void,
         onToggleDanmaku: @escaping () -> Void,
@@ -57,7 +61,10 @@ final class VideoDetailShellSurfaceHost: UIView {
         onNavigateBack: @escaping () -> Void
     ) {
         let state = State(playerViewModel: playerViewModel)
-        let experimentState = VideoDetailPerformanceExperimentState()
+        let experimentState = VideoDetailPerformanceExperimentState(
+            directUIKitSurfaceEnabled: true,
+            narrowPlayerOverlayObservationEnabled: true
+        )
         let overlayState = VideoDetailShellOverlayState(
             detailViewModel: detailViewModel,
             experimentState: experimentState
@@ -66,16 +73,21 @@ final class VideoDetailShellSurfaceHost: UIView {
         self.overlayState = overlayState
         self.experimentState = experimentState
         self.libraryStore = dependencies.libraryStore
-        self.surfaceHostView = UIKitPlayerSurfaceHostView(
+        self.surfaceHostView = DirectUIKitPlayerSurfaceHostView(
             viewModel: playerViewModel,
             isPictureInPictureEnabled: dependencies.libraryStore.pictureInPictureEnabled
+                && !playerViewModel.isAudioOnlyPlayback
         )
         let overlayRoot = PlayerOverlayHostRoot(
             detailViewModel: detailViewModel,
             state: state,
             overlayState: overlayState,
             experimentState: experimentState,
+            runtimeSettings: runtimeSettings,
+            usesNarrowObservation: true,
             dependencies: dependencies,
+            onShowMoreControls: onShowMoreControls,
+            onDismissMoreControls: onDismissMoreControls,
             onRequestFullscreen: onRequestFullscreen,
             onExitFullscreen: onExitFullscreen,
             onToggleDanmaku: onToggleDanmaku,
@@ -91,16 +103,17 @@ final class VideoDetailShellSurfaceHost: UIView {
         if #available(iOS 16.4, *) {
             overlayHostingController.safeAreaRegions = []
         }
-        surfaceHostView.translatesAutoresizingMaskIntoConstraints = false
-        surfaceHostView.isUserInteractionEnabled = false
+        let hostedSurfaceView = surfaceHostView.hostedView
+        hostedSurfaceView.translatesAutoresizingMaskIntoConstraints = false
+        hostedSurfaceView.isUserInteractionEnabled = false
         overlayHostingController.view.translatesAutoresizingMaskIntoConstraints = false
-        addSubview(surfaceHostView)
+        addSubview(hostedSurfaceView)
         addSubview(overlayHostingController.view)
         NSLayoutConstraint.activate([
-            surfaceHostView.leadingAnchor.constraint(equalTo: leadingAnchor),
-            surfaceHostView.trailingAnchor.constraint(equalTo: trailingAnchor),
-            surfaceHostView.topAnchor.constraint(equalTo: topAnchor),
-            surfaceHostView.bottomAnchor.constraint(equalTo: bottomAnchor),
+            hostedSurfaceView.leadingAnchor.constraint(equalTo: leadingAnchor),
+            hostedSurfaceView.trailingAnchor.constraint(equalTo: trailingAnchor),
+            hostedSurfaceView.topAnchor.constraint(equalTo: topAnchor),
+            hostedSurfaceView.bottomAnchor.constraint(equalTo: bottomAnchor),
             overlayHostingController.view.leadingAnchor.constraint(equalTo: leadingAnchor),
             overlayHostingController.view.trailingAnchor.constraint(equalTo: trailingAnchor),
             overlayHostingController.view.topAnchor.constraint(equalTo: topAnchor),
@@ -111,7 +124,10 @@ final class VideoDetailShellSurfaceHost: UIView {
             .removeDuplicates()
             .sink { [weak self] isEnabled in
                 Task { @MainActor [weak self] in
-                    self?.surfaceHostView.setPictureInPictureEnabled(isEnabled)
+                    guard let self else { return }
+                    self.surfaceHostView.setPictureInPictureEnabled(
+                        isEnabled && !self.state.playerViewModel.isAudioOnlyPlayback
+                    )
                 }
             }
             .store(in: &cancellables)
@@ -123,9 +139,22 @@ final class VideoDetailShellSurfaceHost: UIView {
     }
 
     func attach(to parent: UIViewController) {
+        guard !isTornDown else { return }
         surfaceHostView.attach(to: parent)
         parent.addChild(overlayHostingController)
         overlayHostingController.didMove(toParent: parent)
+    }
+
+    func tearDown() {
+        guard !isTornDown else { return }
+        isTornDown = true
+        cancelRotationChromePrewarm()
+        cancellables.removeAll()
+        surfaceHostView.tearDown()
+        surfaceHostView.hostedView.removeFromSuperview()
+        overlayHostingController.willMove(toParent: nil)
+        overlayHostingController.view.removeFromSuperview()
+        overlayHostingController.removeFromParent()
     }
 
     /// 容器 VC 旋转时调用，切换横屏/竖屏控件形态。
@@ -211,11 +240,15 @@ final class VideoDetailShellSurfaceHost: UIView {
         }
     }
 
-    /// 清晰度切换等场景会重建 player 实例，需让 surface-only 根视图重建运行时状态。
+    /// 清晰度切换等场景会替换 player 实例，UIKit 直连路径会原位重绑叠层。
     func setPlayerViewModel(_ playerViewModel: PlayerStateViewModel) {
         guard state.playerViewModel !== playerViewModel else { return }
         state.playerViewModel = playerViewModel
         surfaceHostView.setPlayerViewModel(playerViewModel)
+        surfaceHostView.setPictureInPictureEnabled(
+            libraryStore.pictureInPictureEnabled
+                && !playerViewModel.isAudioOnlyPlayback
+        )
     }
 
     func setVideoGravity(_ gravity: AVLayerVideoGravity) {
@@ -248,18 +281,24 @@ private struct VideoDetailShellOverlaySnapshot: Equatable {
     var historyDuration: TimeInterval?
     var isDanmakuEnabled = true
     var isSwitchingPlayQuality = false
+    var playbackContentMode: PlayerPlaybackContentMode = .video
+    var isSwitchingVideoListenMode = false
 
     init(
         detail: VideoItem,
         selectedCID: Int?,
         isDanmakuEnabled: Bool,
-        isSwitchingPlayQuality: Bool
+        isSwitchingPlayQuality: Bool,
+        playbackContentMode: PlayerPlaybackContentMode,
+        isSwitchingVideoListenMode: Bool
     ) {
         self.historyVideo = detail
         self.historyCID = selectedCID ?? detail.cid
         self.historyDuration = detail.duration.map(TimeInterval.init)
         self.isDanmakuEnabled = isDanmakuEnabled
         self.isSwitchingPlayQuality = isSwitchingPlayQuality
+        self.playbackContentMode = playbackContentMode
+        self.isSwitchingVideoListenMode = isSwitchingVideoListenMode
     }
 }
 
@@ -280,21 +319,31 @@ private final class VideoDetailShellOverlayState: ObservableObject {
             detail: detailViewModel.detail,
             selectedCID: detailViewModel.selectedCID,
             isDanmakuEnabled: detailViewModel.isDanmakuEnabled,
-            isSwitchingPlayQuality: detailViewModel.isSwitchingPlayQuality
+            isSwitchingPlayQuality: detailViewModel.isSwitchingPlayQuality,
+            playbackContentMode: detailViewModel.playbackContentMode,
+            isSwitchingVideoListenMode: detailViewModel.isSwitchingVideoListenMode
         )
 
-        Publishers.CombineLatest4(
+        let playbackSnapshotPublisher = Publishers.CombineLatest4(
             detailViewModel.$detail,
             detailViewModel.$selectedCID,
             detailViewModel.$isDanmakuEnabled,
             detailViewModel.$isSwitchingPlayQuality
         )
-        .map { detail, selectedCID, isDanmakuEnabled, isSwitchingPlayQuality in
-            VideoDetailShellOverlaySnapshot(
+        let listenModePublisher = detailViewModel.$playbackContentMode
+            .combineLatest(detailViewModel.$isSwitchingVideoListenMode)
+
+        Publishers.CombineLatest(playbackSnapshotPublisher, listenModePublisher)
+        .map { playback, listenMode in
+            let (detail, selectedCID, isDanmakuEnabled, isSwitchingPlayQuality) = playback
+            let (playbackContentMode, isSwitchingVideoListenMode) = listenMode
+            return VideoDetailShellOverlaySnapshot(
                 detail: detail,
                 selectedCID: selectedCID,
                 isDanmakuEnabled: isDanmakuEnabled,
-                isSwitchingPlayQuality: isSwitchingPlayQuality
+                isSwitchingPlayQuality: isSwitchingPlayQuality,
+                playbackContentMode: playbackContentMode,
+                isSwitchingVideoListenMode: isSwitchingVideoListenMode
             )
         }
         .removeDuplicates()
@@ -339,12 +388,50 @@ private extension UIView {
     }
 }
 
+@MainActor
+private final class VideoDetailPlayerOverlayLegacyObservationBridge: ObservableObject {
+    @Published private(set) var revision = 0
+
+    private var updateScheduled = false
+    private var cancellables = Set<AnyCancellable>()
+
+    init(
+        viewModel: PlayerStateViewModel,
+        libraryStore: LibraryStore,
+        isEnabled: Bool
+    ) {
+        guard isEnabled else { return }
+        Publishers.Merge(
+            viewModel.objectWillChange,
+            libraryStore.objectWillChange
+        )
+        .sink { [weak self] in
+            self?.scheduleUpdate()
+        }
+        .store(in: &cancellables)
+    }
+
+    private func scheduleUpdate() {
+        guard !updateScheduled else { return }
+        updateScheduled = true
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            self.updateScheduled = false
+            self.revision &+= 1
+        }
+    }
+}
+
 private struct PlayerOverlayHostRoot: View {
     let detailViewModel: VideoDetailViewModel
     @ObservedObject var state: VideoDetailShellSurfaceHost.State
     @ObservedObject var overlayState: VideoDetailShellOverlayState
-    @ObservedObject var experimentState: VideoDetailPerformanceExperimentState
+    let experimentState: VideoDetailPerformanceExperimentState
+    let runtimeSettings: VideoDetailRuntimeSettingsStore
+    let usesNarrowObservation: Bool
     let dependencies: AppDependencies
+    let onShowMoreControls: (@escaping () -> Void) -> Void
+    let onDismissMoreControls: () -> Void
     let onRequestFullscreen: () -> Void
     let onExitFullscreen: () -> Void
     let onToggleDanmaku: () -> Void
@@ -353,40 +440,55 @@ private struct PlayerOverlayHostRoot: View {
 
     var body: some View {
         let overlaySnapshot = overlayState.snapshot
-        SurfaceOnlyPlayerOverlayRoot(
+        let overlay = SurfaceOnlyPlayerOverlayRoot(
             viewModel: state.playerViewModel,
             detailViewModel: detailViewModel,
             overlaySnapshot: overlaySnapshot,
-            experimentSnapshot: experimentState.snapshot,
+            experimentState: experimentState,
+            runtimeSettings: runtimeSettings,
+            usesNarrowObservation: usesNarrowObservation,
             dependencies: dependencies,
             isLandscape: state.isLandscape,
             isBareSurfaceTransitionActive: state.isBareSurfaceTransitionActive,
             retainsChromeDuringBareSurfaceTransition: state.retainsChromeDuringBareSurfaceTransition,
             videoAspectRatio: state.videoAspectRatio,
+            onShowMoreControls: onShowMoreControls,
+            onDismissMoreControls: onDismissMoreControls,
             onToggleDanmaku: onToggleDanmaku,
             onShowDanmakuSettings: onShowDanmakuSettings,
             onNavigateBack: onNavigateBack,
             onRequestFullscreen: onRequestFullscreen,
             onExitFullscreen: onExitFullscreen
         )
-        .id(ObjectIdentifier(state.playerViewModel))
+
+        Group {
+            if usesNarrowObservation {
+                overlay
+            } else {
+                overlay.id(ObjectIdentifier(state.playerViewModel))
+            }
+        }
         .ignoresSafeArea()
     }
 }
 
 private struct SurfaceOnlyPlayerOverlayRoot: View {
     @Environment(\.verticalSizeClass) private var verticalSizeClass
-    @ObservedObject var viewModel: PlayerStateViewModel
+    let viewModel: PlayerStateViewModel
     let detailViewModel: VideoDetailViewModel
-    @ObservedObject var libraryStore: LibraryStore
+    let libraryStore: LibraryStore
+    @ObservedObject var runtimeSettings: VideoDetailRuntimeSettingsStore
 
     let overlaySnapshot: VideoDetailShellOverlaySnapshot
-    let experimentSnapshot: VideoDetailPerformanceExperimentSnapshot
+    let experimentState: VideoDetailPerformanceExperimentState
+    let usesNarrowObservation: Bool
     let dependencies: AppDependencies
     let isLandscape: Bool
     let isBareSurfaceTransitionActive: Bool
     let retainsChromeDuringBareSurfaceTransition: Bool
     let videoAspectRatio: CGFloat
+    let onShowMoreControls: (@escaping () -> Void) -> Void
+    let onDismissMoreControls: () -> Void
     let onToggleDanmaku: () -> Void
     let onShowDanmakuSettings: () -> Void
     let onNavigateBack: () -> Void
@@ -402,20 +504,27 @@ private struct SurfaceOnlyPlayerOverlayRoot: View {
     @StateObject private var seekPreviewModel = PlayerSeekPreviewModel()
     @StateObject private var playbackProgressCoordinator = PlayerPlaybackProgressCoordinator()
     @StateObject private var progressReporter = PlayerPlaybackProgressReporter()
+    @StateObject private var legacyObservationBridge: VideoDetailPlayerOverlayLegacyObservationBridge
     @State private var lastPreparedScrubProgress = -1.0
     @State private var isMoreControlsPresented = false
-    @State private var isMoreControlsSheetPresented = false
+    @State private var portraitMoreControlsRequestID: UUID?
+    @State private var isMoreControlsButtonPressed = false
+    @State private var isVideoListenQueuePresented = false
 
     init(
         viewModel: PlayerStateViewModel,
         detailViewModel: VideoDetailViewModel,
         overlaySnapshot: VideoDetailShellOverlaySnapshot,
-        experimentSnapshot: VideoDetailPerformanceExperimentSnapshot,
+        experimentState: VideoDetailPerformanceExperimentState,
+        runtimeSettings: VideoDetailRuntimeSettingsStore,
+        usesNarrowObservation: Bool,
         dependencies: AppDependencies,
         isLandscape: Bool,
         isBareSurfaceTransitionActive: Bool,
         retainsChromeDuringBareSurfaceTransition: Bool,
         videoAspectRatio: CGFloat,
+        onShowMoreControls: @escaping (@escaping () -> Void) -> Void,
+        onDismissMoreControls: @escaping () -> Void,
         onToggleDanmaku: @escaping () -> Void,
         onShowDanmakuSettings: @escaping () -> Void,
         onNavigateBack: @escaping () -> Void,
@@ -425,22 +534,34 @@ private struct SurfaceOnlyPlayerOverlayRoot: View {
         self.viewModel = viewModel
         self.detailViewModel = detailViewModel
         self.overlaySnapshot = overlaySnapshot
-        self.experimentSnapshot = experimentSnapshot
+        self.experimentState = experimentState
+        self.runtimeSettings = runtimeSettings
+        self.usesNarrowObservation = usesNarrowObservation
         self.dependencies = dependencies
         self.libraryStore = dependencies.libraryStore
         self.isLandscape = isLandscape
         self.isBareSurfaceTransitionActive = isBareSurfaceTransitionActive
         self.retainsChromeDuringBareSurfaceTransition = retainsChromeDuringBareSurfaceTransition
         self.videoAspectRatio = videoAspectRatio
+        self.onShowMoreControls = onShowMoreControls
+        self.onDismissMoreControls = onDismissMoreControls
         self.onToggleDanmaku = onToggleDanmaku
         self.onShowDanmakuSettings = onShowDanmakuSettings
         self.onNavigateBack = onNavigateBack
         self.onRequestFullscreen = onRequestFullscreen
         self.onExitFullscreen = onExitFullscreen
         _surfaceState = StateObject(wrappedValue: PlayerSurfaceStateModel(viewModel: viewModel))
+        _legacyObservationBridge = StateObject(
+            wrappedValue: VideoDetailPlayerOverlayLegacyObservationBridge(
+                viewModel: viewModel,
+                libraryStore: dependencies.libraryStore,
+                isEnabled: !usesNarrowObservation
+            )
+        )
     }
 
     var body: some View {
+        let _ = legacyObservationBridge.revision
         let context = runtimeContext
         let renderContext = context.renderContext
         let renderState = BiliPlayerViewRenderState(
@@ -471,6 +592,15 @@ private struct SurfaceOnlyPlayerOverlayRoot: View {
             )
 
             ZStack {
+                if isAudioOnlyPlayback {
+                    VideoListenArtworkLayer(
+                        video: overlaySnapshot.historyVideo,
+                        isLandscape: isLandscape
+                    )
+                    .allowsHitTesting(false)
+                    .zIndex(0.5)
+                }
+
                 if shouldKeepChromeMounted {
                     Group {
                         BiliPlayerSurfaceGestureLayerHost(
@@ -510,13 +640,13 @@ private struct SurfaceOnlyPlayerOverlayRoot: View {
 
                         persistentMoreControlsButton(contentInsets: videoInsets)
 
-                        if libraryStore.playerPerformanceOverlayEnabled {
+                        if runtimeSettings.playerPerformanceOverlayEnabled {
                             performanceOverlay(contentInsets: videoInsets, in: proxy.size)
                                 .zIndex(8)
                         }
 
                         let rotationReportMetricsID = overlaySnapshot.historyVideo.bvid
-                        if libraryStore.videoRotationFrameReportOverlayEnabled,
+                        if runtimeSettings.videoRotationFrameReportOverlayEnabled,
                            !rotationReportMetricsID.isEmpty {
                             VideoRotationFrameReportFloatingWindow(
                                 metricsID: rotationReportMetricsID,
@@ -549,15 +679,17 @@ private struct SurfaceOnlyPlayerOverlayRoot: View {
                         .zIndex(5)
                 }
 
-                VideoDetailPlayerSurfaceDanmakuLayer(
-                    store: detailViewModel.danmakuRenderStore,
-                    playerViewModel: viewModel,
-                    usesLandscapePlaybackChrome: configuration.isFullscreenActive,
-                    isLayoutTransitioning: isBareSurfaceTransitionActive,
-                    onPlaybackTime: { detailViewModel.updateDanmakuPlaybackTime($0, underLoad: $1) }
-                )
-                .allowsHitTesting(false)
-                .zIndex(2.5)
+                if !isAudioOnlyPlayback {
+                    VideoDetailPlayerSurfaceDanmakuLayer(
+                        store: detailViewModel.danmakuRenderStore,
+                        playerViewModel: viewModel,
+                        usesLandscapePlaybackChrome: configuration.isFullscreenActive,
+                        isLayoutTransitioning: isBareSurfaceTransitionActive,
+                        onPlaybackTime: { detailViewModel.updateDanmakuPlaybackTime($0, underLoad: $1) }
+                    )
+                    .allowsHitTesting(false)
+                    .zIndex(2.5)
+                }
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -570,23 +702,47 @@ private struct SurfaceOnlyPlayerOverlayRoot: View {
         }
         .environmentObject(dependencies)
         .environmentObject(libraryStore)
-        .environment(\.appThemeTintColor, libraryStore.appTintColor)
+        .environment(\.appThemeTintColor, runtimeSettings.appTintColor)
         .biliPlayerLifecycle(
             isFullscreenActive: configuration.isFullscreenActive,
             presentation: configuration.presentation,
             isLayoutTransitioning: configuration.isLayoutTransitioning,
             isSecondaryControlsPresented: configuration.isSecondaryControlsPresented,
-            isPictureInPictureEnabled: libraryStore.pictureInPictureEnabled,
+            isPictureInPictureEnabled: effectivePictureInPictureEnabled,
             actions: context.lifecycleActions
         )
         .onAppear {
-            detailViewModel.scheduleDanmakuLoadIfNeeded()
+            if !isAudioOnlyPlayback {
+                detailViewModel.scheduleDanmakuLoadIfNeeded()
+            }
+        }
+        .onChange(of: ObjectIdentifier(viewModel)) { _, _ in
+            guard usesNarrowObservation else { return }
+            context.lifecycleActions.onPlayerChanged()
+            experimentState.recordPlayerRebind()
         }
         .onChange(of: isLandscape) { _, isLandscape in
+            // 旋转控件预热会在 bare transition 中短暂翻转该值，不能把它当成
+            // 用户真实进入横屏，否则刚弹出的竖屏菜单会被预热流程立即关闭。
+            guard !isBareSurfaceTransitionActive else { return }
             if isLandscape {
-                isMoreControlsSheetPresented = false
+                portraitMoreControlsRequestID = nil
+                onDismissMoreControls()
+                isVideoListenQueuePresented = false
             } else {
                 isMoreControlsPresented = false
+            }
+        }
+        .onChange(of: overlaySnapshot.playbackContentMode) { _, mode in
+            if mode != .audioOnly {
+                isVideoListenQueuePresented = false
+            }
+            guard mode == .audioOnly else { return }
+            isMoreControlsPresented = false
+            portraitMoreControlsRequestID = nil
+            onDismissMoreControls()
+            if isLandscape {
+                onExitFullscreen()
             }
         }
         .onChange(of: isBareSurfaceTransitionActive) { _, isActive in
@@ -595,21 +751,30 @@ private struct SurfaceOnlyPlayerOverlayRoot: View {
             transaction.disablesAnimations = true
             withTransaction(transaction) {
                 isMoreControlsPresented = false
-                isMoreControlsSheetPresented = false
+                isVideoListenQueuePresented = false
             }
             playbackControlsVisibility.cancelAutoHide()
         }
         .onChange(of: surfaceState.isUserSeeking) { _, isUserSeeking in
             updateSeekTransitionSnapshot(isUserSeeking: isUserSeeking)
         }
-        .sheet(isPresented: $isMoreControlsSheetPresented) {
-            SurfaceOnlyMoreControlsSheet(
-                detailViewModel: detailViewModel,
-                viewModel: viewModel,
-                qualityStore: detailViewModel.playbackRenderStore.qualityControlStore,
-                selectPlayVariant: { detailViewModel.selectPlayVariant($0) },
-                onToggleDanmaku: onToggleDanmaku
-            )
+        .onReceive(surfaceState.$snapshot.dropFirst()) { _ in
+            guard usesNarrowObservation else { return }
+            experimentState.recordPlayerStatePublish()
+        }
+        .onReceive(runtimeSettings.$snapshot.dropFirst()) { _ in
+            guard usesNarrowObservation else { return }
+            experimentState.recordSettingsStatePublish()
+        }
+        .sheet(isPresented: $isVideoListenQueuePresented) {
+            NavigationStack {
+                SurfaceOnlyVideoListenQueuePage(
+                    detailViewModel: detailViewModel,
+                    closeSheet: { isVideoListenQueuePresented = false }
+                )
+            }
+            .presentationDetents([.medium, .large])
+            .presentationDragIndicator(.visible)
         }
     }
 
@@ -630,7 +795,16 @@ private struct SurfaceOnlyPlayerOverlayRoot: View {
     }
 
     private var fullscreenMode: PlayerFullscreenMode? {
-        isLandscape ? .landscape(.landscapeRight) : nil
+        guard !isAudioOnlyPlayback else { return nil }
+        return isLandscape ? .landscape(.landscapeRight) : nil
+    }
+
+    private var isAudioOnlyPlayback: Bool {
+        overlaySnapshot.playbackContentMode == .audioOnly
+    }
+
+    private var effectivePictureInPictureEnabled: Bool {
+        runtimeSettings.pictureInPictureEnabled && !isAudioOnlyPlayback
     }
 
     private var keepsChromeMounted: Bool {
@@ -640,7 +814,7 @@ private struct SurfaceOnlyPlayerOverlayRoot: View {
     private var showsCenterPlaybackControl: Bool {
         keepsChromeMounted
             && !isBareSurfaceTransitionActive
-            && viewModel.showsExplicitPlaybackStartControl
+            && surfaceState.showsExplicitPlaybackStartControl
             && surfaceState.errorMessage == nil
     }
 
@@ -670,12 +844,17 @@ private struct SurfaceOnlyPlayerOverlayRoot: View {
             showsPlaybackControls: keepsChromeMounted,
             showsStartupLoadingIndicator: keepsChromeMounted && viewModel.wantsAutoplay,
             pausesOnDisappear: false,
+            controlsAccessory: isAudioOnlyPlayback
+                ? AnyView(videoListenQuickControls)
+                : nil,
             topLeadingControlsAccessory: keepsChromeMounted ? AnyView(backButton) : nil,
-            isDanmakuEnabled: keepsChromeMounted && overlaySnapshot.isDanmakuEnabled,
-            onToggleDanmaku: onToggleDanmaku,
-            onShowDanmakuSettings: onShowDanmakuSettings,
+            isDanmakuEnabled: keepsChromeMounted && overlaySnapshot.isDanmakuEnabled && !isAudioOnlyPlayback,
+            onToggleDanmaku: isAudioOnlyPlayback ? nil : onToggleDanmaku,
+            onShowDanmakuSettings: isAudioOnlyPlayback ? nil : onShowDanmakuSettings,
             isSecondaryControlsPresented: keepsChromeMounted
-                && (isMoreControlsPresented || isMoreControlsSheetPresented),
+                && (isMoreControlsPresented
+                    || portraitMoreControlsRequestID != nil
+                    || isVideoListenQueuePresented),
             ignoresContainerSafeArea: true,
             keepsPlayerSurfaceStable: true,
             fullscreenMode: fullscreenMode,
@@ -683,9 +862,18 @@ private struct SurfaceOnlyPlayerOverlayRoot: View {
             usesLiveSurfaceDuringLayoutTransition: true,
             disablesSurfaceImplicitLayoutAnimations: true,
             showsRotationTransitionSnapshot: false,
-            onRequestFullscreen: onRequestFullscreen,
-            onExitFullscreen: onExitFullscreen
+            onRequestFullscreen: isAudioOnlyPlayback ? nil : onRequestFullscreen,
+            onExitFullscreen: isAudioOnlyPlayback ? nil : onExitFullscreen
         ).configuration()
+    }
+
+    private var videoListenQuickControls: some View {
+        SurfaceOnlyVideoListenQuickControls(
+            detailViewModel: detailViewModel,
+            libraryStore: libraryStore,
+            metrics: controlMetrics,
+            showQueue: { isVideoListenQueuePresented = true }
+        )
     }
 
     private var runtimeContext: BiliPlayerViewRuntimeContext {
@@ -706,7 +894,7 @@ private struct SurfaceOnlyPlayerOverlayRoot: View {
             historyCID: overlaySnapshot.historyCID,
             historyDuration: overlaySnapshot.historyDuration,
             configuration: configuration,
-            isPictureInPictureEnabled: libraryStore.pictureInPictureEnabled,
+            isPictureInPictureEnabled: effectivePictureInPictureEnabled,
             videoGravity: .resizeAspect,
             holdCurrentFrameForSeek: holdCurrentFrameForSeek,
             prepareUserSeekWarmup: prepareUserSeekWarmupIfNeeded,
@@ -715,33 +903,46 @@ private struct SurfaceOnlyPlayerOverlayRoot: View {
     }
 
     private var moreControlsButton: some View {
-        Button {
+        SurfaceOnlyUIKitMoreControlsButton(
+            usesGlass: !showsPausedThemeMask,
+            metrics: controlMetrics,
+            onPressBegan: {
+                isMoreControlsButtonPressed = true
+                playbackControlsVisibility.cancelAutoHide()
+            },
+            onPressEnded: {
+                isMoreControlsButtonPressed = false
+                guard portraitMoreControlsRequestID == nil,
+                      !isMoreControlsPresented
+                else { return }
+                playbackControlsVisibility.scheduleAutoHide(
+                    showsPlaybackControls: keepsChromeMounted,
+                    isLayoutTransitioning: isBareSurfaceTransitionActive
+                )
+            }
+        ) {
             playbackControlsVisibility.cancelAutoHide()
             if isLandscape {
                 withAnimation(.default) {
                     isMoreControlsPresented = true
                 }
             } else {
-                isMoreControlsSheetPresented = true
+                let requestID = UUID()
+                portraitMoreControlsRequestID = requestID
+                onShowMoreControls {
+                    guard portraitMoreControlsRequestID == requestID else { return }
+                    portraitMoreControlsRequestID = nil
+                }
             }
-        } label: {
-            Image(systemName: "ellipsis")
-                .font(.system(size: controlMetrics.iconSize, weight: .semibold))
-                .foregroundStyle(.white)
-                .frame(width: moreControlsButtonWidth, height: controlMetrics.controlHeight)
         }
-        .modifier(SurfaceOnlyMoreControlsButtonSurface(usesGlass: !showsPausedThemeMask, metrics: controlMetrics))
+        .frame(width: moreControlsButtonWidth, height: controlMetrics.controlHeight)
         .frame(width: 44, height: controlMetrics.controlHeight, alignment: .trailing)
-        .biliPlayerExpandedHitTarget(horizontal: 0, vertical: moreControlsVerticalHitPadding)
+        .biliPlayerExpandedHitTarget(horizontal: 0, vertical: 8)
         .accessibilityLabel("更多播放设置")
     }
 
     private var moreControlsButtonWidth: CGFloat {
         controlMetrics.controlHeight + 10
-    }
-
-    private var moreControlsVerticalHitPadding: CGFloat {
-        max((44 - controlMetrics.controlHeight) / 2, 8)
     }
 
     private var showsPausedThemeMask: Bool {
@@ -767,8 +968,10 @@ private struct SurfaceOnlyPlayerOverlayRoot: View {
                 Spacer()
             }
         }
-        .opacity(playbackControlsVisibility.opacity)
-        .allowsHitTesting(playbackControlsVisibility.acceptsHitTesting)
+        .opacity(isMoreControlsButtonPressed ? 1 : playbackControlsVisibility.opacity)
+        .allowsHitTesting(
+            isMoreControlsButtonPressed || playbackControlsVisibility.acceptsHitTesting
+        )
         .zIndex(4)
     }
 
@@ -788,7 +991,7 @@ private struct SurfaceOnlyPlayerOverlayRoot: View {
             HStack {
                 VideoDetailPerformanceOverlayContainer(
                     store: detailViewModel.networkDiagnosticsRenderStore,
-                    experimentSnapshot: experimentSnapshot,
+                    experimentState: experimentState,
                     panelWidth: panelWidth,
                     maximumHeight: maximumHeight
                 )
@@ -929,13 +1132,30 @@ private struct SurfaceOnlyPlayerOverlayRoot: View {
     }
 }
 
-private struct SurfaceOnlyMoreControlsSheet: View {
+struct SurfaceOnlyMoreControlsSheet: View {
     @Environment(\.dismiss) private var dismiss
     @ObservedObject var detailViewModel: VideoDetailViewModel
     @ObservedObject var viewModel: PlayerStateViewModel
     @ObservedObject var qualityStore: VideoDetailQualityControlRenderStore
     let selectPlayVariant: (PlayVariant) -> Void
     let onToggleDanmaku: () -> Void
+    let closeAction: (() -> Void)?
+
+    init(
+        detailViewModel: VideoDetailViewModel,
+        viewModel: PlayerStateViewModel,
+        qualityStore: VideoDetailQualityControlRenderStore,
+        selectPlayVariant: @escaping (PlayVariant) -> Void,
+        onToggleDanmaku: @escaping () -> Void,
+        close: (() -> Void)? = nil
+    ) {
+        self.detailViewModel = detailViewModel
+        self.viewModel = viewModel
+        self.qualityStore = qualityStore
+        self.selectPlayVariant = selectPlayVariant
+        self.onToggleDanmaku = onToggleDanmaku
+        self.closeAction = close
+    }
 
     var body: some View {
         SurfaceOnlyMoreControlsNavigationContent(
@@ -945,10 +1165,244 @@ private struct SurfaceOnlyMoreControlsSheet: View {
             qualityStore: qualityStore,
             selectPlayVariant: selectPlayVariant,
             onToggleDanmaku: onToggleDanmaku,
-            close: { dismiss() }
+            close: closeSheet
         )
         .presentationDetents([.medium])
         .presentationDragIndicator(.visible)
+    }
+
+    private func closeSheet() {
+        if let closeAction {
+            closeAction()
+        } else {
+            dismiss()
+        }
+    }
+}
+
+private struct SurfaceOnlyVideoListenQuickControls: View {
+    @ObservedObject var detailViewModel: VideoDetailViewModel
+    @ObservedObject var libraryStore: LibraryStore
+    let metrics: PlayerNativeControlMetrics
+    let showQueue: () -> Void
+
+    var body: some View {
+        HStack(spacing: metrics.controlSpacing) {
+            PlayerNativeGlassIconButton(
+                systemName: "list.bullet",
+                accessibilityLabel: "播放列表，\(detailViewModel.videoListenQueueAccessoryTitle)",
+                metrics: metrics,
+                action: showQueue
+            )
+
+            Menu {
+                ForEach(VideoListenPlaybackOrder.allCases) { order in
+                    Button {
+                        libraryStore.setVideoListenPlaybackOrder(order)
+                    } label: {
+                        Label(
+                            order.title,
+                            systemImage: libraryStore.videoListenPlaybackOrder == order
+                                ? "checkmark"
+                                : order.systemImage
+                        )
+                    }
+                }
+            } label: {
+                Image(systemName: libraryStore.videoListenPlaybackOrder.systemImage)
+                    .font(.system(size: metrics.iconSize, weight: .semibold))
+                    .frame(width: metrics.controlHeight, height: metrics.controlHeight)
+            }
+            .biliPlayerCompactGlassCircle(metrics: metrics)
+            .accessibilityLabel("播放顺序，\(libraryStore.videoListenPlaybackOrder.title)")
+
+            Menu {
+                ForEach(VideoListenSleepTimerOption.allCases) { option in
+                    Button {
+                        detailViewModel.setVideoListenSleepTimer(option)
+                    } label: {
+                        Label(
+                            option.title,
+                            systemImage: detailViewModel.videoListenSleepTimerOption == option
+                                ? "checkmark"
+                                : option.systemImage
+                        )
+                    }
+                }
+            } label: {
+                sleepTimerLabel
+            }
+            .biliPlayerCompactGlassCapsule(metrics: metrics)
+            .accessibilityLabel("定时关闭，\(detailViewModel.videoListenSleepTimerAccessoryTitle)")
+        }
+    }
+
+    @ViewBuilder
+    private var sleepTimerLabel: some View {
+        if let deadline = detailViewModel.videoListenSleepTimerDeadline {
+            TimelineView(.periodic(from: .now, by: 1)) { context in
+                Text(VideoListenSleepTimerCountdownFormatter.text(deadline: deadline, now: context.date))
+                    .font(.caption2.monospacedDigit().weight(.semibold))
+                    .lineLimit(1)
+                    .frame(width: max(48, metrics.controlHeight + 20), height: metrics.controlHeight)
+            }
+        } else {
+            Image(systemName: detailViewModel.videoListenSleepTimerOption.systemImage)
+                .font(.system(size: metrics.iconSize, weight: .semibold))
+                .frame(width: metrics.controlHeight, height: metrics.controlHeight)
+        }
+    }
+}
+
+private struct VideoListenArtworkLayer: View {
+    let video: VideoItem
+    let isLandscape: Bool
+
+    private let artworkAspectRatio: CGFloat = 16.0 / 9.0
+
+    var body: some View {
+        GeometryReader { proxy in
+            ZStack {
+                Color.black
+
+                backgroundArtwork
+                    .frame(width: proxy.size.width, height: proxy.size.height)
+                    .clipped()
+
+                Color.black.opacity(0.52)
+
+                if proxy.size.height < 280 {
+                    compactContent(in: proxy.size)
+                } else {
+                    regularContent(in: proxy.size)
+                }
+            }
+        }
+        .clipped()
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("听视频中，\(video.title)，\(ownerName)")
+    }
+
+    private var backgroundArtwork: some View {
+        CachedRemoteImage(
+            url: artworkURL,
+            targetPixelSize: 1_280,
+            animatesAppearance: false
+        ) { image in
+            image
+                .resizable()
+                .scaledToFill()
+                .scaleEffect(1.12)
+                .blur(radius: 24)
+        } placeholder: {
+            Color.black
+        }
+    }
+
+    private func compactContent(in size: CGSize) -> some View {
+        let horizontalPadding = min(20.0, max(size.width * 0.05, 12.0))
+        let spacing = min(14.0, max(size.width * 0.035, 10.0))
+        let availableWidth = max(size.width - horizontalPadding * 2 - spacing, 0)
+        let artworkMaximumWidth = min(148.0, availableWidth * 0.43)
+        let artworkMaximumHeight = max(size.height - 28, 0)
+        let artworkSize = fittedArtworkSize(
+            maximumWidth: artworkMaximumWidth,
+            maximumHeight: artworkMaximumHeight
+        )
+        let metadataWidth = max(availableWidth - artworkSize.width, 0)
+
+        return HStack(spacing: spacing) {
+            foregroundArtwork
+                .frame(width: artworkSize.width, height: artworkSize.height)
+
+            metadata(alignment: .leading, textAlignment: .leading, titleLines: 2)
+                .frame(width: metadataWidth, alignment: .leading)
+                .layoutPriority(1)
+        }
+        .padding(.horizontal, horizontalPadding)
+        .frame(width: size.width, height: size.height)
+        .clipped()
+    }
+
+    private func regularContent(in size: CGSize) -> some View {
+        let artworkSize = fittedArtworkSize(
+            maximumWidth: min(isLandscape ? 300 : 220, size.width * 0.52),
+            maximumHeight: max(size.height * 0.55, 0)
+        )
+
+        return VStack(spacing: isLandscape ? 14 : 12) {
+            foregroundArtwork
+                .frame(width: artworkSize.width, height: artworkSize.height)
+
+            metadata(alignment: .center, textAlignment: .center, titleLines: 2)
+                .frame(maxWidth: min(460, size.width * 0.70))
+        }
+        .padding(.horizontal, 28)
+        .padding(.vertical, 22)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    private var foregroundArtwork: some View {
+        CachedRemoteImage(
+            url: artworkURL,
+            targetPixelSize: 960,
+            animatesAppearance: true
+        ) { image in
+            image
+                .resizable()
+                .scaledToFill()
+        } placeholder: {
+            BiliMediaPlaceholder(style: .video, iconSize: 22)
+        }
+        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .stroke(Color.white.opacity(0.16), lineWidth: 0.7)
+        }
+        .shadow(color: .black.opacity(0.34), radius: 12, x: 0, y: 7)
+    }
+
+    private func metadata(
+        alignment: HorizontalAlignment,
+        textAlignment: TextAlignment,
+        titleLines: Int
+    ) -> some View {
+        VStack(alignment: alignment, spacing: 6) {
+            Label("听视频中", systemImage: "headphones")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.white)
+
+            Text(video.title)
+                .font(.headline)
+                .foregroundStyle(.white)
+                .multilineTextAlignment(textAlignment)
+                .lineLimit(titleLines)
+
+            Text(ownerName)
+                .font(.subheadline)
+                .foregroundStyle(.white.opacity(0.76))
+                .lineLimit(1)
+        }
+    }
+
+    private var ownerName: String {
+        let name = video.owner?.name.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return name.isEmpty ? "未知 UP 主" : name
+    }
+
+    private var artworkURL: URL? {
+        guard let picture = video.pic?.normalizedBiliURL(), !picture.isEmpty else { return nil }
+        return URL(string: picture.biliCoverThumbnailURL(width: 1_280, height: 720))
+    }
+
+    private func fittedArtworkSize(
+        maximumWidth: CGFloat,
+        maximumHeight: CGFloat
+    ) -> CGSize {
+        guard maximumWidth > 0, maximumHeight > 0 else { return .zero }
+        let widthFromHeight = maximumHeight * artworkAspectRatio
+        let width = min(maximumWidth, widthFromHeight)
+        return CGSize(width: width, height: width / artworkAspectRatio)
     }
 }
 
@@ -964,7 +1418,22 @@ private struct SurfaceOnlyMoreControlsNavigationContent: View {
     var body: some View {
         NavigationStack {
             List {
-                if qualityStore.hasQualityMenu {
+                if detailViewModel.isVideoListenModeEnabled,
+                   !detailViewModel.videoListenAudioVariants.isEmpty {
+                    NavigationLink {
+                        SurfaceOnlyAudioChoicesPage(
+                            detailViewModel: detailViewModel,
+                            closeSheet: close
+                        )
+                    } label: {
+                        HStack {
+                            Label("音质", systemImage: "waveform")
+                            Spacer()
+                            Text(detailViewModel.videoListenAudioAccessoryTitle)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                } else if qualityStore.hasQualityMenu {
                     NavigationLink {
                         SurfaceOnlyQualityChoicesPage(
                             qualityStore: qualityStore,
@@ -981,13 +1450,59 @@ private struct SurfaceOnlyMoreControlsNavigationContent: View {
                     }
                 }
 
-                NavigationLink {
-                    SurfaceOnlyDanmakuSettingsPage(
-                        detailViewModel: detailViewModel,
-                        toggleDanmaku: onToggleDanmaku
-                    )
-                } label: {
-                    Label("弹幕设置", systemImage: "text.bubble")
+                if detailViewModel.isVideoListenModeEnabled {
+                    NavigationLink {
+                        SurfaceOnlyVideoListenQueuePage(
+                            detailViewModel: detailViewModel,
+                            closeSheet: close
+                        )
+                    } label: {
+                        HStack {
+                            Label("播放列表", systemImage: "list.bullet")
+                            Spacer()
+                            Text(detailViewModel.videoListenQueueAccessoryTitle)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+
+                    NavigationLink {
+                        SurfaceOnlyVideoListenPlaybackOrderPage(
+                            libraryStore: libraryStore,
+                            closeSheet: close
+                        )
+                    } label: {
+                        HStack {
+                            Label("播放顺序", systemImage: libraryStore.videoListenPlaybackOrder.systemImage)
+                            Spacer()
+                            Text(libraryStore.videoListenPlaybackOrder.title)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+
+                    NavigationLink {
+                        SurfaceOnlyVideoListenSleepTimerPage(
+                            detailViewModel: detailViewModel,
+                            closeSheet: close
+                        )
+                    } label: {
+                        HStack {
+                            Label("定时关闭", systemImage: "timer")
+                            Spacer()
+                            Text(detailViewModel.videoListenSleepTimerAccessoryTitle)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                }
+
+                if !detailViewModel.isVideoListenModeEnabled {
+                    NavigationLink {
+                        SurfaceOnlyDanmakuSettingsPage(
+                            detailViewModel: detailViewModel,
+                            toggleDanmaku: onToggleDanmaku
+                        )
+                    } label: {
+                        Label("弹幕设置", systemImage: "text.bubble")
+                    }
                 }
 
                 NavigationLink {
@@ -1004,11 +1519,30 @@ private struct SurfaceOnlyMoreControlsNavigationContent: View {
                     }
                 }
 
-                Toggle(isOn: Binding(
-                    get: { libraryStore.pictureInPictureEnabled },
-                    set: { libraryStore.setPictureInPictureEnabled($0) }
-                )) {
-                    Label("画中画播放", systemImage: "pip")
+                if showsVideoListenModeToggle {
+                    Toggle(isOn: videoListenModeBinding) {
+                        Label {
+                            HStack(spacing: 8) {
+                                Text("听视频")
+                                if detailViewModel.isSwitchingVideoListenMode {
+                                    ProgressView()
+                                        .controlSize(.small)
+                                }
+                            }
+                        } icon: {
+                            Image(systemName: "headphones")
+                        }
+                    }
+                    .disabled(detailViewModel.isSwitchingVideoListenMode)
+                }
+
+                if !detailViewModel.isVideoListenModeEnabled {
+                    Toggle(isOn: Binding(
+                        get: { libraryStore.pictureInPictureEnabled },
+                        set: { libraryStore.setPictureInPictureEnabled($0) }
+                    )) {
+                        Label("画中画播放", systemImage: "pip")
+                    }
                 }
 
                 Toggle(isOn: Binding(
@@ -1025,7 +1559,7 @@ private struct SurfaceOnlyMoreControlsNavigationContent: View {
                     Label("播放控件边缘遮罩", systemImage: "rectangle.topthird.inset.filled")
                 }
 
-                Label("视频格式：\(videoFormatTitle)", systemImage: "film")
+                Label("\(mediaFormatLabel)：\(videoFormatTitle)", systemImage: mediaFormatSystemImage)
                     .foregroundStyle(.secondary)
 
                 Label("解码：\(decodeTitle)", systemImage: "cpu")
@@ -1068,6 +1602,25 @@ private struct SurfaceOnlyMoreControlsNavigationContent: View {
 
     private var videoFormatTitle: String {
         SurfaceOnlyPlaybackFormatText.videoFormatTitle(for: viewModel.engineDiagnostics)
+    }
+
+    private var showsVideoListenModeToggle: Bool {
+        detailViewModel.isVideoListenModeEnabled || detailViewModel.canUseVideoListenMode
+    }
+
+    private var videoListenModeBinding: Binding<Bool> {
+        Binding(
+            get: { detailViewModel.isVideoListenModeEnabled },
+            set: { detailViewModel.setVideoListenModeEnabled($0) }
+        )
+    }
+
+    private var mediaFormatLabel: String {
+        detailViewModel.isVideoListenModeEnabled ? "音频格式" : "视频格式"
+    }
+
+    private var mediaFormatSystemImage: String {
+        detailViewModel.isVideoListenModeEnabled ? "waveform" : "film"
     }
 
 }
@@ -1244,6 +1797,10 @@ private struct SurfaceOnlyLandscapeMoreControlsOverlay: View {
 private enum SurfaceOnlyLandscapeMoreControlsPage {
     case root
     case quality
+    case audio
+    case queue
+    case playbackOrder
+    case sleepTimer
     case danmaku
     case rate
 
@@ -1253,6 +1810,14 @@ private enum SurfaceOnlyLandscapeMoreControlsPage {
             return "播放设置"
         case .quality:
             return "清晰度"
+        case .audio:
+            return "音质"
+        case .queue:
+            return "播放列表"
+        case .playbackOrder:
+            return "播放顺序"
+        case .sleepTimer:
+            return "定时关闭"
         case .danmaku:
             return "弹幕设置"
         case .rate:
@@ -1320,6 +1885,14 @@ private struct SurfaceOnlyLandscapeMoreContent: View {
                 rootPage
             case .quality:
                 qualityPage
+            case .audio:
+                audioPage
+            case .queue:
+                queuePage
+            case .playbackOrder:
+                playbackOrderPage
+            case .sleepTimer:
+                sleepTimerPage
             case .danmaku:
                 SurfaceOnlyDanmakuSettingsPage(
                     detailViewModel: detailViewModel,
@@ -1336,7 +1909,19 @@ private struct SurfaceOnlyLandscapeMoreContent: View {
         ScrollView {
             VStack(spacing: 10) {
                 VStack(spacing: 0) {
-                    if qualityStore.hasQualityMenu {
+                    if detailViewModel.isVideoListenModeEnabled,
+                       !detailViewModel.videoListenAudioVariants.isEmpty {
+                        SurfaceOnlyLandscapeMenuRow(
+                            title: "音质",
+                            systemImage: "waveform",
+                            accessory: detailViewModel.videoListenAudioAccessoryTitle,
+                            showsChevron: true
+                        ) {
+                            page = .audio
+                        }
+
+                        Divider().padding(.leading, 44)
+                    } else if qualityStore.hasQualityMenu {
                         SurfaceOnlyLandscapeMenuRow(
                             title: "清晰度",
                             systemImage: qualityStore.qualityButtonSystemImage,
@@ -1349,16 +1934,53 @@ private struct SurfaceOnlyLandscapeMoreContent: View {
                         Divider().padding(.leading, 44)
                     }
 
-                    SurfaceOnlyLandscapeMenuRow(
-                        title: "弹幕设置",
-                        systemImage: "text.bubble",
-                        accessory: nil,
-                        showsChevron: true
-                    ) {
-                        page = .danmaku
+                    if detailViewModel.isVideoListenModeEnabled {
+                        SurfaceOnlyLandscapeMenuRow(
+                            title: "播放列表",
+                            systemImage: "list.bullet",
+                            accessory: detailViewModel.videoListenQueueAccessoryTitle,
+                            showsChevron: true
+                        ) {
+                            page = .queue
+                        }
+
+                        Divider().padding(.leading, 44)
+
+                        SurfaceOnlyLandscapeMenuRow(
+                            title: "播放顺序",
+                            systemImage: libraryStore.videoListenPlaybackOrder.systemImage,
+                            accessory: libraryStore.videoListenPlaybackOrder.title,
+                            showsChevron: true
+                        ) {
+                            page = .playbackOrder
+                        }
+
+                        Divider().padding(.leading, 44)
+
+                        SurfaceOnlyLandscapeMenuRow(
+                            title: "定时关闭",
+                            systemImage: "timer",
+                            accessory: detailViewModel.videoListenSleepTimerAccessoryTitle,
+                            showsChevron: true
+                        ) {
+                            page = .sleepTimer
+                        }
+
+                        Divider().padding(.leading, 44)
                     }
 
-                    Divider().padding(.leading, 44)
+                    if !detailViewModel.isVideoListenModeEnabled {
+                        SurfaceOnlyLandscapeMenuRow(
+                            title: "弹幕设置",
+                            systemImage: "text.bubble",
+                            accessory: nil,
+                            showsChevron: true
+                        ) {
+                            page = .danmaku
+                        }
+
+                        Divider().padding(.leading, 44)
+                    }
 
                     SurfaceOnlyLandscapeMenuRow(
                         title: "倍速",
@@ -1371,17 +1993,31 @@ private struct SurfaceOnlyLandscapeMoreContent: View {
 
                     Divider().padding(.leading, 44)
 
-                    SurfaceOnlyLandscapeToggleRow(
-                        title: "画中画播放",
-                        systemImage: "pip",
-                        accessory: pictureInPictureAccessory,
-                        isOn: Binding(
-                            get: { libraryStore.pictureInPictureEnabled },
-                            set: { libraryStore.setPictureInPictureEnabled($0) }
+                    if showsVideoListenModeToggle {
+                        SurfaceOnlyLandscapeToggleRow(
+                            title: "听视频",
+                            systemImage: "headphones",
+                            accessory: videoListenModeAccessory,
+                            isOn: videoListenModeBinding
                         )
-                    )
+                        .disabled(detailViewModel.isSwitchingVideoListenMode)
 
-                    Divider().padding(.leading, 44)
+                        Divider().padding(.leading, 44)
+                    }
+
+                    if !detailViewModel.isVideoListenModeEnabled {
+                        SurfaceOnlyLandscapeToggleRow(
+                            title: "画中画播放",
+                            systemImage: "pip",
+                            accessory: pictureInPictureAccessory,
+                            isOn: Binding(
+                                get: { libraryStore.pictureInPictureEnabled },
+                                set: { libraryStore.setPictureInPictureEnabled($0) }
+                            )
+                        )
+
+                        Divider().padding(.leading, 44)
+                    }
 
                     SurfaceOnlyLandscapeToggleRow(
                         title: "播放性能浮窗",
@@ -1409,8 +2045,8 @@ private struct SurfaceOnlyLandscapeMoreContent: View {
 
                 VStack(spacing: 0) {
                     SurfaceOnlyLandscapeInfoRow(
-                        title: "视频格式",
-                        systemImage: "film",
+                        title: mediaFormatLabel,
+                        systemImage: mediaFormatSystemImage,
                         value: videoFormatTitle
                     )
 
@@ -1464,6 +2100,59 @@ private struct SurfaceOnlyLandscapeMoreContent: View {
         }
     }
 
+    private var audioPage: some View {
+        ScrollView {
+            VStack(spacing: 10) {
+                if detailViewModel.isSwitchingVideoListenMode {
+                    SurfaceOnlyAudioSwitchingIndicator()
+                        .padding(.vertical, 7)
+                        .frame(maxWidth: .infinity)
+                        .surfaceOnlyLandscapeGlassGroup()
+                }
+
+                VStack(spacing: 0) {
+                    SurfaceOnlyLandscapeMenuRow(
+                        title: "自动",
+                        subtitle: automaticAudioSubtitle,
+                        systemImage: detailViewModel.selectedVideoListenAudioPreferenceKey == nil
+                            ? "checkmark"
+                            : "wand.and.stars",
+                        accessory: nil,
+                        showsChevron: false
+                    ) {
+                        detailViewModel.selectVideoListenAudioVariant(nil)
+                        close()
+                    }
+
+                    if !detailViewModel.videoListenAudioVariants.isEmpty {
+                        Divider().padding(.leading, 44)
+                    }
+
+                    ForEach(Array(detailViewModel.videoListenAudioVariants.enumerated()), id: \.element.id) { index, variant in
+                        SurfaceOnlyLandscapeMenuRow(
+                            title: variant.title,
+                            subtitle: variant.subtitle,
+                            systemImage: detailViewModel.selectedVideoListenAudioPreferenceKey == variant.preferenceKey
+                                ? "checkmark"
+                                : variant.systemImage,
+                            accessory: nil,
+                            showsChevron: false
+                        ) {
+                            detailViewModel.selectVideoListenAudioVariant(variant)
+                            close()
+                        }
+
+                        if index < detailViewModel.videoListenAudioVariants.count - 1 {
+                            Divider().padding(.leading, 44)
+                        }
+                    }
+                }
+                .surfaceOnlyLandscapeGlassGroup()
+            }
+            .padding(12)
+        }
+    }
+
     private var ratePage: some View {
         ScrollView {
             VStack(spacing: 0) {
@@ -1488,6 +2177,147 @@ private struct SurfaceOnlyLandscapeMoreContent: View {
         }
     }
 
+    private var queuePage: some View {
+        ScrollView {
+            if detailViewModel.videoListenQueueEntries.isEmpty {
+                VStack(spacing: 10) {
+                    if detailViewModel.isLoadingVideoListenQueue {
+                        ProgressView()
+                            .controlSize(.small)
+                        Text("正在载入播放列表")
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                    } else {
+                        Text(detailViewModel.videoListenQueueLoadFailed ? "播放列表载入失败" : "没有可播放内容")
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                        if detailViewModel.videoListenQueueLoadFailed {
+                            Button("重新载入") {
+                                Task {
+                                    await detailViewModel.prepareVideoListenQueue()
+                                }
+                            }
+                            .font(.subheadline.weight(.semibold))
+                        }
+                    }
+                }
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 18)
+                .surfaceOnlyLandscapeGlassGroup()
+                .padding(12)
+            } else {
+                VStack(spacing: 0) {
+                    ForEach(Array(detailViewModel.videoListenQueueEntries.enumerated()), id: \.element.id) { index, entry in
+                        SurfaceOnlyLandscapeMenuRow(
+                            title: entry.title,
+                            subtitle: entry.subtitle,
+                            systemImage: entry.isCurrent ? "checkmark.circle.fill" : "play.circle",
+                            accessory: entry.isCurrent ? "正在播放" : nil,
+                            showsChevron: false
+                        ) {
+                            detailViewModel.selectVideoListenQueueEntry(entry)
+                            close()
+                        }
+                        .task {
+                            await detailViewModel.loadMoreVideoListenQueueIfNeeded(current: entry)
+                        }
+
+                        if index < detailViewModel.videoListenQueueEntries.count - 1 {
+                            Divider().padding(.leading, 44)
+                        }
+                    }
+
+                    if detailViewModel.isLoadingVideoListenQueue {
+                        Divider().padding(.leading, 44)
+                        HStack(spacing: 8) {
+                            ProgressView()
+                                .controlSize(.small)
+                            Text("正在载入更多视频")
+                                .font(.subheadline)
+                                .foregroundStyle(.secondary)
+                        }
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 12)
+                    } else if detailViewModel.videoListenQueueLoadFailed,
+                              detailViewModel.videoListenQueueEntries.count <= 1 {
+                        Divider().padding(.leading, 44)
+                        Button("重新载入播放列表") {
+                            Task {
+                                await detailViewModel.prepareVideoListenQueue()
+                            }
+                        }
+                        .font(.subheadline.weight(.semibold))
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 12)
+                    } else if detailViewModel.videoListenQueueSession.isLoadingMore {
+                        ProgressView()
+                            .controlSize(.small)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 12)
+                    }
+                }
+                .surfaceOnlyLandscapeGlassGroup()
+                .padding(12)
+            }
+        }
+        .task {
+            await detailViewModel.prepareVideoListenQueue()
+        }
+    }
+
+    private var playbackOrderPage: some View {
+        ScrollView {
+            VStack(spacing: 0) {
+                ForEach(Array(VideoListenPlaybackOrder.allCases.enumerated()), id: \.element.id) { index, order in
+                    SurfaceOnlyLandscapeMenuRow(
+                        title: order.title,
+                        subtitle: order.subtitle,
+                        systemImage: libraryStore.videoListenPlaybackOrder == order
+                            ? "checkmark.circle.fill"
+                            : order.systemImage,
+                        accessory: nil,
+                        showsChevron: false
+                    ) {
+                        libraryStore.setVideoListenPlaybackOrder(order)
+                        close()
+                    }
+
+                    if index < VideoListenPlaybackOrder.allCases.count - 1 {
+                        Divider().padding(.leading, 44)
+                    }
+                }
+            }
+            .surfaceOnlyLandscapeGlassGroup()
+            .padding(12)
+        }
+    }
+
+    private var sleepTimerPage: some View {
+        ScrollView {
+            VStack(spacing: 0) {
+                ForEach(Array(VideoListenSleepTimerOption.allCases.enumerated()), id: \.element.id) { index, option in
+                    SurfaceOnlyLandscapeMenuRow(
+                        title: option.title,
+                        systemImage: detailViewModel.videoListenSleepTimerOption == option
+                            ? "checkmark.circle.fill"
+                            : option.systemImage,
+                        accessory: nil,
+                        showsChevron: false
+                    ) {
+                        detailViewModel.setVideoListenSleepTimer(option)
+                        close()
+                    }
+
+                    if index < VideoListenSleepTimerOption.allCases.count - 1 {
+                        Divider().padding(.leading, 44)
+                    }
+                }
+            }
+            .surfaceOnlyLandscapeGlassGroup()
+            .padding(12)
+        }
+    }
+
     private var decodeTitle: String {
         SurfaceOnlyPlaybackFormatText.decodeTitle(for: viewModel.engineDiagnostics)
     }
@@ -1498,6 +2328,41 @@ private struct SurfaceOnlyLandscapeMoreContent: View {
 
     private var pictureInPictureAccessory: String? {
         return libraryStore.pictureInPictureEnabled ? "已开启" : "已关闭"
+    }
+
+    private var showsVideoListenModeToggle: Bool {
+        detailViewModel.isVideoListenModeEnabled || detailViewModel.canUseVideoListenMode
+    }
+
+    private var videoListenModeBinding: Binding<Bool> {
+        Binding(
+            get: { detailViewModel.isVideoListenModeEnabled },
+            set: { detailViewModel.setVideoListenModeEnabled($0) }
+        )
+    }
+
+    private var videoListenModeAccessory: String? {
+        if detailViewModel.isSwitchingVideoListenMode {
+            return "切换中"
+        }
+        return detailViewModel.isVideoListenModeEnabled ? "已开启" : "已关闭"
+    }
+
+    private var automaticAudioSubtitle: String {
+        guard let variant = detailViewModel.automaticVideoListenAudioVariant else {
+            return "优先选择兼容性较好的音轨"
+        }
+        return ["当前 \(variant.title)", variant.subtitle]
+            .filter { !$0.isEmpty }
+            .joined(separator: " · ")
+    }
+
+    private var mediaFormatLabel: String {
+        detailViewModel.isVideoListenModeEnabled ? "音频格式" : "视频格式"
+    }
+
+    private var mediaFormatSystemImage: String {
+        detailViewModel.isVideoListenModeEnabled ? "waveform" : "film"
     }
 
     private var performanceOverlayAccessory: String? {
@@ -1694,10 +2559,266 @@ private struct SurfaceOnlyQualityChoicesPage: View {
     }
 }
 
+private struct SurfaceOnlyAudioChoicesPage: View {
+    @ObservedObject var detailViewModel: VideoDetailViewModel
+    let closeSheet: () -> Void
+
+    var body: some View {
+        List {
+            if detailViewModel.isSwitchingVideoListenMode {
+                SurfaceOnlyAudioSwitchingIndicator()
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 6)
+                    .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16))
+                    .listRowBackground(Color.clear)
+            }
+
+            Button {
+                detailViewModel.selectVideoListenAudioVariant(nil)
+                closeSheet()
+            } label: {
+                audioChoiceLabel(
+                    title: "自动",
+                    subtitle: automaticSubtitle,
+                    systemImage: detailViewModel.selectedVideoListenAudioPreferenceKey == nil
+                        ? "checkmark"
+                        : "wand.and.stars"
+                )
+            }
+
+            ForEach(detailViewModel.videoListenAudioVariants) { variant in
+                Button {
+                    detailViewModel.selectVideoListenAudioVariant(variant)
+                    closeSheet()
+                } label: {
+                    audioChoiceLabel(
+                        title: variant.title,
+                        subtitle: variant.subtitle,
+                        systemImage: detailViewModel.selectedVideoListenAudioPreferenceKey == variant.preferenceKey
+                            ? "checkmark"
+                            : variant.systemImage
+                    )
+                }
+            }
+        }
+        .scrollContentBackground(.hidden)
+        .listRowBackground(Color.clear)
+        .listStyle(.plain)
+        .background(Color.clear)
+        .foregroundStyle(.primary)
+        .navigationTitle("音质")
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbarBackground(.automatic, for: .navigationBar)
+    }
+
+    private func audioChoiceLabel(
+        title: String,
+        subtitle: String,
+        systemImage: String
+    ) -> some View {
+        Label {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title)
+                if !subtitle.isEmpty {
+                    Text(subtitle)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+        } icon: {
+            Image(systemName: systemImage)
+        }
+    }
+
+    private var automaticSubtitle: String {
+        guard let variant = detailViewModel.automaticVideoListenAudioVariant else {
+            return "优先选择兼容性较好的音轨"
+        }
+        return ["当前 \(variant.title)", variant.subtitle]
+            .filter { !$0.isEmpty }
+            .joined(separator: " · ")
+    }
+}
+
+private struct SurfaceOnlyVideoListenQueuePage: View {
+    @ObservedObject var detailViewModel: VideoDetailViewModel
+    let closeSheet: () -> Void
+
+    var body: some View {
+        List {
+            if detailViewModel.videoListenQueueEntries.isEmpty {
+                VStack(spacing: 10) {
+                    if detailViewModel.isLoadingVideoListenQueue {
+                        ProgressView()
+                            .controlSize(.small)
+                        Text("正在载入播放列表")
+                            .foregroundStyle(.secondary)
+                    } else {
+                        Text(detailViewModel.videoListenQueueLoadFailed ? "播放列表载入失败" : "没有可播放内容")
+                            .foregroundStyle(.secondary)
+                        if detailViewModel.videoListenQueueLoadFailed {
+                            Button("重新载入") {
+                                Task {
+                                    await detailViewModel.prepareVideoListenQueue()
+                                }
+                            }
+                        }
+                    }
+                }
+                .frame(maxWidth: .infinity)
+            } else {
+                ForEach(detailViewModel.videoListenQueueEntries) { entry in
+                    Button {
+                        detailViewModel.selectVideoListenQueueEntry(entry)
+                        closeSheet()
+                    } label: {
+                        Label {
+                            HStack {
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(entry.title)
+                                    if let subtitle = entry.subtitle {
+                                        Text(subtitle)
+                                            .font(.caption)
+                                            .foregroundStyle(.secondary)
+                                    }
+                                }
+                                Spacer()
+                                if entry.isCurrent {
+                                    Text("正在播放")
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                }
+                            }
+                        } icon: {
+                            Image(systemName: entry.isCurrent ? "checkmark.circle.fill" : "play.circle")
+                        }
+                    }
+                    .task {
+                        await detailViewModel.loadMoreVideoListenQueueIfNeeded(current: entry)
+                    }
+                }
+
+                if detailViewModel.isLoadingVideoListenQueue {
+                    HStack(spacing: 8) {
+                        Spacer()
+                        ProgressView()
+                            .controlSize(.small)
+                        Text("正在载入更多视频")
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                        Spacer()
+                    }
+                } else if detailViewModel.videoListenQueueLoadFailed,
+                          detailViewModel.videoListenQueueEntries.count <= 1 {
+                    Button("重新载入播放列表") {
+                        Task {
+                            await detailViewModel.prepareVideoListenQueue()
+                        }
+                    }
+                    .frame(maxWidth: .infinity)
+                } else if detailViewModel.videoListenQueueSession.isLoadingMore {
+                    HStack {
+                        Spacer()
+                        ProgressView()
+                            .controlSize(.small)
+                        Spacer()
+                    }
+                }
+            }
+        }
+        .scrollContentBackground(.hidden)
+        .listRowBackground(Color.clear)
+        .listStyle(.plain)
+        .background(Color.clear)
+        .foregroundStyle(.primary)
+        .navigationTitle("播放列表")
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbarBackground(.automatic, for: .navigationBar)
+        .task {
+            await detailViewModel.prepareVideoListenQueue()
+        }
+    }
+}
+
+private struct SurfaceOnlyVideoListenPlaybackOrderPage: View {
+    @ObservedObject var libraryStore: LibraryStore
+    let closeSheet: () -> Void
+
+    var body: some View {
+        List {
+            ForEach(VideoListenPlaybackOrder.allCases) { order in
+                Button {
+                    libraryStore.setVideoListenPlaybackOrder(order)
+                    closeSheet()
+                } label: {
+                    Label {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(order.title)
+                            Text(order.subtitle)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    } icon: {
+                        Image(systemName: libraryStore.videoListenPlaybackOrder == order
+                            ? "checkmark.circle.fill"
+                            : order.systemImage)
+                    }
+                }
+            }
+        }
+        .scrollContentBackground(.hidden)
+        .listRowBackground(Color.clear)
+        .listStyle(.plain)
+        .background(Color.clear)
+        .foregroundStyle(.primary)
+        .navigationTitle("播放顺序")
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbarBackground(.automatic, for: .navigationBar)
+    }
+}
+
+private struct SurfaceOnlyVideoListenSleepTimerPage: View {
+    @ObservedObject var detailViewModel: VideoDetailViewModel
+    let closeSheet: () -> Void
+
+    var body: some View {
+        List {
+            ForEach(VideoListenSleepTimerOption.allCases) { option in
+                Button {
+                    detailViewModel.setVideoListenSleepTimer(option)
+                    closeSheet()
+                } label: {
+                    Label(
+                        option.title,
+                        systemImage: detailViewModel.videoListenSleepTimerOption == option
+                            ? "checkmark.circle.fill"
+                            : option.systemImage
+                    )
+                }
+            }
+        }
+        .scrollContentBackground(.hidden)
+        .listRowBackground(Color.clear)
+        .listStyle(.plain)
+        .background(Color.clear)
+        .foregroundStyle(.primary)
+        .navigationTitle("定时关闭")
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbarBackground(.automatic, for: .navigationBar)
+    }
+}
+
 private struct SurfaceOnlyQualitySwitchingIndicator: View {
     var body: some View {
         PlayerInlineLoadingIndicator(message: "正在切换清晰度")
             .accessibilityLabel("正在切换清晰度")
+    }
+}
+
+private struct SurfaceOnlyAudioSwitchingIndicator: View {
+    var body: some View {
+        PlayerInlineLoadingIndicator(message: "正在切换音质")
+            .accessibilityLabel("正在切换音质")
     }
 }
 
@@ -1789,17 +2910,83 @@ private struct SurfaceOnlyDanmakuSettingsPage: View {
     }
 }
 
-private struct SurfaceOnlyMoreControlsButtonSurface: ViewModifier {
+private struct SurfaceOnlyUIKitMoreControlsButton: UIViewRepresentable {
     let usesGlass: Bool
     let metrics: PlayerNativeControlMetrics
+    let onPressBegan: () -> Void
+    let onPressEnded: () -> Void
+    let action: () -> Void
 
-    func body(content: Content) -> some View {
-        if usesGlass {
-            content.biliPlayerCompactGlassCapsule(metrics: metrics)
-        } else {
-            content
-                .buttonStyle(.plain)
-                .contentShape(Capsule())
+    func makeCoordinator() -> Coordinator {
+        Coordinator(
+            onPressBegan: onPressBegan,
+            onPressEnded: onPressEnded,
+            action: action
+        )
+    }
+
+    func makeUIView(context: Context) -> UIButton {
+        let button = UIButton(
+            configuration: configuration,
+            primaryAction: context.coordinator.primaryAction
+        )
+        button.addAction(context.coordinator.pressBeganAction, for: .touchDown)
+        button.addAction(
+            context.coordinator.pressEndedAction,
+            for: [.touchUpInside, .touchUpOutside, .touchCancel]
+        )
+        button.accessibilityLabel = "更多播放设置"
+        return button
+    }
+
+    func updateUIView(_ button: UIButton, context: Context) {
+        context.coordinator.onPressBegan = onPressBegan
+        context.coordinator.onPressEnded = onPressEnded
+        context.coordinator.action = action
+        button.configuration = configuration
+    }
+
+    private var configuration: UIButton.Configuration {
+        var configuration = usesGlass
+            ? UIButton.Configuration.clearGlass()
+            : UIButton.Configuration.plain()
+        configuration.image = UIImage(
+            systemName: "ellipsis",
+            withConfiguration: UIImage.SymbolConfiguration(
+                pointSize: metrics.iconSize,
+                weight: .semibold
+            )
+        )
+        configuration.baseForegroundColor = .white
+        configuration.contentInsets = .zero
+        return configuration
+    }
+
+    final class Coordinator {
+        var onPressBegan: () -> Void
+        var onPressEnded: () -> Void
+        var action: () -> Void
+
+        init(
+            onPressBegan: @escaping () -> Void,
+            onPressEnded: @escaping () -> Void,
+            action: @escaping () -> Void
+        ) {
+            self.onPressBegan = onPressBegan
+            self.onPressEnded = onPressEnded
+            self.action = action
+        }
+
+        lazy var pressBeganAction = UIAction { [weak self] _ in
+            self?.onPressBegan()
+        }
+
+        lazy var pressEndedAction = UIAction { [weak self] _ in
+            self?.onPressEnded()
+        }
+
+        lazy var primaryAction = UIAction { [weak self] _ in
+            self?.action()
         }
     }
 }

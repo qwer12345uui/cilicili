@@ -589,7 +589,7 @@ private struct LiveRoomSurfaceOnlyOverlay: View {
             showsStartupLoadingIndicator: keepsChromeMounted,
             pausesOnDisappear: false,
             controlsAccessory: keepsChromeMounted
-                ? AnyView(LivePlayerPiliPodAccessory(viewModel: viewModel))
+                ? liveControlsAccessory
                 : nil,
             controlsCenterAccessory: nil,
             topLeadingControlsAccessory: keepsChromeMounted
@@ -624,10 +624,14 @@ private struct LiveRoomSurfaceOnlyOverlay: View {
     private var topLeadingControlsAccessory: AnyView? {
         guard state.usesLandscapeChrome || state.isPortraitFullscreen else { return nil }
         return AnyView(
-            LivePlayerPiliPodFullscreenBackButton {
+            LivePlayerSimpleLiveFullscreenHeader(viewModel: viewModel) {
                 onExitFullscreen(playerViewModel)
             }
         )
+    }
+
+    private var liveControlsAccessory: AnyView {
+        AnyView(LivePlayerSimpleLiveAccessory(viewModel: viewModel))
     }
 
     private var runtimeContext: BiliPlayerViewRuntimeContext {

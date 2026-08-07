@@ -202,6 +202,33 @@ actor VideoPreloadCenter {
         )
     }
 
+    func preloadPlayInfo(
+        bvid: String,
+        cid: Int,
+        page: Int?,
+        api: BiliAPIClient,
+        preferredQuality: Int?,
+        targetPreferredQuality: Int? = nil,
+        cdnPreference: PlaybackCDNPreference = .automatic,
+        priority: TaskPriority = .utility,
+        playbackAdaptationProfile: PlayerPlaybackAdaptationProfile = .normal
+    ) {
+        preloadPlayURL(
+            bvid: bvid,
+            cid: cid,
+            page: page,
+            preferredQuality: preferredQuality,
+            targetPreferredQuality: targetPreferredQuality,
+            cdnPreference: cdnPreference,
+            api: api,
+            warmsMedia: false,
+            mediaWarmupMode: .routePlanOnly,
+            mediaWarmupDelay: 0,
+            priority: priority,
+            playbackAdaptationProfile: playbackAdaptationProfile
+        )
+    }
+
     private func preloadPlayURL(
         bvid: String,
         cid: Int,
@@ -4052,13 +4079,15 @@ actor RemoteImageCache {
         _ urls: [URL],
         scale: CGFloat = 1,
         targetPixelSize: Int? = 760,
-        maximumConcurrentLoads: Int = 3
+        maximumConcurrentLoads: Int = 3,
+        decodePolicy: RemoteImageDecodePolicy = .standard
     ) async {
         await prefetch(
             urls.map { RemoteImageSource(url: $0) },
             scale: scale,
             targetPixelSize: targetPixelSize,
-            maximumConcurrentLoads: maximumConcurrentLoads
+            maximumConcurrentLoads: maximumConcurrentLoads,
+            decodePolicy: decodePolicy
         )
     }
 
@@ -4066,7 +4095,8 @@ actor RemoteImageCache {
         _ sources: [RemoteImageSource],
         scale: CGFloat = 1,
         targetPixelSize: Int? = 760,
-        maximumConcurrentLoads: Int = 3
+        maximumConcurrentLoads: Int = 3,
+        decodePolicy: RemoteImageDecodePolicy = .standard
     ) async {
         await RemoteImageLoadSuppressionGate.shared.waitUntilAllowed(priority: .prefetch)
         guard !Task.isCancelled else { return }
@@ -4076,8 +4106,18 @@ actor RemoteImageCache {
         let budgetedSources = Array(uniqueSources.prefix(imageBudget.maximumURLs))
         let candidates = budgetedSources.filter { source in
             source.urls.contains { url in
-                let key = cacheKey(for: url, scale: scale, targetPixelSize: targetPixelSize)
-                return cachedImage(for: url, scale: scale, targetPixelSize: targetPixelSize) == nil
+                let key = cacheKey(
+                    for: url,
+                    scale: scale,
+                    targetPixelSize: targetPixelSize,
+                    decodePolicy: decodePolicy
+                )
+                return cachedImage(
+                    for: url,
+                    scale: scale,
+                    targetPixelSize: targetPixelSize,
+                    decodePolicy: decodePolicy
+                ) == nil
                     && inFlight[key] == nil
                     && !isTemporarilyFailed(key)
             }
@@ -4091,7 +4131,12 @@ actor RemoteImageCache {
             for _ in 0..<concurrentLoads {
                 guard let source = iterator.next() else { break }
                 group.addTask {
-                    await self.prefetchOne(source, scale: scale, targetPixelSize: targetPixelSize)
+                    await self.prefetchOne(
+                        source,
+                        scale: scale,
+                        targetPixelSize: targetPixelSize,
+                        decodePolicy: decodePolicy
+                    )
                 }
             }
 
@@ -4102,7 +4147,12 @@ actor RemoteImageCache {
                 }
                 guard let source = iterator.next() else { continue }
                 group.addTask {
-                    await self.prefetchOne(source, scale: scale, targetPixelSize: targetPixelSize)
+                    await self.prefetchOne(
+                        source,
+                        scale: scale,
+                        targetPixelSize: targetPixelSize,
+                        decodePolicy: decodePolicy
+                    )
                 }
             }
         }
@@ -4230,7 +4280,12 @@ actor RemoteImageCache {
         }
     }
 
-    private func prefetchOne(_ source: RemoteImageSource, scale: CGFloat, targetPixelSize: Int?) async {
+    private func prefetchOne(
+        _ source: RemoteImageSource,
+        scale: CGFloat,
+        targetPixelSize: Int?,
+        decodePolicy: RemoteImageDecodePolicy
+    ) async {
         guard !Task.isCancelled else { return }
         for url in source.urls {
             let image = await load(
@@ -4238,7 +4293,8 @@ actor RemoteImageCache {
                 scale: scale,
                 targetPixelSize: targetPixelSize,
                 cachePolicy: .standard,
-                priority: .prefetch
+                priority: .prefetch,
+                decodePolicy: decodePolicy
             )
             if image != nil { return }
         }

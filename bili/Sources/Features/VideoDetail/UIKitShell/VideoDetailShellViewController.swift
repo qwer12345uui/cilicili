@@ -23,6 +23,11 @@ final class VideoDetailShellViewController: UIViewController {
     private let onNavigateBack: () -> Void
     private var cancellables = Set<AnyCancellable>()
     private let systemBackGestureDelegateLease = SystemBackGestureDelegateLease()
+    private var playerMoreControlsHost: UIHostingController<SurfaceOnlyMoreControlsSheet>?
+    private weak var playerMoreControlsPresenter: UIViewController?
+    private var playerMoreControlsDismissAction: (() -> Void)?
+    private var playerMoreControlsPresentationCheck: DispatchWorkItem?
+    private var playerMoreControlsPresentationRetry: DispatchWorkItem?
 
     private lazy var playerSurfaceController: PlayerSurfaceController = {
         PlayerSurfaceController(
@@ -71,6 +76,7 @@ final class VideoDetailShellViewController: UIViewController {
     private var activeContentTab: VideoDetailContentTab
     private var scrollOffsets: [VideoDetailContentTab: CGFloat] = [:]
     private var contentActionSuppressionWorkItem: DispatchWorkItem?
+    private var didTearDownPlayerSurface = false
 
     /// 竖屏标准高度（对齐原项目：固定 16:9，与视频真实比例无关）。
     private func standardPlayerHeight(forWidth width: CGFloat) -> CGFloat {
@@ -248,6 +254,7 @@ final class VideoDetailShellViewController: UIViewController {
     override func viewWillDisappear(_ animated: Bool) {
         super.viewWillDisappear(animated)
         isViewActive = false
+        dismissPlayerMoreControls(animated: false)
         AppStatusBarCompatibility.restoreDefaultPresentation()
         cancelPendingRotationCompletionRecovery()
         playerSurfaceController.cancelRotationChromePrewarm()
@@ -264,6 +271,24 @@ final class VideoDetailShellViewController: UIViewController {
         playerSurfaceController.cancelRotationChromePrewarm()
         // 双保险：tab 切换等场景 viewWillDisappear 可能不触发，这里再兜一次。
         AppOrientationLock.restorePortrait(in: view.window?.windowScene)
+        if isMovingFromParent || isBeingDismissed || navigationController?.isBeingDismissed == true {
+            tearDownPlayerSurfaceIfNeeded()
+        }
+    }
+
+    func prepareForDismantle() {
+        dismissPlayerMoreControls(animated: false)
+        releaseSystemBackGestureOwnership()
+        tearDownPlayerSurfaceIfNeeded()
+    }
+
+    private func tearDownPlayerSurfaceIfNeeded() {
+        guard !didTearDownPlayerSurface else { return }
+        didTearDownPlayerSurface = true
+        playbackStateCancellable = nil
+        guard let host = playerSurfaceController.releaseHost() else { return }
+        (host as? VideoDetailShellSurfaceHost)?.tearDown()
+        host.surfaceView.removeFromSuperview()
     }
 
     override func viewDidLayoutSubviews() {
@@ -280,6 +305,9 @@ final class VideoDetailShellViewController: UIViewController {
     ) {
         super.viewWillTransition(to: size, with: coordinator)
         let toLandscape = size.width > size.height
+        if toLandscape {
+            dismissPlayerMoreControls(animated: false)
+        }
         AppStatusBarCompatibility.applyPlaybackPresentation(
             isHidden: toLandscape || isPortraitFullscreen
         )
@@ -524,6 +552,17 @@ final class VideoDetailShellViewController: UIViewController {
             playerViewModel: playerViewModel,
             detailViewModel: viewModel,
             dependencies: dependencies,
+            runtimeSettings: runtimeSettings,
+            onShowMoreControls: { [weak self] onDismiss in
+                guard let self else {
+                    onDismiss()
+                    return
+                }
+                self.presentPlayerMoreControls(onDismiss: onDismiss)
+            },
+            onDismissMoreControls: { [weak self] in
+                self?.dismissPlayerMoreControls(animated: false)
+            },
             onRequestFullscreen: { [weak self] in self?.requestFullscreen() },
             onExitFullscreen: { [weak self] in self?.requestExitFullscreen() },
             onToggleDanmaku: { [weak self] in self?.viewModel.toggleDanmaku() },
@@ -551,6 +590,180 @@ final class VideoDetailShellViewController: UIViewController {
 
     private func setSurfaceVideoAspectRatio(_ aspectRatio: CGFloat) {
         playerSurfaceController.setVideoAspectRatio(aspectRatio)
+    }
+
+    private func presentPlayerMoreControls(onDismiss: @escaping () -> Void) {
+        guard isViewLoaded,
+              view.window != nil,
+              !isLandscape
+        else {
+            onDismiss()
+            return
+        }
+
+        if let host = playerMoreControlsHost {
+            if host.presentingViewController != nil,
+               !host.isBeingDismissed,
+               host.viewIfLoaded?.window != nil {
+                onDismiss()
+                return
+            }
+            finishPlayerMoreControlsPresentation(host)
+        } else {
+            finishPendingPlayerMoreControlsPresentation()
+        }
+
+        playerMoreControlsDismissAction = onDismiss
+        attemptPlayerMoreControlsPresentation(retriesRemaining: 8)
+    }
+
+    private func attemptPlayerMoreControlsPresentation(retriesRemaining: Int) {
+        guard playerMoreControlsDismissAction != nil,
+              playerMoreControlsHost == nil,
+              isViewLoaded,
+              view.window != nil,
+              !isLandscape,
+              let playerViewModel = viewModel.stablePlayerViewModel,
+              let presenter = playerMoreControlsPresentationOwner()
+        else {
+            finishPendingPlayerMoreControlsPresentation()
+            return
+        }
+
+        guard !presenter.isBeingDismissed,
+              !presenter.isBeingPresented,
+              presenter.presentedViewController == nil
+        else {
+            schedulePlayerMoreControlsPresentationRetry(retriesRemaining: retriesRemaining)
+            return
+        }
+
+        let host = UIHostingController(
+            rootView: SurfaceOnlyMoreControlsSheet(
+                detailViewModel: viewModel,
+                viewModel: playerViewModel,
+                qualityStore: viewModel.playbackRenderStore.qualityControlStore,
+                selectPlayVariant: { [weak self] variant in
+                    self?.viewModel.selectPlayVariant(variant)
+                },
+                onToggleDanmaku: { [weak self] in
+                    self?.viewModel.toggleDanmaku()
+                },
+                close: { [weak self] in
+                    self?.dismissPlayerMoreControls(animated: true)
+                }
+            )
+        )
+        host.modalPresentationStyle = .pageSheet
+        host.view.backgroundColor = .clear
+        if let sheet = host.sheetPresentationController {
+            sheet.detents = [.medium()]
+            sheet.prefersGrabberVisible = true
+        }
+
+        playerMoreControlsHost = host
+        playerMoreControlsPresenter = presenter
+        host.presentationController?.delegate = self
+        presenter.present(host, animated: true) { [weak self, weak host] in
+            guard let self, let host else { return }
+            host.presentationController?.delegate = self
+            self.verifyPlayerMoreControlsPresentation(host)
+        }
+        schedulePlayerMoreControlsPresentationCheck(host)
+    }
+
+    private func dismissPlayerMoreControls(animated: Bool) {
+        playerMoreControlsPresentationRetry?.cancel()
+        playerMoreControlsPresentationRetry = nil
+        guard let host = playerMoreControlsHost else {
+            finishPendingPlayerMoreControlsPresentation()
+            return
+        }
+        playerMoreControlsPresentationCheck?.cancel()
+        playerMoreControlsPresentationCheck = nil
+        guard host.presentingViewController != nil else {
+            finishPlayerMoreControlsPresentation(host)
+            return
+        }
+        host.dismiss(animated: animated) { [weak self, weak host] in
+            guard let self, let host else { return }
+            self.finishPlayerMoreControlsPresentation(host)
+        }
+    }
+
+    private func schedulePlayerMoreControlsPresentationRetry(retriesRemaining: Int) {
+        playerMoreControlsPresentationRetry?.cancel()
+        guard retriesRemaining > 0 else {
+            finishPendingPlayerMoreControlsPresentation()
+            return
+        }
+        let workItem = DispatchWorkItem { [weak self] in
+            self?.attemptPlayerMoreControlsPresentation(retriesRemaining: retriesRemaining - 1)
+        }
+        playerMoreControlsPresentationRetry = workItem
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.12, execute: workItem)
+    }
+
+    private func playerMoreControlsPresentationOwner() -> UIViewController? {
+        guard let window = view.window else { return nil }
+        var owner: UIViewController = self
+        while let parent = owner.parent,
+              parent.viewIfLoaded?.window === window {
+            owner = parent
+        }
+        return owner
+    }
+
+    private func schedulePlayerMoreControlsPresentationCheck(
+        _ host: UIHostingController<SurfaceOnlyMoreControlsSheet>
+    ) {
+        playerMoreControlsPresentationCheck?.cancel()
+        let workItem = DispatchWorkItem { [weak self, weak host] in
+            guard let self, let host else { return }
+            self.verifyPlayerMoreControlsPresentation(host)
+        }
+        playerMoreControlsPresentationCheck = workItem
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.7, execute: workItem)
+    }
+
+    private func verifyPlayerMoreControlsPresentation(
+        _ host: UIHostingController<SurfaceOnlyMoreControlsSheet>
+    ) {
+        guard playerMoreControlsHost === host else { return }
+        guard let presenter = playerMoreControlsPresenter,
+              host.presentingViewController === presenter,
+              presenter.presentedViewController === host,
+              host.viewIfLoaded?.window != nil
+        else {
+            finishPlayerMoreControlsPresentation(host)
+            return
+        }
+        playerMoreControlsPresentationCheck?.cancel()
+        playerMoreControlsPresentationCheck = nil
+    }
+
+    private func finishPlayerMoreControlsPresentation(
+        _ host: UIHostingController<SurfaceOnlyMoreControlsSheet>
+    ) {
+        guard playerMoreControlsHost === host else { return }
+        playerMoreControlsPresentationRetry?.cancel()
+        playerMoreControlsPresentationRetry = nil
+        playerMoreControlsPresentationCheck?.cancel()
+        playerMoreControlsPresentationCheck = nil
+        playerMoreControlsHost = nil
+        playerMoreControlsPresenter = nil
+        finishPendingPlayerMoreControlsPresentation()
+    }
+
+    private func finishPendingPlayerMoreControlsPresentation() {
+        playerMoreControlsPresentationRetry?.cancel()
+        playerMoreControlsPresentationRetry = nil
+        playerMoreControlsPresentationCheck?.cancel()
+        playerMoreControlsPresentationCheck = nil
+        playerMoreControlsPresenter = nil
+        let dismissAction = playerMoreControlsDismissAction
+        playerMoreControlsDismissAction = nil
+        dismissAction?()
     }
 
     private func setSurfaceLandscape(_ landscape: Bool) {
@@ -743,12 +956,17 @@ final class VideoDetailShellViewController: UIViewController {
             if let barView = collapsedBarHost?.view {
                 playerContainer.bringSubviewToFront(barView)
             }
-        } else if let host = collapsedBarHost {
-            host.willMove(toParent: nil)
-            host.view.removeFromSuperview()
-            host.removeFromParent()
-            collapsedBarHost = nil
+        } else {
+            removeCollapsedBarHost()
         }
+    }
+
+    private func removeCollapsedBarHost() {
+        guard let host = collapsedBarHost else { return }
+        host.willMove(toParent: nil)
+        host.view.removeFromSuperview()
+        host.removeFromParent()
+        collapsedBarHost = nil
     }
 
     // MARK: - Bindings
@@ -795,8 +1013,9 @@ final class VideoDetailShellViewController: UIViewController {
     }
 
     private func bindPlaybackState(to playerViewModel: PlayerStateViewModel?) {
+        playbackStateCancellable = nil
+        removeCollapsedBarHost()
         guard let playerViewModel else {
-            playbackStateCancellable = nil
             return
         }
         // 订阅播放状态：暂停只放宽最小高度，不主动收起播放器；恢复播放时
@@ -825,6 +1044,10 @@ final class VideoDetailShellViewController: UIViewController {
                     self.updatePlayerContainerHeight()
                 }
             }
+
+        if isViewLoaded, playerContainer.bounds.height > 0 {
+            updateCollapsedChrome(playerHeight: playerContainer.bounds.height)
+        }
     }
 
     // MARK: - System back gestures
@@ -873,6 +1096,15 @@ final class VideoDetailShellViewController: UIViewController {
         contentHost.view.isUserInteractionEnabled = true
     }
 
+}
+
+extension VideoDetailShellViewController: UIAdaptivePresentationControllerDelegate {
+    func presentationControllerDidDismiss(_ presentationController: UIPresentationController) {
+        guard let host = playerMoreControlsHost,
+              presentationController.presentedViewController === host
+        else { return }
+        finishPlayerMoreControlsPresentation(host)
+    }
 }
 
 extension VideoDetailShellViewController: UIGestureRecognizerDelegate {

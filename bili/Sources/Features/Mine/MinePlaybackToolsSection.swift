@@ -54,6 +54,19 @@ struct MinePlaybackToolsSection: View {
                 Label("视频窗口底部进度条", systemImage: "line.3.horizontal.decrease")
             }
 
+            Picker(selection: Binding(
+                get: { libraryStore.videoListenPlaylistSortOrder },
+                set: { libraryStore.setVideoListenPlaylistSortOrder($0) }
+            )) {
+                ForEach(VideoListenPlaylistSortOrder.allCases) { order in
+                    Label(order.title, systemImage: order.systemImage)
+                        .tag(order)
+                }
+            } label: {
+                Label("听视频列表排序", systemImage: libraryStore.videoListenPlaylistSortOrder.systemImage)
+            }
+            .pickerStyle(.navigationLink)
+
             NavigationLink {
                 PlayerPerformanceLogView()
             } label: {

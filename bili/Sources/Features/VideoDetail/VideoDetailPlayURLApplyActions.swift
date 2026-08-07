@@ -49,6 +49,7 @@ extension VideoDetailViewModel {
             return
         }
         currentPlayURLData = data
+        applyVideoListenAudioVariants(from: data)
         let variants = sortedPlayVariants(playVariants(from: data))
         guard let appliedState = applyPlayableVariantState(variants: variants, source: source) else { return }
         guard isCurrentPlaybackContext(bvid: bvid, cid: cid, page: page) else { return }

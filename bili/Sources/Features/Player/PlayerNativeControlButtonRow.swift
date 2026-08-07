@@ -1,7 +1,7 @@
 import SwiftUI
 
 struct PlayerNativeControlButtonRow: View {
-    @ObservedObject var clock: PlayerPlaybackClock
+    let clock: PlayerPlaybackClock
     let metrics: PlayerNativeControlMetrics
     let layout: BiliPlayerControlLayout
     let isPlaying: Bool

@@ -4,7 +4,8 @@ extension VideoDetailViewModel {
     func selectPgcEpisode(_ video: VideoItem) {
         guard !isPlaybackTerminatedForNavigation else { return }
         guard video.isPGCEpisode, video.bvid != detail.bvid || video.cid != selectedCID else { return }
-        saveCurrentPlaybackProgressBeforeEpisodeSwitch()
+        captureVideoListenPlaybackIntentForContentSwitch()
+        saveCurrentPlaybackProgressBeforeContentSwitch()
 
         isPlaybackInvalidatedForNavigation = false
         cancelBackgroundTasks()
@@ -17,7 +18,7 @@ extension VideoDetailViewModel {
         pendingPlaybackHistoryResumeCID = nil
         resumeDiagnostics = .none
         resetPlaybackStateForSelectedPage()
-        resetInlineStateForPgcEpisodeSwitch()
+        resetInlineStateForContentSwitch()
         syncCommentsRenderStore()
         syncRelatedRenderStore()
 
@@ -39,7 +40,7 @@ extension VideoDetailViewModel {
         }
     }
 
-    private func resetInlineStateForPgcEpisodeSwitch() {
+    func resetInlineStateForContentSwitch() {
         comments = []
         commentCursor = ""
         commentsEnd = false
@@ -57,7 +58,7 @@ extension VideoDetailViewModel {
         uploaderProfile = nil
     }
 
-    private func saveCurrentPlaybackProgressBeforeEpisodeSwitch() {
+    func saveCurrentPlaybackProgressBeforeContentSwitch() {
         guard !libraryStore.incognitoModeEnabled else { return }
         let time = currentPlaybackResumeTime()
         guard time.isFinite,

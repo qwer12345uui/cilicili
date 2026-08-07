@@ -24,20 +24,91 @@ struct LivePlayerLiveEdgeButton: View {
     }
 }
 
-/// PiliPod 布局把刷新和画质直接放在播放按钮之后，保持一眼可见的直播控制行。
-struct LivePlayerPiliPodAccessory: View {
+/// SimpleLive exposes route selection next to refresh and quality. Keeping it
+/// in the existing native control row avoids a second fullscreen overlay.
+struct LivePlayerSimpleLiveAccessory: View {
     @ObservedObject var viewModel: LiveRoomViewModel
 
     var body: some View {
         HStack(spacing: 8) {
             LivePlayerLiveEdgeButton(viewModel: viewModel)
-            LivePlayerPiliPodQualityMenu(viewModel: viewModel)
+            LivePlayerLiveQualityMenu(viewModel: viewModel)
+            LivePlayerSimpleLiveRouteMenu(viewModel: viewModel)
         }
     }
 }
 
-/// PiliPod 在播放层只呈现当前画质文字，不额外放入功能图标，减少直播控制行的视觉噪音。
-private struct LivePlayerPiliPodQualityMenu: View {
+private struct LivePlayerSimpleLiveRouteMenu: View {
+    @Environment(\.playerNativeControlMetrics) private var metrics
+    @ObservedObject var viewModel: LiveRoomViewModel
+
+    var body: some View {
+        if viewModel.hasMultipleStreamCandidates || viewModel.currentStreamTitle != nil {
+            Menu {
+                ForEach(viewModel.streamMenuItems) { item in
+                    Button {
+                        viewModel.selectStreamCandidate(id: item.id)
+                    } label: {
+                        if item.isSelected {
+                            Label(item.title, systemImage: "checkmark")
+                        } else {
+                            Text(item.title)
+                        }
+                    }
+                }
+            } label: {
+                Image(systemName: "antenna.radiowaves.left.and.right")
+                    .font(.system(size: metrics.iconSize, weight: .semibold))
+                    .frame(width: metrics.controlHeight, height: metrics.controlHeight)
+            }
+            .buttonStyle(.plain)
+            .biliPlayerClearGlass(interactive: true, in: Circle())
+            .accessibilityLabel("直播线路：\(viewModel.currentStreamTitle ?? "未选择")")
+        }
+    }
+}
+
+struct LivePlayerSimpleLiveFullscreenHeader: View {
+    @ObservedObject var viewModel: LiveRoomViewModel
+    let onExitFullscreen: () -> Void
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Button(action: onExitFullscreen) {
+                Image(systemName: "chevron.left")
+                    .font(.system(size: 16, weight: .semibold))
+                    .frame(width: 34, height: 34)
+            }
+            .buttonStyle(.plain)
+
+            PlaybackDetailOwnerAvatar(
+                owner: viewModel.anchorOwner,
+                fallbackURLString: viewModel.anchorFace,
+                side: 28,
+                pixelSize: 80
+            )
+
+            VStack(alignment: .leading, spacing: 1) {
+                Text(viewModel.title)
+                    .font(.subheadline.weight(.semibold))
+                    .lineLimit(1)
+                Text(viewModel.anchorName)
+                    .font(.caption2)
+                    .foregroundStyle(.white.opacity(0.72))
+                    .lineLimit(1)
+            }
+            .frame(maxWidth: 210, alignment: .leading)
+        }
+        .padding(.trailing, 12)
+        .biliPlayerClearGlass(interactive: true, in: Capsule())
+        .biliLiquidGlassForeground(shadowOpacity: 0.20)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("退出全屏，\(viewModel.title)，主播 \(viewModel.anchorName)")
+    }
+}
+
+/// 播放层只呈现当前画质文字，不额外放入功能图标，减少直播控制行的视觉噪音。
+private struct LivePlayerLiveQualityMenu: View {
     @Environment(\.playerNativeControlMetrics) private var metrics
     @ObservedObject var viewModel: LiveRoomViewModel
 
@@ -65,22 +136,6 @@ private struct LivePlayerPiliPodQualityMenu: View {
             .biliPlayerClearGlass(interactive: true, in: Capsule())
             .accessibilityLabel("直播画质：\(viewModel.currentQualityTitle ?? "未选择")")
         }
-    }
-}
-
-struct LivePlayerPiliPodFullscreenBackButton: View {
-    @Environment(\.playerNativeControlMetrics) private var metrics
-    let action: () -> Void
-
-    var body: some View {
-        Button(action: action) {
-            Image(systemName: "arrow.down.right.and.arrow.up.left")
-                .font(.system(size: metrics.iconSize, weight: .semibold))
-                .foregroundStyle(.white)
-                .frame(width: metrics.controlHeight, height: metrics.controlHeight)
-        }
-        .biliPlayerCompactGlassCircle(metrics: metrics)
-        .accessibilityLabel("退出全屏")
     }
 }
 

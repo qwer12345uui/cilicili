@@ -7,7 +7,8 @@ extension VideoDetailViewModel {
         resumeCandidate: PlaybackResumeCandidate,
         resumeTime: TimeInterval,
         playbackRate: BiliPlaybackRate,
-        shouldAutoplay: Bool
+        shouldAutoplay: Bool,
+        playbackHandoffSource: PlayerStateViewModel?
     ) {
         guard !isPlaybackInvalidatedForNavigation else {
             playerViewModel.stop(reason: .navigation)
@@ -23,6 +24,8 @@ extension VideoDetailViewModel {
             isAwaitingRelatedVideoReturnPlayback && !shouldAutoplay
         )
         stablePlayerViewModel = playerViewModel
+        pendingVideoListenPlaybackIntent = nil
+        persistVideoListenPlaybackSession(wantsPlayback: shouldAutoplay)
         syncPlayerIdentityRenderStore()
         updateResumeDiagnostics(
             source: resumeCandidate.sourceTitle,
@@ -37,7 +40,11 @@ extension VideoDetailViewModel {
         applySponsorBlockSegmentsToPlayer()
         scheduleSponsorBlockSegmentsAfterFirstFrame()
         if shouldAutoplay {
-            playerViewModel.play()
+            if let playbackHandoffSource {
+                playerViewModel.startSeamlessPlaybackHandoff(from: playbackHandoffSource)
+            } else {
+                playerViewModel.play()
+            }
         }
     }
 }

@@ -54,15 +54,18 @@ struct BiliPlayerViewRuntimeContextBuilder {
             surfaceState: surfaceState,
             playbackControlsVisibility: playbackControlsVisibility,
             rotationTransitionSnapshotModel: rotationTransitionSnapshotModel,
+            seekTransitionSnapshotModel: seekTransitionSnapshotModel,
             appBackgroundRecoverySnapshotModel: appBackgroundRecoverySnapshotModel,
             speedBoostModel: speedBoostModel,
+            seekPreviewModel: seekPreviewModel,
             playbackProgressCoordinator: playbackProgressCoordinator,
             progressReporter: progressReporter,
             progressContext: progressContext,
             configuration: configuration,
             isPictureInPictureEnabled: isPictureInPictureEnabled,
             defaultPlaybackRate: libraryStore.defaultPlaybackRate,
-            videoGravity: videoGravity
+            videoGravity: videoGravity,
+            resetPreparedScrubProgress: resetPreparedScrubProgress
         ).actions
     }
 

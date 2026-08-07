@@ -81,7 +81,7 @@ final class LiveRoomShellViewController: UIViewController {
         self.onNavigateBack = onNavigateBack
         self.contentState = contentState
         self.backdropHost = UIHostingController(
-            rootView: LiveRoomVisualBackdrop(viewModel: viewModel)
+            rootView: LiveRoomVisualBackdrop()
         )
         self.contentHost = UIHostingController(
             rootView: LiveRoomShellContentView(
@@ -110,7 +110,12 @@ final class LiveRoomShellViewController: UIViewController {
     }
 
     override var preferredStatusBarStyle: UIStatusBarStyle {
-        .lightContent
+        guard !hidesSystemChrome,
+              traitCollection.userInterfaceStyle != .dark
+        else {
+            return .lightContent
+        }
+        return .darkContent
     }
 
     override var prefersHomeIndicatorAutoHidden: Bool {
@@ -120,11 +125,11 @@ final class LiveRoomShellViewController: UIViewController {
     override func viewDidLoad() {
         super.viewDidLoad()
         applyAppearanceMode(dependencies.libraryStore.appearanceMode)
-        view.backgroundColor = .black
+        view.backgroundColor = .systemGroupedBackground
         playerContainer.backgroundColor = .black
 
-        backdropHost.view.backgroundColor = .clear
-        backdropHost.view.isOpaque = false
+        backdropHost.view.backgroundColor = .systemGroupedBackground
+        backdropHost.view.isOpaque = true
         backdropHost.view.isUserInteractionEnabled = false
         contentHost.view.backgroundColor = .clear
         loadingHost.view.backgroundColor = .clear
@@ -165,7 +170,7 @@ final class LiveRoomShellViewController: UIViewController {
 
         registerForTraitChanges([UITraitUserInterfaceStyle.self]) {
             (viewController: LiveRoomShellViewController, _) in
-            viewController.setNeedsStatusBarAppearanceUpdate()
+            viewController.updatePlaybackSystemChrome()
         }
 
         bindPlayerSurface()
@@ -221,7 +226,8 @@ final class LiveRoomShellViewController: UIViewController {
         let targetUsesLandscapeFullscreen = usesLandscapeLiveFullscreen(forLandscape: toLandscape)
         let targetUsesFullscreenLayout = targetUsesLandscapeFullscreen || isPortraitFullscreen
         AppStatusBarCompatibility.applyPlaybackPresentation(
-            isHidden: targetUsesFullscreenLayout
+            isHidden: targetUsesFullscreenLayout,
+            style: statusBarStyle(forHiddenSystemChrome: targetUsesFullscreenLayout)
         )
         rotationGeneration &+= 1
         let generation = rotationGeneration
@@ -324,7 +330,19 @@ final class LiveRoomShellViewController: UIViewController {
         setNeedsStatusBarAppearanceUpdate()
         setNeedsUpdateOfHomeIndicatorAutoHidden()
         guard isViewActive else { return }
-        AppStatusBarCompatibility.applyPlaybackPresentation(isHidden: hidesSystemChrome)
+        AppStatusBarCompatibility.applyPlaybackPresentation(
+            isHidden: hidesSystemChrome,
+            style: statusBarStyle(forHiddenSystemChrome: hidesSystemChrome)
+        )
+    }
+
+    private func statusBarStyle(forHiddenSystemChrome isHidden: Bool) -> UIStatusBarStyle {
+        guard !isHidden,
+              traitCollection.userInterfaceStyle != .dark
+        else {
+            return .lightContent
+        }
+        return .darkContent
     }
 
     private func applyAppearanceMode(_ mode: AppAppearanceMode) {
@@ -448,7 +466,7 @@ final class LiveRoomShellViewController: UIViewController {
         safeAreaTop: CGFloat,
         safeAreaBottom: CGFloat
     ) -> CGRect {
-        let height = LiveRoomPiliPodLayoutPolicy.playerHeight(
+        let height = LiveRoomSimpleLiveLayoutPolicy.playerHeight(
             containerSize: bounds.size,
             safeAreaTop: safeAreaTop,
             safeAreaBottom: safeAreaBottom,
@@ -456,7 +474,7 @@ final class LiveRoomShellViewController: UIViewController {
         )
         return CGRect(
             x: bounds.minX,
-            y: bounds.minY + safeAreaTop + LiveRoomPiliPodLayoutPolicy.headerContentHeight,
+            y: bounds.minY + safeAreaTop + LiveRoomSimpleLiveLayoutPolicy.headerContentHeight,
             width: bounds.width,
             height: height
         )

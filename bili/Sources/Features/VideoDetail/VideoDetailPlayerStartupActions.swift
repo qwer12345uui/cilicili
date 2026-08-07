@@ -5,13 +5,15 @@ extension VideoDetailViewModel {
         resumeTimeOverride: TimeInterval? = nil,
         shouldResumePlayback: Bool? = nil,
         playbackRateOverride: BiliPlaybackRate? = nil,
-        preservesPreviousPlayerUntilFirstFrame: Bool = false
+        preservesPreviousPlayerUntilFirstFrame: Bool = false,
+        usesSeamlessPlaybackHandoff: Bool = false
     ) {
         guard !isPlaybackInvalidatedForNavigation else { return }
         guard let variant = selectedPlayVariant, variant.isPlayable else {
             resetStablePlayerForMissingVariant()
             return
         }
+        normalizeVideoListenMode(for: variant)
 
         let identity = playerIdentity(for: variant)
         if applyStableIdentityResumeIfNeeded(
@@ -26,11 +28,13 @@ extension VideoDetailViewModel {
         let startupPreparation = stablePlayerStartupPreparation(
             resumeTimeOverride: resumeTimeOverride,
             shouldResumePlayback: shouldResumePlayback,
-            playbackRateOverride: playbackRateOverride
+            playbackRateOverride: playbackRateOverride,
+            usesSeamlessPlaybackHandoff: usesSeamlessPlaybackHandoff
         )
         preparePreviousStablePlayerForReplacement(
             startupPreparation.previousPlayer,
-            preservesPreviousPlayerUntilFirstFrame: preservesPreviousPlayerUntilFirstFrame
+            preservesPreviousPlayerUntilFirstFrame: preservesPreviousPlayerUntilFirstFrame,
+            keepsPreviousPlaybackActive: startupPreparation.playbackHandoffSource != nil
         )
         resetStablePlayerObserversForNewIdentity(identity)
         createAndInstallStablePlayer(

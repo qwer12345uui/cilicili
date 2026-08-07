@@ -54,6 +54,20 @@ struct MineDisplaySettingsSection: View {
             MineImageCacheControl()
 
             Toggle(isOn: Binding(
+                get: { libraryStore.thumbnailLongPressPreviewExperimentEnabled },
+                set: { libraryStore.setThumbnailLongPressPreviewExperimentEnabled($0) }
+            )) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Label("缩略图按住预览实验", systemImage: "hand.tap")
+
+                    Text("打开后，按住动态或消息里的缩略图会弹出系统图片预览；普通点击仍会打开完整大图。")
+                        .appTypography(.settingsSubtitle, fallback: .caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+
+            Toggle(isOn: Binding(
                 get: { libraryStore.showsVideoCoverDurationBadges },
                 set: { libraryStore.setShowsVideoCoverDurationBadges($0) }
             )) {

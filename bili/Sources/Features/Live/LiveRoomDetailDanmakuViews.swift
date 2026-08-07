@@ -132,10 +132,13 @@ struct LiveDanmakuOverlay: View {
                 playbackRate: 1,
                 isEnabled: snapshot.isEnabled && isVisibleInCurrentOrientation,
                 hasPresentedPlayback: playerViewModel.hasPresentedPlayback || shouldDriveLiveDanmaku,
+                isLoadShedding: false,
                 settings: snapshot.settings,
                 topInset: usesLandscapeChrome ? 28 : 8,
                 bottomInset: usesLandscapeChrome ? 84 : 54,
-                isLayoutTransitioning: isLayoutTransitioning
+                isLayoutTransitioning: isLayoutTransitioning,
+                playbackClock: nil,
+                onPlaybackTime: nil
             )
             .padding(videoContentInsets(in: proxy.size))
             .padding(.horizontal, usesLandscapeChrome ? 18 : 4)

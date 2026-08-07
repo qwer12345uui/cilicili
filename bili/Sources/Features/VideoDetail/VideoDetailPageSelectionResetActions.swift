@@ -4,6 +4,7 @@ extension VideoDetailViewModel {
     func resetPlaybackStateForSelectedPage() {
         resetDanmakuLoad(clearItems: true)
         currentPlayURLData = nil
+        clearVideoListenAudioVariants()
         playVariants = []
         selectedPlayVariant = nil
         playURLElapsedMilliseconds = nil

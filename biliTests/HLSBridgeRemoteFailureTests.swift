@@ -533,6 +533,67 @@ final class HLSBridgePlaylistRenderingTests: XCTestCase {
         )
     }
 
+    func testRendersAudioOnlyPlaylistWithoutVideoRoutes() throws {
+        let baseURL = try XCTUnwrap(URL(string: "http://127.0.0.1:50124"))
+        let audioURL = try XCTUnwrap(URL(string: "https://upos.example.test/audio-aac.m4s"))
+        let rendition = HLSRendition(
+            sourceURL: audioURL,
+            fallbackSourceURLs: [],
+            mediaType: .audio,
+            quality: 30280,
+            initialization: HTTPByteRange(start: 0, endInclusive: 299),
+            initializationData: nil,
+            references: [
+                SIDXParser.Reference(
+                    range: HTTPByteRange(start: 300, endInclusive: 699),
+                    duration: 1,
+                    startTime: 0,
+                    startTimeTicks: 0,
+                    timescale: 1_000
+                )
+            ],
+            targetDuration: 1,
+            bandwidth: 128_000,
+            codec: "mp4a.40.2",
+            mediaTimeOffset: 0,
+            baseMediaDecodeTimeOffsetTicks: 0,
+            dynamicRange: .sdr,
+            dolbyVisionConfiguration: nil,
+            hlsBaseLayerCodec: nil,
+            dimensions: nil,
+            frameRate: nil
+        )
+
+        let rendered = LocalHLSBridge.renderAudioOnlyPlaylists(
+            rendition: rendition,
+            baseURL: baseURL
+        )
+
+        XCTAssertEqual(Set(rendered.routes.keys), Set([
+            "/master.m3u8",
+            "/audio.m3u8",
+            "/media/audio/init.mp4",
+            "/media/audio/segment-0.m4s"
+        ]))
+        XCTAssertFalse(rendered.routes.keys.contains(where: { $0.contains("video") }))
+
+        let master = try dataRouteString("/master.m3u8", in: rendered.routes)
+        XCTAssertTrue(master.playlist.contains("CODECS=\"mp4a.40.2\""))
+        XCTAssertFalse(master.playlist.contains("RESOLUTION="))
+        XCTAssertFalse(master.playlist.contains("#EXT-X-MEDIA:TYPE=AUDIO"))
+
+        let audio = try dataRouteString("/audio.m3u8", in: rendered.routes)
+        XCTAssertTrue(audio.playlist.contains("/media/audio/init.mp4"))
+        try assertRemoteRoute(
+            "/media/audio/segment-0.m4s",
+            in: rendered.routes,
+            url: audioURL,
+            fallbackURLs: [],
+            range: HTTPByteRange(start: 300, endInclusive: 699),
+            contentType: "audio/mp4"
+        )
+    }
+
     private func dataRouteString(
         _ path: String,
         in routes: [String: HLSProxyRoute],

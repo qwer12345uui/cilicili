@@ -3,6 +3,7 @@ import SwiftUI
 struct LiveRoomDetailView: View {
     @EnvironmentObject private var dependencies: AppDependencies
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.colorScheme) private var colorScheme
     let seedRoom: LiveRoom
     @StateObject private var holder = LiveRoomViewModelHolder()
 
@@ -13,7 +14,7 @@ struct LiveRoomDetailView: View {
             hidesRootTabBar: false,
             navigationBarVisibility: .hidden,
             hidesBackButton: true,
-            statusBarStyle: .lightContent,
+            statusBarStyle: statusBarStyle,
             performanceContext: .live(seedRoom),
             lifecycleActions: pageLifecycleActions
         ) {
@@ -56,6 +57,13 @@ struct LiveRoomDetailView: View {
                 holder.viewModel?.stopPlaybackForNavigation()
             }
         )
+    }
+
+    private var statusBarStyle: UIStatusBarStyle {
+        guard colorScheme != .dark else {
+            return .lightContent
+        }
+        return .darkContent
     }
 
     private func configureAndStartPlaybackIfNeeded() {

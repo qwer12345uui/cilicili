@@ -60,4 +60,47 @@ final class PlayerSpeedBoostPolicyTests: XCTestCase {
             )
         )
     }
+
+    @MainActor
+    func testPlayerReplacementRestoresThePlayerThatStartedSpeedBoost() {
+        let playerA = PlayerStateViewModel(
+            videoURL: nil,
+            audioURL: nil,
+            title: "Player A",
+            referer: "https://www.bilibili.com"
+        )
+        let playerB = PlayerStateViewModel(
+            videoURL: nil,
+            audioURL: nil,
+            title: "Player B",
+            referer: "https://www.bilibili.com"
+        )
+        defer {
+            playerA.stop()
+            playerB.stop()
+        }
+
+        playerA.setPlaybackRate(.x15)
+        playerB.setPlaybackRate(.x075)
+        let model = PlayerSpeedBoostModel()
+        XCTAssertTrue(
+            model.beginIfNeeded(
+                playerViewModel: playerA,
+                isSurfacePlaying: true,
+                hidePlaybackControls: {}
+            )
+        )
+        XCTAssertEqual(playerA.playbackRate, .x20)
+
+        var didShowControls = false
+        model.end(
+            reason: .playerChanged,
+            playerViewModel: playerB,
+            showPlaybackControls: { didShowControls = true }
+        )
+
+        XCTAssertEqual(playerA.playbackRate, .x15)
+        XCTAssertEqual(playerB.playbackRate, .x075)
+        XCTAssertFalse(didShowControls)
+    }
 }

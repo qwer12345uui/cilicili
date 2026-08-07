@@ -12,6 +12,9 @@ extension VideoDetailViewModel {
               detail.bvid == bvid,
               selectedCID == cid
         else { return }
+        let mergedData = currentPlayURLData?.mergingPlayableStreams(from: data) ?? data
+        currentPlayURLData = mergedData
+        applyVideoListenAudioVariants(from: mergedData)
         let variants = playVariants(from: data)
         let supplementMilliseconds = formatMilliseconds(elapsedMilliseconds(since: supplementStart))
         guard !variants.isEmpty else {

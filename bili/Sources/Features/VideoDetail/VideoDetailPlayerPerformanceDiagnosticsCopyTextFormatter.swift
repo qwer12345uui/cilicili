@@ -40,12 +40,20 @@ enum PlayerPerformanceOverlayDiagnosticsCopyTextFormatter {
             "视频详情页刷新优化",
             "enabled: true",
             "contentShell: narrowObservation",
+            "playerSurface: \(snapshot.directUIKitSurfaceEnabled ? "directUIKit" : "swiftUIBridge")",
+            "playerOverlayObservation: \(snapshot.narrowPlayerOverlayObservationEnabled ? "narrow" : "legacy")",
+            "playerOverlayLifecycle: \(snapshot.narrowPlayerOverlayObservationEnabled ? "stableOverlay" : "identityRebuild")",
+            "playerReplacementStrategy: \(snapshot.narrowPlayerOverlayObservationEnabled ? "inPlaceRebind" : "legacyRebuild")",
+            "playbackClockObservation: leafControls",
             "rotationStrategy: videoSurfaceFirst",
             "bareSurfaceTransition: \(snapshot.isBareSurfaceTransitionActive ? "true" : "false")",
             "rotationTransitionCount: \(snapshot.rotationTransitionCount)",
             "lastBareSurfaceDuration: \(formattedMilliseconds(snapshot.lastBareSurfaceDurationMilliseconds))",
             "totalBareSurfaceDuration: \(formattedMilliseconds(snapshot.totalBareSurfaceDurationMilliseconds))",
             "overlayPublishCount: \(snapshot.overlayPublishCount)",
+            "playerStatePublishCount: \(snapshot.playerStatePublishCount)",
+            "settingsStatePublishCount: \(snapshot.settingsStatePublishCount)",
+            "playerRebindCount: \(snapshot.playerRebindCount)",
             "overlayDeferredCount: \(snapshot.overlayDeferredCount)",
             "overlayFlushCount: \(snapshot.overlayFlushCount)",
             "lastEvent: \(snapshot.lastEvent)"
@@ -65,13 +73,18 @@ enum PlayerPerformanceOverlayDiagnosticsCopyTextFormatter {
         diagnosticsStore: VideoDetailNetworkDiagnosticsRenderStore,
         playerViewModel: PlayerStateViewModel?
     ) -> String {
+        let selectedStream = selectedStreamText(
+            diagnosticsStore.selectedPlayVariant,
+            playbackContentMode: playerViewModel?.playbackContentMode ?? .video,
+            requestedAudioStream: playerViewModel?.requestedAudioStream
+        )
         var lines = [
             "播放现场诊断",
             "generated: \(copyDateFormatter.string(from: Date()))",
             "metricsID: \(metricsID)",
             "video: \(diagnosticsStore.videoTitle.isEmpty ? "-" : diagnosticsStore.videoTitle)",
             "selectedQuality: \(selectedQualityText(diagnosticsStore.selectedPlayVariant))",
-            "selectedStream: \(selectedStreamText(diagnosticsStore.selectedPlayVariant))",
+            "selectedStream: \(selectedStream)",
             "playURLSource: \(PlaybackNetworkDiagnosticFormat.playURLSourceTitle(diagnosticsStore.lastPlayURLSource))",
             "playURLElapsed: \(PlaybackNetworkDiagnosticFormat.formattedMilliseconds(diagnosticsStore.playURLElapsedMilliseconds))",
             "detailElapsed: \(PlaybackNetworkDiagnosticFormat.formattedMilliseconds(diagnosticsStore.detailLoadElapsedMilliseconds))"
@@ -85,6 +98,7 @@ enum PlayerPerformanceOverlayDiagnosticsCopyTextFormatter {
         }
 
         let diagnostics = playerViewModel.engineDiagnostics
+        lines.append("playbackContentMode: \(diagnostics.playbackContentMode.diagnosticTitle)")
         lines.append("playerState: \(PlaybackNetworkPlayerDiagnosticSnapshot.playerStateTitle(playerViewModel))")
         lines.append("playbackPhase: \(playerViewModel.playbackPhase.diagnosticTitle)")
         lines.append("engine: \(diagnostics.engineName)")
@@ -192,8 +206,26 @@ enum PlayerPerformanceOverlayDiagnosticsCopyTextFormatter {
         return "q\(variant.quality) \(variant.title)"
     }
 
-    private static func selectedStreamText(_ variant: PlayVariant?) -> String {
+    private static func selectedStreamText(
+        _ variant: PlayVariant?,
+        playbackContentMode: PlayerPlaybackContentMode,
+        requestedAudioStream: DASHStream?
+    ) -> String {
         guard let variant else { return "-" }
+        if playbackContentMode == .audioOnly {
+            let audioStream = requestedAudioStream ?? variant.audioStream
+            var parts = ["仅音频"]
+            if let codec = PlaybackNetworkDiagnosticFormat.nilIfEmpty(audioStream?.codecLabel) {
+                parts.append(codec)
+            }
+            if let bandwidth = audioStream?.bandwidth, bandwidth > 0 {
+                parts.append(String(format: "%.2f Mbps", Double(bandwidth) / 1_000_000))
+            }
+            if let audioCodecs = audioStream?.codecs, !audioCodecs.isEmpty {
+                parts.append("audioCodecs=\(audioCodecs)")
+            }
+            return parts.joined(separator: " · ")
+        }
         var parts = [
             dynamicRangeTitle(variant.dynamicRange),
             PlaybackNetworkDiagnosticFormat.nilIfEmpty(variant.codec) ?? "codec未知",

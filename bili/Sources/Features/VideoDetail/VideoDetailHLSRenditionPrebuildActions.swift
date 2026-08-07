@@ -9,7 +9,8 @@ extension VideoDetailViewModel {
     ) {
         cancelHLSRenditionPrebuildTask(advancesGeneration: false)
         let prebuildGeneration = advanceHLSRenditionPrebuildGeneration()
-        guard !isPlaybackInvalidatedForNavigation,
+        guard playbackContentMode == .video,
+              !isPlaybackInvalidatedForNavigation,
               let cid,
               let startupVariant,
               startupVariant.audioURL != nil,

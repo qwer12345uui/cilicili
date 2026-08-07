@@ -153,30 +153,30 @@ final class LivePlaybackExperimentsTests: XCTestCase {
         )
     }
 
-    func testPiliPodLayoutReservesDetailAndSafeAreaBeforeSizingPlayer() {
-        let tallPlayerHeight = LiveRoomPiliPodLayoutPolicy.playerHeight(
+    func testSimpleLiveLayoutReservesDetailAndSafeAreaBeforeSizingPlayer() {
+        let tallPlayerHeight = LiveRoomSimpleLiveLayoutPolicy.playerHeight(
             containerSize: CGSize(width: 420, height: 912),
             safeAreaTop: 59,
             safeAreaBottom: 34,
             videoAspectRatio: 9.0 / 16.0
         )
-        XCTAssertEqual(tallPlayerHeight, 551)
+        XCTAssertEqual(tallPlayerHeight, 475)
         XCTAssertLessThanOrEqual(
             tallPlayerHeight
                 + 59
                 + 34
-                + LiveRoomPiliPodLayoutPolicy.headerContentHeight
-                + LiveRoomPiliPodLayoutPolicy.minimumDetailHeight,
+                + LiveRoomSimpleLiveLayoutPolicy.headerContentHeight
+                + LiveRoomSimpleLiveLayoutPolicy.minimumDetailHeight,
             912
         )
 
-        let compactPlayerHeight = LiveRoomPiliPodLayoutPolicy.playerHeight(
+        let compactPlayerHeight = LiveRoomSimpleLiveLayoutPolicy.playerHeight(
             containerSize: CGSize(width: 375, height: 667),
             safeAreaTop: 47,
             safeAreaBottom: 34,
             videoAspectRatio: 9.0 / 16.0
         )
-        XCTAssertEqual(compactPlayerHeight, 318)
+        XCTAssertEqual(compactPlayerHeight, 242)
     }
 
     func testRotationSurfaceStabilityPolicyHidesChatHostForTheWholeTransition() {

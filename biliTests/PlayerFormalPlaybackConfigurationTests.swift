@@ -44,6 +44,29 @@ final class PlayerFormalPlaybackConfigurationTests: XCTestCase {
         }
     }
 
+    func testAudioOnlyPlaybackPublishesNowPlayingWhileActivelyPlaying() {
+        XCTAssertTrue(
+            PlayerNowPlayingPublicationPolicy.shouldPublish(
+                isActive: true,
+                wantsAutoplay: true,
+                isPlaying: true,
+                isTerminated: false,
+                hasPlaybackFailure: false,
+                playbackContentMode: .audioOnly
+            )
+        )
+        XCTAssertFalse(
+            PlayerNowPlayingPublicationPolicy.shouldPublish(
+                isActive: false,
+                wantsAutoplay: true,
+                isPlaying: true,
+                isTerminated: false,
+                hasPlaybackFailure: false,
+                playbackContentMode: .audioOnly
+            )
+        )
+    }
+
     @MainActor
     func testNowPlayingMetadataUsesVideoAuthorWhenAvailable() {
         let player = PlayerStateViewModel(
@@ -109,6 +132,61 @@ final class PlayerFormalPlaybackConfigurationTests: XCTestCase {
     }
 
     @MainActor
+    func testLibraryStoreRetiresFormerListenAndMetalExperimentFlags() {
+        let defaults = makeUserDefaults()
+        let retiredKeys = [
+            "cc.bili.playback.videoListenModeExperimentEnabled.v1",
+            "cc.bili.playback.officialListenerPlaylistExperimentEnabled.v1",
+            "cc.bili.playback.metalDanmakuRendererExperimentEnabled.v1",
+        ]
+        retiredKeys.forEach { defaults.set(false, forKey: $0) }
+
+        _ = LibraryStore(userDefaults: defaults)
+
+        retiredKeys.forEach { XCTAssertNil(defaults.object(forKey: $0)) }
+    }
+
+    func testPlayerStreamSourceResumeTimePreservesAudioOnlyMode() {
+        let source = PlayerStreamSource(
+            metricsID: "audio-only-test",
+            videoURL: nil,
+            audioURL: URL(string: "https://example.com/audio.m4s"),
+            videoStream: nil,
+            audioStream: nil,
+            alternateVideoRenditions: [],
+            referer: "https://www.bilibili.com",
+            httpHeaders: [:],
+            title: "Test",
+            durationHint: 100,
+            isLiveStream: false,
+            isLiveHLS: false,
+            liveHLSFormat: nil,
+            resumeTime: 0,
+            dynamicRange: .sdr,
+            cdnPreference: .automatic,
+            playbackContentMode: .audioOnly
+        )
+
+        let resumed = source.withResumeTime(42)
+        XCTAssertEqual(resumed.resumeTime, 42)
+        XCTAssertEqual(resumed.playbackContentMode, .audioOnly)
+    }
+
+    @MainActor
+    func testLibraryStoreRetiresPromotedVideoAndLiveExperimentPreferences() {
+        let defaults = makeUserDefaults()
+        let videoSurfaceKey = "cc.bili.videoDetail.directUIKitSurfaceExperimentEnabled.v1"
+        let liveLayoutKey = "cc.bili.live.simpleLiveRoomLayoutExperimentEnabled.v1"
+        defaults.set(false, forKey: videoSurfaceKey)
+        defaults.set(false, forKey: liveLayoutKey)
+
+        _ = LibraryStore(userDefaults: defaults)
+
+        XCTAssertNil(defaults.object(forKey: videoSurfaceKey))
+        XCTAssertNil(defaults.object(forKey: liveLayoutKey))
+    }
+
+    @MainActor
     func testExplicitPlaybackPromptsDoNotReturnAfterPause() {
         let player = PlayerStateViewModel(
             videoURL: nil,
@@ -128,6 +206,78 @@ final class PlayerFormalPlaybackConfigurationTests: XCTestCase {
 
         XCTAssertFalse(player.isAwaitingInitialManualPlayback)
         XCTAssertFalse(player.isAwaitingRelatedVideoReturnPlayback)
+    }
+
+    @MainActor
+    func testPlayerSurfaceSnapshotIncludesDurationAndExplicitPlaybackPrompt() {
+        let player = PlayerStateViewModel(
+            videoURL: nil,
+            audioURL: nil,
+            title: "Test",
+            referer: "https://www.bilibili.com"
+        )
+        defer { player.stop() }
+
+        player.duration = 88
+        player.setInitialManualPlaybackPrompt(true)
+        let snapshot = PlayerSurfaceSnapshot(viewModel: player)
+
+        XCTAssertEqual(snapshot.duration, 88)
+        XCTAssertTrue(snapshot.showsExplicitPlaybackStartControl)
+    }
+
+    @MainActor
+    func testPlayerSurfaceStateRebindStopsOldPlayerUpdatesAndTracksNewPlayer() async {
+        let playerA = PlayerStateViewModel(
+            videoURL: nil,
+            audioURL: nil,
+            title: "Player A",
+            referer: "https://www.bilibili.com"
+        )
+        let playerB = PlayerStateViewModel(
+            videoURL: nil,
+            audioURL: nil,
+            title: "Player B",
+            referer: "https://www.bilibili.com"
+        )
+        defer {
+            playerA.stop()
+            playerB.stop()
+        }
+
+        playerA.duration = 10
+        playerB.duration = 20
+        let surfaceState = PlayerSurfaceStateModel(viewModel: playerA)
+        surfaceState.bind(viewModel: playerA)
+        XCTAssertEqual(surfaceState.duration, 10)
+
+        surfaceState.bind(viewModel: playerB)
+        XCTAssertEqual(surfaceState.duration, 20)
+
+        playerA.duration = 30
+        try? await Task.sleep(nanoseconds: 30_000_000)
+        XCTAssertEqual(surfaceState.duration, 20)
+
+        playerB.duration = 40
+        try? await Task.sleep(nanoseconds: 30_000_000)
+        XCTAssertEqual(surfaceState.duration, 40)
+    }
+
+    @MainActor
+    func testVideoDetailRuntimeSettingsSnapshotTracksPlayerOverlayInputs() async {
+        let defaults = makeUserDefaults()
+        let libraryStore = LibraryStore(userDefaults: defaults)
+        let runtimeSettings = VideoDetailRuntimeSettingsStore()
+        runtimeSettings.bind(libraryStore)
+
+        libraryStore.setPictureInPictureEnabled(true)
+        libraryStore.setDefaultPlaybackRate(1.5)
+        XCTAssertTrue(libraryStore.setAppTintColorHex("#123456"))
+        try? await Task.sleep(nanoseconds: 30_000_000)
+
+        XCTAssertTrue(runtimeSettings.pictureInPictureEnabled)
+        XCTAssertEqual(runtimeSettings.defaultPlaybackRate, 1.5)
+        XCTAssertEqual(runtimeSettings.snapshot.appTintColorHex, "#123456")
     }
 
     @MainActor
@@ -370,6 +520,113 @@ final class PlayerFormalPlaybackConfigurationTests: XCTestCase {
         XCTAssertTrue(player.isStoppedAppBackgroundSurfaceRecoveryReadyForReveal())
         player.finishAppBackgroundSurfaceRecoveryReveal()
         XCTAssertEqual(player.playbackPhase, .paused)
+    }
+
+    @MainActor
+    func testAudioOnlyPlaybackContinuesWhenApplicationEntersBackground() throws {
+        let coordinator = ActivePlaybackCoordinator.shared
+        coordinator.stopActivePlayback()
+
+        let engine = PlayerLifecycleEngineSpy(isPlaying: true)
+        let audioURL = try XCTUnwrap(URL(string: "https://example.com/audio.m4s"))
+        let player = PlayerStateViewModel(
+            videoURL: nil,
+            audioURL: audioURL,
+            title: "听视频后台播放测试",
+            referer: "https://www.bilibili.com",
+            playbackContentMode: .audioOnly,
+            engine: engine
+        )
+        coordinator.activate(player)
+        player.setPlaybackIntent(true)
+        defer {
+            player.stop()
+            coordinator.stopActivePlayback()
+        }
+
+        XCTAssertFalse(player.pauseForAppBackground())
+        XCTAssertEqual(engine.backgroundPauseCallCount, 0)
+        XCTAssertTrue(player.wantsAutoplay)
+    }
+
+    @MainActor
+    func testDelayedStartupResumeCorrectionDoesNotRewindAdvancedAudioPlayback() async throws {
+        let coordinator = ActivePlaybackCoordinator.shared
+        coordinator.stopActivePlayback()
+
+        let engine = PlayerLifecycleEngineSpy(isPlaying: true)
+        engine.snapshotTime = 30
+        let audioURL = try XCTUnwrap(URL(string: "https://example.com/audio.m4s"))
+        let player = PlayerStateViewModel(
+            videoURL: nil,
+            audioURL: audioURL,
+            title: "听视频前台进度测试",
+            referer: "https://www.bilibili.com",
+            resumeTime: 12,
+            startupResumePolicy: .immediate,
+            playbackContentMode: .audioOnly,
+            engine: engine
+        )
+        let surface = VideoSurfaceContainerView()
+        player.attachSurface(surface, prefersNativePlaybackControls: false)
+        coordinator.activate(player)
+        player.setPlaybackIntent(true)
+        defer {
+            player.stop()
+            coordinator.stopActivePlayback()
+        }
+
+        player.play()
+        try await Task.sleep(nanoseconds: 220_000_000)
+
+        XCTAssertEqual(engine.seekCallCount, 0)
+        XCTAssertEqual(engine.snapshotTime, 30)
+    }
+
+    @MainActor
+    func testSeamlessPlaybackHandoffKeepsOldAudioUntilNewPlaybackStarts() {
+        let coordinator = ActivePlaybackCoordinator.shared
+        coordinator.stopActivePlayback()
+
+        let oldEngine = PlayerLifecycleEngineSpy(isPlaying: true)
+        oldEngine.snapshotTime = 18
+        let oldPlayer = PlayerStateViewModel(
+            videoURL: URL(string: "https://example.com/video.m4s"),
+            audioURL: URL(string: "https://example.com/video-audio.m4s"),
+            title: "原视频播放器",
+            referer: "https://www.bilibili.com",
+            engine: oldEngine
+        )
+        let newEngine = PlayerLifecycleEngineSpy(isPlaying: false)
+        let newPlayer = PlayerStateViewModel(
+            videoURL: nil,
+            audioURL: URL(string: "https://example.com/audio-only.m4s"),
+            title: "听视频播放器",
+            referer: "https://www.bilibili.com",
+            playbackContentMode: .audioOnly,
+            engine: newEngine
+        )
+        let surface = VideoSurfaceContainerView()
+        newPlayer.attachSurface(surface, prefersNativePlaybackControls: false)
+        coordinator.activate(oldPlayer)
+        defer {
+            newPlayer.stop()
+            oldPlayer.stop()
+            coordinator.stopActivePlayback()
+        }
+
+        newPlayer.startSeamlessPlaybackHandoff(from: oldPlayer)
+
+        XCTAssertTrue(coordinator.currentActivePlayer() === oldPlayer)
+        XCTAssertEqual(oldEngine.pauseCallCount, 0)
+        XCTAssertEqual(newEngine.lastSeekTime, 18)
+        XCTAssertEqual(newEngine.temporaryAudioSuppressionValues.last, true)
+
+        newEngine.onFirstFrame?(18)
+
+        XCTAssertTrue(coordinator.currentActivePlayer() === newPlayer)
+        XCTAssertGreaterThanOrEqual(oldEngine.pauseCallCount, 1)
+        XCTAssertEqual(newEngine.temporaryAudioSuppressionValues.last, false)
     }
 
     @MainActor
@@ -770,6 +1027,7 @@ final class PlayerLifecycleEngineSpy: PlayerRenderingEngine {
     private(set) var prepareCallCount = 0
     private(set) var seekCallCount = 0
     private(set) var lastSeekTime: TimeInterval?
+    private(set) var temporaryAudioSuppressionValues: [Bool] = []
 
     init(isPlaying: Bool) {
         self.isPlaying = isPlaying
@@ -851,7 +1109,9 @@ final class PlayerLifecycleEngineSpy: PlayerRenderingEngine {
     func setPreferredPeakBitRate(_: Double?) {}
     func setVolume(_ volume: Float) { self.volume = volume }
     func setMuted(_ isMuted: Bool) { self.isMuted = isMuted }
-    func setTemporaryAudioSuppressed(_: Bool) {}
+    func setTemporaryAudioSuppressed(_ isSuppressed: Bool) {
+        temporaryAudioSuppressionValues.append(isSuppressed)
+    }
     func setPictureInPictureEnabled(_: Bool) {}
     func seek(toTime time: TimeInterval) -> TimeInterval? {
         seekCallCount += 1
