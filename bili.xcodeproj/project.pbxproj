@@ -29,14 +29,28 @@
 		};
 /* End PBXCopyFilesBuildPhase section */
 
+/* Begin PBXBuildFile section */
+		A11500000000000000000001 /* CiliCiliCompatibilityApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = A11500000000000000000011 /* CiliCiliCompatibilityApp.swift */; };
+		A11500000000000000000002 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = A11500000000000000000012 /* Assets.xcassets */; };
+		A11500000000000000000003 /* LaunchScreen.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = A11500000000000000000013 /* LaunchScreen.storyboard */; };
+/* End PBXBuildFile section */
+
 /* Begin PBXFileReference section */
 		7FB932AC2FA5009100F93779 /* bili.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = bili.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		7FB940012FA9000000F93779 /* biliTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = biliTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		A11500000000000000000011 /* CiliCiliCompatibilityApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Compatibility/CiliCiliCompatibilityApp.swift"; sourceTree = "<group>"; };
+		A11500000000000000000012 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		A11500000000000000000013 /* LaunchScreen.storyboard */ = {isa = PBXFileReference; lastKnownFileType = file.storyboard; path = Resources/LaunchScreen.storyboard; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
 		7FB932AE2FA5009100F93779 /* bili */ = {
-			isa = PBXFileSystemSynchronizedRootGroup;
+			isa = PBXGroup;
+			children = (
+				A11500000000000000000011 /* CiliCiliCompatibilityApp.swift */,
+				A11500000000000000000012 /* Assets.xcassets */,
+				A11500000000000000000013 /* LaunchScreen.storyboard */,
+			);
 			path = bili;
 			sourceTree = "<group>";
 		};
@@ -106,9 +120,6 @@
 			buildRules = (
 			);
 			dependencies = (
-			);
-			fileSystemSynchronizedGroups = (
-				7FB932AE2FA5009100F93779 /* bili */,
 			);
 			name = bili;
 			packageProductDependencies = (
@@ -186,6 +197,8 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				A11500000000000000000002 /* Assets.xcassets in Resources */,
+				A11500000000000000000003 /* LaunchScreen.storyboard in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -203,6 +216,7 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				A11500000000000000000001 /* CiliCiliCompatibilityApp.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -391,7 +405,6 @@
 					CURRENT_PROJECT_VERSION = 257;
 					DEVELOPMENT_TEAM = "";
 					ENABLE_PREVIEWS = YES;
-					EXCLUDED_SOURCE_FILE_NAMES = "Sources/**";
 					FRAMEWORK_SEARCH_PATHS = "$(inherited)";
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = "Config/bili-Info.plist";
