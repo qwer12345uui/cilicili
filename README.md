@@ -6,22 +6,27 @@ cilicili 是一个使用 SwiftUI 开发的第三方 iOS 客户端实验项目，
 
 官方 Telegram 频道：[@cilicili89](https://t.me/cilicili89)
 
-## 功能概览
+## iOS 15 兼容版本
 
-- 首页推荐、搜索、UP 主空间、视频详情和相关推荐。
-- 动态页支持图文、视频动态、转发动态展示。
-- 视频详情页包含评论、弹幕、点赞、投币、收藏、分享等交互入口。
-- 基于 AVPlayer 的 HLS Bridge 播放链路，面向 iOS 26+ 设备优化 HEVC 硬件解码体验。
-- 支持弹幕开关、弹幕样式设置、内容关键词过滤、图片大图预览和组图切换。
-- 支持二维码登录和 Web 登录，登录态存储在本机 Keychain 中。
-- GitHub Actions 可自动构建 Release 未签名 IPA。
+当前发布版本以 **iOS 15.0** 为最低部署目标，采用系统 `TabView` 保留截图所示的三个底部入口：**首页**、**我的**与**搜索**。入口选择会在本机保存并于下次启动恢复。首页和搜索使用内置网页视图继续提供浏览与关键词检索；“我的”页保留账户网页入口，并提供从系统相册选择图片、申请相册权限及写入系统相册的保存路径。
+
+原始工程中的视频播放、弹幕、动态和高阶设置界面依赖 iOS 16–26 的 SwiftUI 与 UIKit API，因此不纳入 iOS 15 兼容构建。源码仍完整保留在仓库中，供后续按系统版本继续维护。
+
+| 项目 | 当前兼容构建 | 原始高版本界面 |
+| --- | --- | --- |
+| 最低系统版本 | iOS 15.0 | iOS 26.4+ |
+| 底部导航 | 首页、我的、搜索 | 首页、动态、直播、我的、搜索 |
+| 图片保存 | 系统相册选择、授权与写入 | 原图、GIF、Live Photo 保存 |
+| 构建成员 | `bili/Compatibility/CiliCiliCompatibilityApp.swift` | `bili/Sources/` |
 
 ## 环境要求
 
-- macOS + Xcode 26.5 或更新版本。
-- iOS 26.4+。
-- Swift 6 / SwiftUI。
-- 目标设备建议 iPhone 16 及以上机型。
+| 项目 | 要求 |
+| --- | --- |
+| 开发环境 | macOS + Xcode 26.5 或更新版本 |
+| 最低部署版本 | iOS 15.0 |
+| 界面框架 | SwiftUI、UIKit、WebKit、Photos |
+| 产物类型 | 无签名 IPA |
 
 ## 本地运行
 
@@ -66,12 +71,12 @@ xcodebuild \
 
 APP_PATH="$(find "$DERIVED_DATA_PATH/Build/Products" -maxdepth 2 -name '*.app' -type d | head -n 1)"
 cp -R "$APP_PATH" "$BUILD_DIR/Payload/"
-(cd "$BUILD_DIR" && zip -qry cilicili-release-unsigned.ipa Payload)
+(cd "$BUILD_DIR" && zip -qry cilicili-ios15-unsigned.ipa Payload)
 ```
 
-## GitHub Actions
+## 在线构建
 
-仓库内置 `.github/workflows/unsigned-ipa.yml`，每次推送到 `main` 或手动触发 workflow 时，会构建一个 Release 未签名 IPA artifact。
+仓库内置 `.github/workflows/unsigned-ipa.yml`。该工作流仅在 GitHub 的 Actions 页面手动启动，构建完成后会提供 `cilicili-ios15-unsigned.ipa` 和 `xcodebuild.log` 两个可下载产物。发布步骤、文件校验与签名限制请参阅 [BUILD_AND_RELEASE_WORKFLOW.md](BUILD_AND_RELEASE_WORKFLOW.md)。
 
 ## 隐私与安全
 
