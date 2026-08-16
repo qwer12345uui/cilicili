@@ -989,7 +989,7 @@ private enum NativeBiliAPI {
                 values[cookie.name] = cookie.value
             }
         }
-        let header = values.keys.sorted().map { "\($0)=\(values[$0] ?? \"\")" }.joined(separator: "; ")
+        let header = values.keys.sorted().map { "\($0)=\(values[$0] ?? "")" }.joined(separator: "; ")
         guard !header.isEmpty else {
             throw NativeMediaError.service(code: -1, message: "登录已确认，但尚未获取到可保存的会话信息")
         }
