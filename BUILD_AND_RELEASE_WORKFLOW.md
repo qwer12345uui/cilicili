@@ -32,7 +32,7 @@ unzip -l cilicili-ios15-unsigned.ipa
 | --- | --- |
 | `cilicili-ios15-unsigned.ipa` | iOS 15 兼容的无签名包 |
 | `cilicili-ios15-unsigned.ipa.sha256` | 完整性校验值 |
-| `RELEASE_NOTES_1.0.20.md` | 修复内容、功能范围与验证结论 |
+| `RELEASE_NOTES_<version>.md` | 对应版本的修复内容、功能范围与验证结论 |
 | `LICENSE` 与对应源码 | 履行 GPL-3.0-only 的源码与许可义务 |
 
 > 无签名 IPA 不可直接作为 App Store 或 TestFlight 发布包，也不应随附任何开发者账号、证书、描述文件或私钥。需要安装到设备时，应由具备相应授权的开发者在仓库外完成签名。

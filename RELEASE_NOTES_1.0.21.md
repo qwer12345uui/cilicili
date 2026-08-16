@@ -1,8 +1,12 @@
 # cilicili 1.0.21 原生界面修复日记
 
-**最低部署版本：** iOS 15.0  
-**应用版本：** 1.0.21（258）  
-**状态：** 待完成 GitHub 构建验证。
+**最低部署版本：** iOS 15.0
+
+**应用版本：** 1.0.21（258）
+
+**源码修订：** `590244db09f9d1337cebc0763ad8a35c4c192c1b`
+
+**构建结论：** GitHub macOS 构建通过，`BUILD SUCCEEDED`。[1]
 
 ## 本次修复
 
@@ -25,8 +29,19 @@
 
 ## 构建验证
 
-构建运行编号、IPA 文件大小、SHA-256 和日志结论将在 GitHub 构建成功后补充到本日记中。
+| 项目 | 结果 |
+| --- | --- |
+| GitHub 构建运行 | [#31970611137][1] |
+| 构建时长 | 38 秒 |
+| 编译结论 | `BUILD SUCCEEDED` |
+| IPA 文件名 | `cilicili-ios15-unsigned.ipa` |
+| IPA 大小 | 11,681,619 bytes |
+| SHA-256 | `6f33a10b0c27bc97e822d66e5fe5e412b7c8b5cb6d96aa844b50e919d9784733` |
+| 签名状态 | 无签名 |
+
+无签名 IPA 不能直接作为 App Store 或 TestFlight 包发布，也不能在未签名的普通设备上直接安装。使用前应由持有相应证书与描述文件的开发者在仓库外完成签名；不得将个人证书、描述文件、账号凭据或私钥提交到仓库。
 
 ## 参考来源
 
-[1]: https://github.com/qwer12345uui/cilicili
+[1]: https://github.com/qwer12345uui/cilicili/actions/runs/31970611137
+[2]: https://github.com/qwer12345uui/cilicili
