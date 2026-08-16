@@ -26,12 +26,18 @@ extension EnvironmentValues {
 extension View {
     @ViewBuilder
     func rootFloatingTabBarContentPadding(extra: CGFloat = 0) -> some View {
-        safeAreaPadding(.bottom, RootFloatingTabBarMetrics.contentBottomPadding + extra)
+        padding(.bottom, RootFloatingTabBarMetrics.contentBottomPadding + extra)
     }
 
     @ViewBuilder
     func nativeTopNavigationChrome() -> some View {
-        toolbarBackground(.automatic, for: .navigationBar)
+        Group {
+            if #available(iOS 16.0, *) {
+                self.toolbarBackground(.automatic, for: .navigationBar)
+            } else {
+                self
+            }
+        }
     }
 
     @ViewBuilder
@@ -47,46 +53,59 @@ extension View {
         accessoryUsesFullWidth: Bool = false,
         @ViewBuilder accessory: @escaping () -> Accessory
     ) -> some View {
-        modifier(
-            RootFloatingNavigationTitleModifier(
-                title: title,
-                accessoryUsesFullWidth: accessoryUsesFullWidth,
-                accessory: accessory
-            )
-        )
+        Group {
+            if #available(iOS 26.0, *) {
+                self.modifier(
+                    RootFloatingNavigationTitleModifier(
+                        title: title,
+                        accessoryUsesFullWidth: accessoryUsesFullWidth,
+                        accessory: accessory
+                    )
+                )
+            } else {
+                self.navigationBarTitle(title, displayMode: .inline)
+            }
+        }
     }
 
     @ViewBuilder
     func hiddenRootNavigationTitle(_ title: String) -> some View {
-        navigationTitle(title)
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar(.hidden, for: .navigationBar)
-            .toolbar {
-                ToolbarItem(placement: .principal) {
-                    Color.clear
-                        .frame(width: 1, height: 1)
-                        .accessibilityHidden(true)
-                }
+        Group {
+            if #available(iOS 16.0, *) {
+                self
+                    .navigationTitle(title)
+                    .navigationBarTitleDisplayMode(.inline)
+                    .toolbar(.hidden, for: .navigationBar)
+            } else {
+                self
+                    .navigationBarTitle(title, displayMode: .inline)
             }
+        }
     }
 
     @ViewBuilder
     func hiddenInlineNavigationTitle() -> some View {
-        navigationTitle("")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbarBackground(.automatic, for: .navigationBar)
-            .toolbar {
-                ToolbarItem(placement: .principal) {
-                    Color.clear
-                        .frame(width: 1, height: 1)
-                        .accessibilityHidden(true)
-                }
+        Group {
+            if #available(iOS 16.0, *) {
+                self
+                    .navigationTitle("")
+                    .navigationBarTitleDisplayMode(.inline)
+                    .toolbarBackground(.automatic, for: .navigationBar)
+            } else {
+                self.navigationBarTitle("", displayMode: .inline)
             }
+        }
     }
 
     @ViewBuilder
     func nativeTopScrollEdgeEffect(hidesRootNavigationTitle: Bool = true) -> some View {
-        modifier(TopScrollEdgeEffect(hidesRootNavigationTitle: hidesRootNavigationTitle))
+        Group {
+            if #available(iOS 26.0, *) {
+                self.modifier(TopScrollEdgeEffect(hidesRootNavigationTitle: hidesRootNavigationTitle))
+            } else {
+                self
+            }
+        }
     }
 
     @ViewBuilder
@@ -255,16 +274,21 @@ private struct BiliGlassButtonStyleModifier: ViewModifier {
 
     @ViewBuilder
     func body(content: Content) -> some View {
-        if prominent {
-            content
-                .buttonStyle(.glassProminent)
+        if #available(iOS 26.0, *) {
+            if prominent {
+                content.buttonStyle(.glassProminent)
+            } else {
+                content.buttonStyle(.glass)
+            }
+        } else if prominent {
+            content.buttonStyle(.borderedProminent)
         } else {
-            content
-                .buttonStyle(.glass)
+            content.buttonStyle(.bordered)
         }
     }
 }
 
+@available(iOS 26.0, *)
 struct TopScrollEdgeEffect: ViewModifier {
     @Environment(\.rootNavigationTitleHidden) private var rootNavigationTitleHidden
     @Environment(\.scrollEdgeEffectPreference) private var scrollEdgeEffectPreference
@@ -300,6 +324,7 @@ struct TopScrollEdgeEffect: ViewModifier {
     }
 }
 
+@available(iOS 26.0, *)
 private struct RootFloatingNavigationTitleModifier<Accessory: View>: ViewModifier {
     let title: String
     let accessoryUsesFullWidth: Bool
@@ -321,6 +346,7 @@ private struct RootFloatingNavigationTitleModifier<Accessory: View>: ViewModifie
     }
 }
 
+@available(iOS 26.0, *)
 private struct RootFloatingNavigationTitle<Accessory: View>: View {
     let title: String
     let isTitleHidden: Bool

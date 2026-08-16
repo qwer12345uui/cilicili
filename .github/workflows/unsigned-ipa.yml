@@ -1,11 +1,10 @@
-name: Build unsigned IPA
+name: Build iOS 15 unsigned IPA
 
 on:
   workflow_dispatch:
-  push:
-    branches:
-      - main
-      - master
+
+permissions:
+  contents: read
 
 jobs:
   build:
@@ -13,13 +12,13 @@ jobs:
     runs-on: macos-26
 
     steps:
-      - name: Checkout
+      - name: Checkout source
         uses: actions/checkout@v4
 
       - name: Select Xcode
+        shell: bash
         run: |
           set -euo pipefail
-          ls -1 /Applications | grep -E '^Xcode' || true
           if [ -d "/Applications/Xcode_26.4.app" ]; then
             sudo xcode-select -s /Applications/Xcode_26.4.app
           elif [ -d "/Applications/Xcode_26.3.app" ]; then
@@ -35,10 +34,14 @@ jobs:
           xcodebuild -showsdks
 
       - name: Build Release app without signing
+        shell: bash
         run: |
-          set -euo pipefail
+          set -o pipefail
           DERIVED_DATA_PATH="$RUNNER_TEMP/DerivedData"
           BUILD_DIR="$RUNNER_TEMP/build"
+          rm -rf "$DERIVED_DATA_PATH" "$BUILD_DIR"
+          mkdir -p "$BUILD_DIR/Payload"
+
           xcodebuild \
             -project bili.xcodeproj \
             -scheme bili \
@@ -50,23 +53,38 @@ jobs:
             CODE_SIGNING_ALLOWED=NO \
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGN_IDENTITY="" \
+            DEVELOPMENT_TEAM="" \
             PROVISIONING_PROFILE_SPECIFIER="" \
             COPY_PHASE_STRIP=YES \
             STRIP_INSTALLED_PRODUCT=YES \
             DEPLOYMENT_POSTPROCESSING=YES \
-            build
+            build 2>&1 | tee "$GITHUB_WORKSPACE/xcodebuild.log"
+
           APP_PATH="$(find "$DERIVED_DATA_PATH/Build/Products" -maxdepth 2 -name '*.app' -type d | head -n 1)"
           if [ -z "$APP_PATH" ]; then
             echo "No .app bundle was produced." >&2
             exit 1
           fi
-          mkdir -p "$BUILD_DIR/Payload"
           cp -R "$APP_PATH" "$BUILD_DIR/Payload/"
-          (cd "$BUILD_DIR" && zip -qry "$GITHUB_WORKSPACE/cilicili-release-unsigned.ipa" Payload)
+          (
+            cd "$BUILD_DIR"
+            zip -qry "$GITHUB_WORKSPACE/cilicili-ios15-unsigned.ipa" Payload
+          )
 
-      - name: Upload unsigned IPA
+      - name: Upload build log
+        if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: cilicili-release-unsigned-ipa
-          path: cilicili-release-unsigned.ipa
+          name: cilicili-ios15-xcodebuild-log
+          path: xcodebuild.log
+          if-no-files-found: warn
+          retention-days: 14
+
+      - name: Upload unsigned IPA
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cilicili-ios15-unsigned-ipa
+          path: cilicili-ios15-unsigned.ipa
           if-no-files-found: error
+          retention-days: 14

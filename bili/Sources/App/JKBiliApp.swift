@@ -44,11 +44,17 @@ private struct MainInterfaceHost: View {
     @StateObject private var dependencies = AppDependencies()
 
     var body: some View {
-        RootTabView()
-            .scrollIndicators(.hidden, axes: .vertical)
-            .environmentObject(dependencies)
-            .environmentObject(dependencies.sessionStore)
-            .environmentObject(dependencies.libraryStore)
-            .environmentObject(dependencies.homeRecommendDiagnosticsStore)
+        Group {
+            if #available(iOS 26.0, *) {
+                RootTabView()
+                    .scrollIndicators(.hidden, axes: .vertical)
+            } else {
+                LegacyRootTabView()
+            }
+        }
+        .environmentObject(dependencies)
+        .environmentObject(dependencies.sessionStore)
+        .environmentObject(dependencies.libraryStore)
+        .environmentObject(dependencies.homeRecommendDiagnosticsStore)
     }
 }

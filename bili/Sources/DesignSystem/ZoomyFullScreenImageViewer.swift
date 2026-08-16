@@ -1034,9 +1034,18 @@ private enum ZoomyPhotoLibrarySaver {
     }
 
     private static func saveImageFile(_ fileURL: URL) async -> Bool {
-        await performChanges {
+        if await performChanges({
             PHAssetChangeRequest.creationRequestForAssetFromImage(atFileURL: fileURL)
+        }) {
+            return true
         }
+
+        // 部分旧系统无法直接导入某些网络图片文件。保留原始文件导入优先级，
+        // 失败后回退为 UIImage 写入，避免“保存”操作无反馈地失败。
+        guard let image = UIImage(contentsOfFile: fileURL.path) else {
+            return false
+        }
+        return await saveStaticImage(image)
     }
 
     private static func saveLivePhoto(imageFileURL: URL, videoFileURL: URL) async -> Bool {
