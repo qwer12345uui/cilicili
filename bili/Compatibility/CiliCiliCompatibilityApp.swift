@@ -1,5 +1,9 @@
+import AVFoundation
+import AVKit
+import CoreImage
 import Foundation
 import Photos
+import Security
 import SwiftUI
 import UIKit
 
@@ -45,6 +49,7 @@ private enum CompatibilityTab: String, CaseIterable, Identifiable {
 private struct CompatibilityRootView: View {
     @AppStorage("cc.bili.compat.selectedRootTab.v2") private var storedTab = CompatibilityTab.home.rawValue
     @State private var selectedTab = CompatibilityTab.home
+    @StateObject private var authStore = NativeAuthStore()
 
     var body: some View {
         ZStack(alignment: .bottom) {
@@ -52,6 +57,7 @@ private struct CompatibilityRootView: View {
                 .ignoresSafeArea()
 
             activeScreen
+                .environmentObject(authStore)
                 .padding(.bottom, 106)
 
             FloatingCompatibilityTabBar(selectedTab: $selectedTab)
@@ -139,70 +145,69 @@ private struct FloatingCompatibilityTabBar: View {
 }
 
 private struct CompatibilityHomeView: View {
-    private let highlights = [
-        CompatibilityHighlight(title: "发现精彩内容", subtitle: "原生推荐框架", symbol: "sparkles", colors: [Color(red: 0.97, green: 0.42, blue: 0.61), Color(red: 0.45, green: 0.29, blue: 0.76)]),
-        CompatibilityHighlight(title: "旅行与人文", subtitle: "在城市之间漫游", symbol: "map.fill", colors: [Color(red: 0.13, green: 0.62, blue: 0.68), Color(red: 0.07, green: 0.23, blue: 0.42)]),
-        CompatibilityHighlight(title: "音乐现场", subtitle: "聆听此刻心动", symbol: "music.note", colors: [Color(red: 0.98, green: 0.57, blue: 0.20), Color(red: 0.73, green: 0.17, blue: 0.39)])
-    ]
-
-    private let cards = [
-        CompatibilityFeedCard(title: "夏日城市漫游指南", caption: "带着相机，记录傍晚的风", duration: "08:42", symbol: "building.2.crop.circle.fill", colors: [Color(red: 0.20, green: 0.53, blue: 0.76), Color(red: 0.79, green: 0.89, blue: 0.94)]),
-        CompatibilityFeedCard(title: "厨房里的治愈时光", caption: "今天也要好好吃饭", duration: "12:18", symbol: "fork.knife.circle.fill", colors: [Color(red: 0.97, green: 0.61, blue: 0.35), Color(red: 0.86, green: 0.29, blue: 0.30)]),
-        CompatibilityFeedCard(title: "一场关于光影的练习", caption: "把日常拍成电影", duration: "05:36", symbol: "camera.fill", colors: [Color(red: 0.24, green: 0.23, blue: 0.42), Color(red: 0.67, green: 0.46, blue: 0.69)]),
-        CompatibilityFeedCard(title: "周末书单分享", caption: "留给自己的安静片刻", duration: "10:02", symbol: "book.closed.fill", colors: [Color(red: 0.31, green: 0.54, blue: 0.42), Color(red: 0.88, green: 0.81, blue: 0.45)])
-    ]
+    @StateObject private var feedStore = NativeFeedStore()
+    @State private var selectedVideo: NativeVideo?
 
     private let columns = [GridItem(.flexible(), spacing: 12), GridItem(.flexible(), spacing: 12)]
 
     var body: some View {
         ScrollView(showsIndicators: false) {
             VStack(alignment: .leading, spacing: 20) {
-                CompatibilityPageHeader(title: "首页", subtitle: "为你准备的原生内容")
+                CompatibilityPageHeader(title: "首页", subtitle: "原生推荐与视频播放")
 
-                TabView {
-                    ForEach(highlights) { item in
-                        CompatibilityHighlightCard(item: item)
-                    }
-                }
-                .tabViewStyle(PageTabViewStyle(indexDisplayMode: .automatic))
-                .frame(height: 196)
+                NativeFeatureBanner(
+                    title: "发现精彩视频",
+                    subtitle: feedStore.statusText,
+                    symbol: "play.rectangle.fill"
+                )
 
                 HStack(alignment: .firstTextBaseline) {
                     Text("热门推荐")
                         .font(.system(size: 22, weight: .bold))
                     Spacer()
-                    Text("换一换")
+                    Button("换一换") { feedStore.reload() }
                         .font(.system(size: 14, weight: .semibold))
                         .foregroundColor(CompatibilityPalette.pink)
+                        .buttonStyle(PlainButtonStyle())
                 }
 
-                LazyVGrid(columns: columns, spacing: 18) {
-                    ForEach(cards) { card in
-                        CompatibilityFeedCardView(card: card)
+                if feedStore.isLoading && feedStore.videos.isEmpty {
+                    NativeLoadingPanel(text: "正在加载推荐视频")
+                } else if let message = feedStore.errorMessage, feedStore.videos.isEmpty {
+                    NativeErrorPanel(message: message, retry: feedStore.reload)
+                } else {
+                    LazyVGrid(columns: columns, spacing: 18) {
+                        ForEach(feedStore.videos) { video in
+                            Button { selectedVideo = video } label: {
+                                NativeVideoCard(video: video)
+                            }
+                            .buttonStyle(CompatibilityPressStyle())
+                            .accessibilityLabel("播放 \(video.title)")
+                        }
                     }
                 }
             }
             .padding(.horizontal, 16)
             .padding(.top, 18)
         }
+        .onAppear { feedStore.loadIfNeeded() }
+        .sheet(item: $selectedVideo) { video in
+            NativePlayerView(video: video)
+        }
     }
 }
 
 private struct CompatibilitySearchView: View {
     @State private var keyword = ""
-    @State private var submittedKeyword = ""
+    @StateObject private var searchStore = NativeSearchStore()
+    @State private var selectedVideo: NativeVideo?
 
-    private let hotWords = ["城市漫游", "音乐现场", "美食记录", "摄影", "阅读"]
-    private let suggestions = [
-        CompatibilitySearchSuggestion(title: "原生界面体验", subtitle: "更贴近应用的浏览与搜索体验", symbol: "rectangle.3.group.fill"),
-        CompatibilitySearchSuggestion(title: "本地内容保存", subtitle: "支持系统照片图库授权与写入", symbol: "photo.on.rectangle.angled"),
-        CompatibilitySearchSuggestion(title: "收藏你的灵感", subtitle: "在“我的”页面管理个人偏好", symbol: "heart.fill")
-    ]
+    private let hotWords = ["动画", "音乐", "游戏", "科技", "知识"]
 
     var body: some View {
         ScrollView(showsIndicators: false) {
             VStack(alignment: .leading, spacing: 20) {
-                CompatibilityPageHeader(title: "搜索", subtitle: "搜索你感兴趣的内容")
+                CompatibilityPageHeader(title: "搜索", subtitle: "搜索视频、用户与话题")
 
                 HStack(spacing: 10) {
                     Image(systemName: "magnifyingglass")
@@ -210,10 +215,7 @@ private struct CompatibilitySearchView: View {
                     TextField("视频、用户、话题", text: $keyword, onCommit: submit)
                         .textFieldStyle(PlainTextFieldStyle())
                     if !keyword.isEmpty {
-                        Button {
-                            keyword = ""
-                            submittedKeyword = ""
-                        } label: {
+                        Button { keyword = "" } label: {
                             Image(systemName: "xmark.circle.fill")
                                 .foregroundColor(.secondary)
                         }
@@ -227,10 +229,9 @@ private struct CompatibilitySearchView: View {
                 .frame(height: 48)
                 .background(Color(UIColor.secondarySystemGroupedBackground), in: Capsule())
 
-                if submittedKeyword.isEmpty {
+                if searchStore.query.isEmpty {
                     Text("热门搜索")
                         .font(.system(size: 20, weight: .bold))
-
                     CompatibilityFlowLayout(items: hotWords) { word in
                         Button(word) {
                             keyword = word
@@ -243,114 +244,84 @@ private struct CompatibilitySearchView: View {
                         .background(CompatibilityPalette.pink.opacity(0.10), in: Capsule())
                         .buttonStyle(PlainButtonStyle())
                     }
-
-                    Text("推荐功能")
-                        .font(.system(size: 20, weight: .bold))
-                        .padding(.top, 2)
-
-                    VStack(spacing: 10) {
-                        ForEach(suggestions) { suggestion in
-                            CompatibilitySuggestionRow(suggestion: suggestion)
-                        }
-                    }
                 } else {
-                    Text("“\(submittedKeyword)” 的搜索结果")
+                    Text("“\(searchStore.query)” 的搜索结果")
                         .font(.system(size: 20, weight: .bold))
-
-                    ForEach(searchResults, id: \.self) { result in
-                        CompatibilityResultRow(title: result, keyword: submittedKeyword)
+                    if searchStore.isLoading {
+                        NativeLoadingPanel(text: "正在搜索")
+                    } else if let message = searchStore.errorMessage {
+                        NativeErrorPanel(message: message, retry: submit)
+                    } else if searchStore.results.isEmpty {
+                        NativeEmptyPanel(text: "没有找到可播放的视频")
+                    } else {
+                        ForEach(searchStore.results) { video in
+                            Button { selectedVideo = video } label: {
+                                NativeSearchVideoRow(video: video)
+                            }
+                            .buttonStyle(CompatibilityPressStyle())
+                        }
                     }
                 }
             }
             .padding(.horizontal, 16)
             .padding(.top, 18)
         }
-    }
-
-    private var searchResults: [String] {
-        [
-            "与 \(submittedKeyword) 有关的精选内容",
-            "\(submittedKeyword) 创作灵感与经验分享",
-            "正在讨论 \(submittedKeyword) 的用户动态"
-        ]
+        .sheet(item: $selectedVideo) { video in
+            NativePlayerView(video: video)
+        }
     }
 
     private func submit() {
         let trimmed = keyword.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
-        submittedKeyword = trimmed
+        searchStore.search(trimmed)
     }
 }
 
 private struct CompatibilityMineView: View {
+    @EnvironmentObject private var authStore: NativeAuthStore
     @State private var saveStatus = "尚未选择图片"
     @State private var showsPhotoPicker = false
 
     var body: some View {
         ScrollView(showsIndicators: false) {
             VStack(alignment: .leading, spacing: 18) {
-                CompatibilityPageHeader(title: "我的", subtitle: "管理账户与本地偏好")
+                CompatibilityPageHeader(title: "我的", subtitle: "账号、播放与本地保存")
 
-                HStack(spacing: 14) {
-                    ZStack {
-                        Circle()
-                            .fill(CompatibilityPalette.pink.opacity(0.16))
-                            .frame(width: 64, height: 64)
-                        Image(systemName: "person.fill")
-                            .font(.system(size: 28, weight: .semibold))
-                            .foregroundColor(CompatibilityPalette.pink)
-                    }
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text("欢迎使用 cilicili")
-                            .font(.system(size: 19, weight: .bold))
-                        Text("原生 iOS 15 兼容界面")
-                            .font(.system(size: 14))
-                            .foregroundColor(.secondary)
-                    }
-                    Spacer()
-                }
-                .padding(16)
-                .background(Color(UIColor.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+                NativeAccountCard(authStore: authStore)
 
-                Text("本地功能")
+                Text("账号")
                     .font(.system(size: 20, weight: .bold))
-                    .padding(.top, 2)
+                Button {
+                    authStore.showsLogin = true
+                } label: {
+                    CompatibilitySettingRow(
+                        icon: authStore.isLoggedIn ? "checkmark.seal.fill" : "qrcode",
+                        title: authStore.isLoggedIn ? "已登录：\(authStore.displayName)" : "扫码登录账号",
+                        detail: authStore.isLoggedIn ? "管理登录状态" : "安全二维码登录"
+                    )
+                }
+                .buttonStyle(CompatibilityPressStyle())
 
+                Text("保存")
+                    .font(.system(size: 20, weight: .bold))
                 Button {
                     showsPhotoPicker = true
                 } label: {
-                    HStack(spacing: 14) {
-                        Image(systemName: "square.and.arrow.down.fill")
-                            .font(.system(size: 23, weight: .semibold))
-                            .foregroundColor(CompatibilityPalette.pink)
-                            .frame(width: 34)
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text("保存图片到系统相册")
-                                .font(.system(size: 16, weight: .semibold))
-                                .foregroundColor(.primary)
-                            Text(saveStatus)
-                                .font(.system(size: 13))
-                                .foregroundColor(.secondary)
-                                .lineLimit(2)
-                        }
-                        Spacer()
-                        Image(systemName: "chevron.right")
-                            .font(.system(size: 14, weight: .semibold))
-                            .foregroundColor(.secondary)
-                    }
-                    .padding(16)
-                    .background(Color(UIColor.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+                    CompatibilitySettingRow(
+                        icon: "photo.fill",
+                        title: "保存图片到系统相册",
+                        detail: saveStatus
+                    )
                 }
                 .buttonStyle(CompatibilityPressStyle())
 
                 Text("偏好设置")
                     .font(.system(size: 20, weight: .bold))
-                    .padding(.top, 2)
-
                 VStack(spacing: 1) {
-                    CompatibilitySettingRow(icon: "bell.fill", title: "通知与提醒", detail: "系统设置")
-                    CompatibilitySettingRow(icon: "paintbrush.fill", title: "界面外观", detail: "跟随系统")
-                    CompatibilitySettingRow(icon: "lock.shield.fill", title: "隐私与安全", detail: "本地管理")
+                    CompatibilitySettingRow(icon: "play.rectangle.fill", title: "视频播放", detail: "原生 AVPlayer")
+                    CompatibilitySettingRow(icon: "camera.viewfinder", title: "视频画面", detail: "可保存单帧")
+                    CompatibilitySettingRow(icon: "lock.shield.fill", title: "凭据存储", detail: "系统钥匙串")
                 }
                 .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
             }
@@ -368,6 +339,9 @@ private struct CompatibilityMineView: View {
                     }
                 }
             }
+        }
+        .sheet(isPresented: $authStore.showsLogin) {
+            NativeLoginView(authStore: authStore)
         }
     }
 }
@@ -686,5 +660,915 @@ private enum CompatibilityPhotoSaveError: LocalizedError {
         case .writeFailed:
             return "系统相册未完成图片写入"
         }
+    }
+}
+
+
+// MARK: - Native video, search and account services
+
+private struct NativeVideo: Identifiable, Hashable {
+    let bvid: String
+    let title: String
+    let author: String
+    let coverURL: URL?
+    let durationText: String
+    let description: String
+
+    var id: String { bvid }
+}
+
+private enum NativeMediaError: LocalizedError {
+    case invalidResponse
+    case missingVideoID
+    case unavailablePlayback
+    case service(code: Int, message: String)
+
+    var errorDescription: String? {
+        switch self {
+        case .invalidResponse:
+            return "服务返回的数据格式无法识别"
+        case .missingVideoID:
+            return "该视频缺少可播放的标识"
+        case .unavailablePlayback:
+            return "当前视频暂时没有可用的播放地址，可能需要登录或不支持当前清晰度"
+        case let .service(code, message):
+            return "服务请求失败（\(code)）：\(message)"
+        }
+    }
+}
+
+private struct NativeBiliResponse<Payload: Decodable>: Decodable {
+    let code: Int
+    let message: String?
+    let data: Payload?
+}
+
+private struct NativePopularPayload: Decodable {
+    let list: [NativeVideoDTO]?
+}
+
+private struct NativeSearchPayload: Decodable {
+    let result: [NativeSearchSection]?
+}
+
+private struct NativeSearchSection: Decodable {
+    let resultType: String?
+    let data: [NativeVideoDTO]?
+
+    enum CodingKeys: String, CodingKey {
+        case resultType = "result_type"
+        case data
+    }
+}
+
+private struct NativeVideoDTO: Decodable {
+    let bvid: String?
+    let title: String?
+    let pic: String?
+    let author: String?
+    let ownerName: String?
+    let description: String?
+    let durationText: String?
+
+    enum CodingKeys: String, CodingKey {
+        case bvid, title, pic, author, owner, desc, duration, durationText = "duration_text"
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        bvid = container.nativeString(forKey: .bvid)
+        title = container.nativeString(forKey: .title)
+        pic = container.nativeString(forKey: .pic)
+        author = container.nativeString(forKey: .author)
+        description = container.nativeString(forKey: .desc)
+        durationText = container.nativeString(forKey: .durationText) ?? container.nativeString(forKey: .duration)
+        if let owner = try? container.decode(NativeOwner.self, forKey: .owner) {
+            ownerName = owner.name
+        } else {
+            ownerName = nil
+        }
+    }
+
+    func asNativeVideo() -> NativeVideo? {
+        guard let bvid, !bvid.isEmpty else { return nil }
+        let normalizedCover: URL?
+        if let pic, pic.hasPrefix("//") {
+            normalizedCover = URL(string: "https:\(pic)")
+        } else {
+            normalizedCover = URL(string: pic ?? "")
+        }
+        return NativeVideo(
+            bvid: bvid,
+            title: NativeText.clean(title ?? "未命名视频"),
+            author: ownerName ?? author ?? "哔哩哔哩用户",
+            coverURL: normalizedCover,
+            durationText: durationText ?? "视频",
+            description: NativeText.clean(description ?? "")
+        )
+    }
+}
+
+private struct NativeOwner: Decodable {
+    let name: String?
+}
+
+private struct NativeViewPayload: Decodable {
+    let cid: Int?
+    let title: String?
+    let pic: String?
+    let owner: NativeOwner?
+    let desc: String?
+    let duration: Int?
+}
+
+private struct NativePlayPayload: Decodable {
+    let durl: [NativePlaySegment]?
+}
+
+private struct NativePlaySegment: Decodable {
+    let url: String?
+}
+
+private struct NativeQRGeneratePayload: Decodable {
+    let url: String?
+    let qrcodeKey: String?
+
+    enum CodingKeys: String, CodingKey {
+        case url
+        case qrcodeKey = "qrcode_key"
+    }
+}
+
+private struct NativeQRPollPayload: Decodable {
+    let code: Int?
+    let message: String?
+    let url: String?
+}
+
+private struct NativeNavPayload: Decodable {
+    let isLogin: Bool?
+    let uname: String?
+    let face: String?
+}
+
+private extension KeyedDecodingContainer {
+    func nativeString(forKey key: Key) -> String? {
+        if let value = try? decode(String.self, forKey: key) { return value }
+        if let value = try? decode(Int.self, forKey: key) { return String(value) }
+        if let value = try? decode(Double.self, forKey: key) { return String(value) }
+        return nil
+    }
+}
+
+private enum NativeText {
+    static func clean(_ value: String) -> String {
+        value
+            .replacingOccurrences(of: #"<[^>]+>"#, with: "", options: .regularExpression)
+            .replacingOccurrences(of: "&quot;", with: "\"")
+            .replacingOccurrences(of: "&amp;", with: "&")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+}
+
+private enum NativeCredentialVault {
+    private static let service = "cc.bili.compat.native"
+    private static let account = "bilibili.cookie.header"
+
+    static func cookieHeader() -> String? {
+        let query: [CFString: Any] = [
+            kSecClass: kSecClassGenericPassword,
+            kSecAttrService: service,
+            kSecAttrAccount: account,
+            kSecReturnData: true,
+            kSecMatchLimit: kSecMatchLimitOne
+        ]
+        var result: CFTypeRef?
+        guard SecItemCopyMatching(query as CFDictionary, &result) == errSecSuccess,
+              let data = result as? Data,
+              let value = String(data: data, encoding: .utf8),
+              !value.isEmpty
+        else { return nil }
+        return value
+    }
+
+    static func save(cookieHeader: String) throws {
+        let data = Data(cookieHeader.utf8)
+        let baseQuery: [CFString: Any] = [
+            kSecClass: kSecClassGenericPassword,
+            kSecAttrService: service,
+            kSecAttrAccount: account
+        ]
+        let updateStatus = SecItemUpdate(baseQuery as CFDictionary, [kSecValueData: data] as CFDictionary)
+        if updateStatus == errSecSuccess { return }
+        var insert = baseQuery
+        insert[kSecValueData] = data
+        insert[kSecAttrAccessible] = kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
+        let insertStatus = SecItemAdd(insert as CFDictionary, nil)
+        guard insertStatus == errSecSuccess else {
+            throw NSError(domain: "NativeCredentialVault", code: Int(insertStatus), userInfo: [NSLocalizedDescriptionKey: "无法写入系统钥匙串"])
+        }
+    }
+
+    static func clear() {
+        let query: [CFString: Any] = [
+            kSecClass: kSecClassGenericPassword,
+            kSecAttrService: service,
+            kSecAttrAccount: account
+        ]
+        SecItemDelete(query as CFDictionary)
+    }
+}
+
+private enum NativeBiliAPI {
+    private static let apiBase = URL(string: "https://api.bilibili.com")!
+    private static let passportBase = URL(string: "https://passport.bilibili.com")!
+    private static let userAgent = "Mozilla/5.0 (iPhone; CPU iPhone OS 15_0 like Mac OS X) AppleWebKit/605.1.15 Version/15.0 Mobile/15E148 Safari/604.1"
+
+    static func popularVideos() async throws -> [NativeVideo] {
+        let payload: NativePopularPayload = try await request(
+            base: apiBase,
+            path: "/x/web-interface/popular",
+            query: ["pn": "1", "ps": "20"]
+        )
+        return (payload.list ?? []).compactMap { $0.asNativeVideo() }
+    }
+
+    static func searchVideos(keyword: String) async throws -> [NativeVideo] {
+        let payload: NativeSearchPayload = try await request(
+            base: apiBase,
+            path: "/x/web-interface/search/all/v2",
+            query: ["keyword": keyword]
+        )
+        let section = payload.result?.first(where: { $0.resultType == "video" })
+        return (section?.data ?? []).compactMap { $0.asNativeVideo() }
+    }
+
+    static func playbackURL(for video: NativeVideo) async throws -> URL {
+        let detail: NativeViewPayload = try await request(
+            base: apiBase,
+            path: "/x/web-interface/view",
+            query: ["bvid": video.bvid]
+        )
+        guard let cid = detail.cid else { throw NativeMediaError.missingVideoID }
+        let payload: NativePlayPayload = try await request(
+            base: apiBase,
+            path: "/x/player/playurl",
+            query: ["bvid": video.bvid, "cid": String(cid), "qn": "32", "fnval": "0", "fourk": "1"],
+            referer: "https://www.bilibili.com/video/\(video.bvid)"
+        )
+        guard let rawURL = payload.durl?.first?.url,
+              let url = URL(string: rawURL)
+        else { throw NativeMediaError.unavailablePlayback }
+        return url
+    }
+
+    static func generateQRCode() async throws -> NativeQRGeneratePayload {
+        try await request(
+            base: passportBase,
+            path: "/x/passport-login/web/qrcode/generate",
+            query: [:],
+            referer: "https://passport.bilibili.com/login"
+        )
+    }
+
+    static func pollQRCode(key: String) async throws -> NativeQRPollPayload {
+        try await request(
+            base: passportBase,
+            path: "/x/passport-login/web/qrcode/poll",
+            query: ["qrcode_key": key],
+            referer: "https://passport.bilibili.com/login"
+        )
+    }
+
+    static func currentUser() async throws -> NativeNavPayload {
+        try await request(base: apiBase, path: "/x/web-interface/nav", query: [:])
+    }
+
+    static func clearCookies() {
+        let hosts = ["https://api.bilibili.com", "https://passport.bilibili.com", "https://www.bilibili.com"]
+        for host in hosts {
+            guard let url = URL(string: host) else { continue }
+            for cookie in HTTPCookieStorage.shared.cookies(for: url) ?? [] {
+                HTTPCookieStorage.shared.deleteCookie(cookie)
+            }
+        }
+    }
+
+    private static func request<Payload: Decodable>(
+        base: URL,
+        path: String,
+        query: [String: String],
+        referer: String? = nil
+    ) async throws -> Payload {
+        var components = URLComponents(url: base.appendingPathComponent(path), resolvingAgainstBaseURL: false)
+        components?.queryItems = query.map { URLQueryItem(name: $0.key, value: $0.value) }
+        guard let url = components?.url else { throw NativeMediaError.invalidResponse }
+        var request = URLRequest(url: url)
+        request.setValue(userAgent, forHTTPHeaderField: "User-Agent")
+        request.setValue(referer ?? "https://www.bilibili.com", forHTTPHeaderField: "Referer")
+        if let cookie = NativeCredentialVault.cookieHeader(), !cookie.isEmpty {
+            request.setValue(cookie, forHTTPHeaderField: "Cookie")
+        }
+        let (data, response) = try await URLSession.shared.data(for: request)
+        guard let http = response as? HTTPURLResponse, 200 ..< 300 ~= http.statusCode else {
+            throw NativeMediaError.invalidResponse
+        }
+        let decoded = try JSONDecoder().decode(NativeBiliResponse<Payload>.self, from: data)
+        guard decoded.code == 0 else {
+            throw NativeMediaError.service(code: decoded.code, message: decoded.message ?? "未知错误")
+        }
+        guard let payload = decoded.data else { throw NativeMediaError.invalidResponse }
+        return payload
+    }
+
+    static func persistCookiesFromSharedStorage() throws {
+        let urls = [URL(string: "https://api.bilibili.com")!, URL(string: "https://passport.bilibili.com")!]
+        var values: [String: String] = [:]
+        for url in urls {
+            for cookie in HTTPCookieStorage.shared.cookies(for: url) ?? [] {
+                values[cookie.name] = cookie.value
+            }
+        }
+        let header = values.keys.sorted().map { "\($0)=\(values[$0] ?? \"\")" }.joined(separator: "; ")
+        guard !header.isEmpty else {
+            throw NativeMediaError.service(code: -1, message: "登录已确认，但尚未获取到可保存的会话信息")
+        }
+        try NativeCredentialVault.save(cookieHeader: header)
+    }
+}
+
+@MainActor
+private final class NativeFeedStore: ObservableObject {
+    @Published private(set) var videos: [NativeVideo] = []
+    @Published private(set) var isLoading = false
+    @Published private(set) var errorMessage: String?
+
+    var statusText: String {
+        if isLoading { return "正在加载推荐内容" }
+        if let errorMessage { return errorMessage }
+        return videos.isEmpty ? "点击换一换获取推荐" : "已加载 \(videos.count) 个可打开的视频"
+    }
+
+    func loadIfNeeded() {
+        guard videos.isEmpty else { return }
+        reload()
+    }
+
+    func reload() {
+        guard !isLoading else { return }
+        isLoading = true
+        errorMessage = nil
+        Task {
+            do {
+                videos = try await NativeBiliAPI.popularVideos()
+                if videos.isEmpty { errorMessage = "当前没有可显示的推荐视频" }
+            } catch {
+                errorMessage = error.localizedDescription
+            }
+            isLoading = false
+        }
+    }
+}
+
+@MainActor
+private final class NativeSearchStore: ObservableObject {
+    @Published private(set) var query = ""
+    @Published private(set) var results: [NativeVideo] = []
+    @Published private(set) var isLoading = false
+    @Published private(set) var errorMessage: String?
+
+    func search(_ keyword: String) {
+        guard !keyword.isEmpty else { return }
+        query = keyword
+        isLoading = true
+        errorMessage = nil
+        results = []
+        Task {
+            do {
+                results = try await NativeBiliAPI.searchVideos(keyword: keyword)
+            } catch {
+                errorMessage = error.localizedDescription
+            }
+            isLoading = false
+        }
+    }
+}
+
+@MainActor
+private final class NativeAuthStore: ObservableObject {
+    @Published var showsLogin = false
+    @Published private(set) var isLoggedIn = false
+    @Published private(set) var displayName = "未登录"
+    @Published private(set) var faceURL: URL?
+    @Published private(set) var qrURL = ""
+    @Published private(set) var qrState = "准备生成二维码"
+    @Published private(set) var errorMessage: String?
+
+    private var pollingTask: Task<Void, Never>?
+    private var qrKey = ""
+
+    init() {
+        Task { await refreshAccount() }
+    }
+
+    func prepareLogin() {
+        pollingTask?.cancel()
+        qrState = "正在生成二维码"
+        errorMessage = nil
+        qrURL = ""
+        Task {
+            do {
+                let info = try await NativeBiliAPI.generateQRCode()
+                guard let url = info.url, let key = info.qrcodeKey else {
+                    throw NativeMediaError.invalidResponse
+                }
+                qrURL = url
+                qrKey = key
+                qrState = "请使用哔哩哔哩扫描二维码"
+                startPolling()
+            } catch {
+                errorMessage = error.localizedDescription
+                qrState = "二维码生成失败"
+            }
+        }
+    }
+
+    func cancelLogin() {
+        pollingTask?.cancel()
+        pollingTask = nil
+    }
+
+    func logout() {
+        cancelLogin()
+        NativeCredentialVault.clear()
+        NativeBiliAPI.clearCookies()
+        isLoggedIn = false
+        displayName = "未登录"
+        faceURL = nil
+    }
+
+    func refreshAccount() async {
+        do {
+            let account = try await NativeBiliAPI.currentUser()
+            isLoggedIn = account.isLogin == true
+            displayName = account.uname ?? (isLoggedIn ? "已登录用户" : "未登录")
+            faceURL = URL(string: account.face ?? "")
+        } catch {
+            isLoggedIn = false
+            displayName = "未登录"
+            faceURL = nil
+        }
+    }
+
+    private func startPolling() {
+        let key = qrKey
+        pollingTask = Task {
+            for _ in 0 ..< 90 where !Task.isCancelled {
+                do {
+                    let result = try await NativeBiliAPI.pollQRCode(key: key)
+                    switch result.code {
+                    case 0:
+                        try NativeBiliAPI.persistCookiesFromSharedStorage()
+                        qrState = "登录已确认"
+                        await refreshAccount()
+                        showsLogin = false
+                        pollingTask = nil
+                        return
+                    case 860:
+                        qrState = "已扫码，请在账号中确认"
+                    case 861:
+                        qrState = "请使用哔哩哔哩扫描二维码"
+                    case 862:
+                        qrState = "二维码已过期，请刷新"
+                        pollingTask = nil
+                        return
+                    default:
+                        qrState = result.message ?? "正在等待扫码"
+                    }
+                } catch {
+                    errorMessage = error.localizedDescription
+                    pollingTask = nil
+                    return
+                }
+                try? await Task.sleep(nanoseconds: 2_000_000_000)
+            }
+            if !Task.isCancelled { qrState = "二维码已过期，请刷新" }
+        }
+    }
+}
+
+@MainActor
+private final class NativePlayerController: ObservableObject {
+    let player = AVPlayer()
+    @Published private(set) var isLoading = true
+    @Published private(set) var errorMessage: String?
+
+    private let video: NativeVideo
+
+    init(video: NativeVideo) {
+        self.video = video
+    }
+
+    func prepare() {
+        isLoading = true
+        errorMessage = nil
+        Task {
+            do {
+                let url = try await NativeBiliAPI.playbackURL(for: video)
+                let item = AVPlayerItem(url: url)
+                player.replaceCurrentItem(with: item)
+                player.play()
+                isLoading = false
+            } catch {
+                errorMessage = error.localizedDescription
+                isLoading = false
+            }
+        }
+    }
+
+    func stop() {
+        player.pause()
+        player.replaceCurrentItem(with: nil)
+    }
+
+    func captureCurrentFrame(completion: @escaping (Result<UIImage, Error>) -> Void) {
+        guard let asset = player.currentItem?.asset else {
+            completion(.failure(NativeMediaError.unavailablePlayback))
+            return
+        }
+        let time = player.currentTime()
+        DispatchQueue.global(qos: .userInitiated).async {
+            let generator = AVAssetImageGenerator(asset: asset)
+            generator.appliesPreferredTrackTransform = true
+            do {
+                let image = try generator.copyCGImage(at: time, actualTime: nil)
+                DispatchQueue.main.async { completion(.success(UIImage(cgImage: image))) }
+            } catch {
+                DispatchQueue.main.async { completion(.failure(error)) }
+            }
+        }
+    }
+}
+
+// MARK: - Native feature views
+
+private struct NativeFeatureBanner: View {
+    let title: String
+    let subtitle: String
+    let symbol: String
+
+    var body: some View {
+        ZStack(alignment: .bottomLeading) {
+            RoundedRectangle(cornerRadius: 24, style: .continuous)
+                .fill(LinearGradient(colors: [CompatibilityPalette.pink, Color(red: 0.32, green: 0.27, blue: 0.72)], startPoint: .topLeading, endPoint: .bottomTrailing))
+            Circle()
+                .fill(Color.white.opacity(0.16))
+                .frame(width: 155, height: 155)
+                .offset(x: 190, y: -68)
+            Image(systemName: symbol)
+                .font(.system(size: 56, weight: .bold))
+                .foregroundColor(.white.opacity(0.9))
+                .offset(x: 215, y: -40)
+            VStack(alignment: .leading, spacing: 7) {
+                Text(title).font(.system(size: 25, weight: .bold))
+                Text(subtitle).font(.system(size: 14, weight: .medium)).lineLimit(2)
+            }
+            .foregroundColor(.white)
+            .padding(22)
+        }
+        .frame(height: 174)
+    }
+}
+
+private struct NativeVideoCard: View {
+    let video: NativeVideo
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            ZStack(alignment: .bottomTrailing) {
+                NativeCoverImage(url: video.coverURL)
+                    .frame(height: 118)
+                    .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+                Text(video.durationText)
+                    .font(.system(size: 11, weight: .bold))
+                    .foregroundColor(.white)
+                    .padding(.horizontal, 7)
+                    .padding(.vertical, 4)
+                    .background(Color.black.opacity(0.58), in: Capsule())
+                    .padding(9)
+            }
+            Text(video.title)
+                .font(.system(size: 15, weight: .semibold))
+                .foregroundColor(.primary)
+                .lineLimit(2)
+            Text(video.author)
+                .font(.system(size: 12))
+                .foregroundColor(.secondary)
+                .lineLimit(1)
+        }
+    }
+}
+
+private struct NativeSearchVideoRow: View {
+    let video: NativeVideo
+
+    var body: some View {
+        HStack(spacing: 12) {
+            NativeCoverImage(url: video.coverURL)
+                .frame(width: 122, height: 74)
+                .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+            VStack(alignment: .leading, spacing: 5) {
+                Text(video.title)
+                    .font(.system(size: 16, weight: .semibold))
+                    .foregroundColor(.primary)
+                    .lineLimit(2)
+                Text(video.author)
+                    .font(.system(size: 13))
+                    .foregroundColor(.secondary)
+                if !video.description.isEmpty {
+                    Text(video.description)
+                        .font(.system(size: 12))
+                        .foregroundColor(.secondary)
+                        .lineLimit(1)
+                }
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(10)
+        .background(Color(UIColor.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+    }
+}
+
+private struct NativeCoverImage: View {
+    let url: URL?
+
+    var body: some View {
+        AsyncImage(url: url) { phase in
+            switch phase {
+            case let .success(image):
+                image.resizable().scaledToFill()
+            default:
+                LinearGradient(colors: [CompatibilityPalette.pink.opacity(0.82), Color.indigo.opacity(0.72)], startPoint: .topLeading, endPoint: .bottomTrailing)
+                    .overlay(Image(systemName: "play.fill").font(.system(size: 28, weight: .bold)).foregroundColor(.white.opacity(0.86)))
+            }
+        }
+        .clipped()
+    }
+}
+
+private struct NativeLoadingPanel: View {
+    let text: String
+
+    var body: some View {
+        HStack(spacing: 12) {
+            ProgressView()
+            Text(text).font(.system(size: 15, weight: .medium)).foregroundColor(.secondary)
+            Spacer()
+        }
+        .padding(18)
+        .background(Color(UIColor.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+    }
+}
+
+private struct NativeEmptyPanel: View {
+    let text: String
+
+    var body: some View {
+        Text(text)
+            .font(.system(size: 15, weight: .medium))
+            .foregroundColor(.secondary)
+            .frame(maxWidth: .infinity, minHeight: 116)
+            .background(Color(UIColor.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+    }
+}
+
+private struct NativeErrorPanel: View {
+    let message: String
+    let retry: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("内容加载失败").font(.system(size: 16, weight: .bold))
+            Text(message).font(.system(size: 13)).foregroundColor(.secondary).fixedSize(horizontal: false, vertical: true)
+            Button("重试", action: retry)
+                .font(.system(size: 14, weight: .bold))
+                .foregroundColor(CompatibilityPalette.pink)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(16)
+        .background(Color(UIColor.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+    }
+}
+
+private struct NativeAccountCard: View {
+    @ObservedObject var authStore: NativeAuthStore
+
+    var body: some View {
+        HStack(spacing: 14) {
+            ZStack {
+                Circle().fill(CompatibilityPalette.pink.opacity(0.16)).frame(width: 64, height: 64)
+                if let url = authStore.faceURL {
+                    AsyncImage(url: url) { phase in
+                        if case let .success(image) = phase {
+                            image.resizable().scaledToFill()
+                        } else {
+                            Image(systemName: "person.fill")
+                                .font(.system(size: 28, weight: .semibold))
+                                .foregroundColor(CompatibilityPalette.pink)
+                        }
+                    }
+                    .frame(width: 64, height: 64)
+                    .clipShape(Circle())
+                } else {
+                    Image(systemName: "person.fill")
+                        .font(.system(size: 28, weight: .semibold))
+                        .foregroundColor(CompatibilityPalette.pink)
+                }
+            }
+            VStack(alignment: .leading, spacing: 4) {
+                Text(authStore.isLoggedIn ? authStore.displayName : "欢迎使用 cilicili")
+                    .font(.system(size: 19, weight: .bold))
+                Text(authStore.isLoggedIn ? "账号状态已保存到本机钥匙串" : "登录后可使用账号相关内容")
+                    .font(.system(size: 13))
+                    .foregroundColor(.secondary)
+                    .lineLimit(2)
+            }
+            Spacer()
+        }
+        .padding(16)
+        .background(Color(UIColor.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+    }
+}
+
+private struct NativeLoginView: View {
+    @ObservedObject var authStore: NativeAuthStore
+    @Environment(\.presentationMode) private var presentationMode
+
+    var body: some View {
+        NavigationView {
+            VStack(spacing: 20) {
+                Text("扫码登录")
+                    .font(.system(size: 25, weight: .bold))
+                Text("请使用哔哩哔哩客户端扫描二维码并确认。登录凭据只保存在此设备的系统钥匙串中。")
+                    .font(.system(size: 14))
+                    .foregroundColor(.secondary)
+                    .multilineTextAlignment(.center)
+                    .padding(.horizontal, 24)
+                if let image = NativeQRCodeRenderer.image(from: authStore.qrURL) {
+                    Image(uiImage: image)
+                        .interpolation(.none)
+                        .resizable()
+                        .scaledToFit()
+                        .frame(width: 214, height: 214)
+                        .padding(12)
+                        .background(Color.white, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+                        .shadow(color: Color.black.opacity(0.08), radius: 9, y: 4)
+                } else {
+                    ProgressView().frame(width: 214, height: 214)
+                }
+                Text(authStore.qrState)
+                    .font(.system(size: 15, weight: .medium))
+                    .foregroundColor(.secondary)
+                if let error = authStore.errorMessage {
+                    Text(error)
+                        .font(.system(size: 13))
+                        .foregroundColor(.red)
+                        .multilineTextAlignment(.center)
+                        .padding(.horizontal, 24)
+                }
+                Button("刷新二维码") { authStore.prepareLogin() }
+                    .font(.system(size: 16, weight: .bold))
+                    .foregroundColor(.white)
+                    .padding(.horizontal, 22)
+                    .padding(.vertical, 12)
+                    .background(CompatibilityPalette.pink, in: Capsule())
+                if authStore.isLoggedIn {
+                    Button("退出当前账号") { authStore.logout() }
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundColor(.red)
+                }
+                Spacer()
+            }
+            .padding(.top, 32)
+            .navigationBarItems(trailing: Button("完成") {
+                authStore.cancelLogin()
+                presentationMode.wrappedValue.dismiss()
+            })
+        }
+        .navigationViewStyle(StackNavigationViewStyle())
+        .onAppear { authStore.prepareLogin() }
+        .onDisappear { authStore.cancelLogin() }
+    }
+}
+
+private enum NativeQRCodeRenderer {
+    static func image(from value: String) -> UIImage? {
+        guard !value.isEmpty,
+              let filter = CIFilter(name: "CIQRCodeGenerator")
+        else { return nil }
+        filter.setValue(Data(value.utf8), forKey: "inputMessage")
+        filter.setValue("M", forKey: "inputCorrectionLevel")
+        guard let output = filter.outputImage?.transformed(by: CGAffineTransform(scaleX: 10, y: 10)),
+              let cgImage = CIContext().createCGImage(output, from: output.extent)
+        else { return nil }
+        return UIImage(cgImage: cgImage)
+    }
+}
+
+private struct NativePlayerView: View {
+    let video: NativeVideo
+    @Environment(\.presentationMode) private var presentationMode
+    @StateObject private var controller: NativePlayerController
+    @State private var saveStatus = "播放后可保存当前画面"
+
+    init(video: NativeVideo) {
+        self.video = video
+        _controller = StateObject(wrappedValue: NativePlayerController(video: video))
+    }
+
+    var body: some View {
+        NavigationView {
+            ScrollView(showsIndicators: false) {
+                VStack(alignment: .leading, spacing: 18) {
+                    ZStack {
+                        Color.black
+                        NativeAVPlayerView(player: controller.player)
+                        if controller.isLoading {
+                            ProgressView("正在获取播放地址")
+                                .tint(.white)
+                                .foregroundColor(.white)
+                        }
+                    }
+                    .frame(height: 230)
+                    .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+
+                    Text(video.title)
+                        .font(.system(size: 21, weight: .bold))
+                    Text("UP：\(video.author) · \(video.durationText)")
+                        .font(.system(size: 14))
+                        .foregroundColor(.secondary)
+                    if !video.description.isEmpty {
+                        Text(video.description)
+                            .font(.system(size: 14))
+                            .foregroundColor(.secondary)
+                    }
+                    if let error = controller.errorMessage {
+                        NativeErrorPanel(message: error, retry: controller.prepare)
+                    }
+                    Button {
+                        controller.captureCurrentFrame { result in
+                            switch result {
+                            case let .success(image):
+                                CompatibilityPhotoSaver.save(image) { saveResult in
+                                    switch saveResult {
+                                    case .success:
+                                        saveStatus = "当前视频画面已保存到系统相册"
+                                    case let .failure(error):
+                                        saveStatus = "画面保存失败：\(error.localizedDescription)"
+                                    }
+                                }
+                            case let .failure(error):
+                                saveStatus = "无法抓取当前画面：\(error.localizedDescription)"
+                            }
+                        }
+                    } label: {
+                        HStack(spacing: 12) {
+                            Image(systemName: "camera.viewfinder")
+                            VStack(alignment: .leading, spacing: 3) {
+                                Text("保存当前视频画面").font(.system(size: 16, weight: .semibold))
+                                Text(saveStatus).font(.system(size: 13)).foregroundColor(.secondary).lineLimit(2)
+                            }
+                            Spacer()
+                        }
+                        .foregroundColor(.primary)
+                        .padding(15)
+                        .background(Color(UIColor.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+                    }
+                    .buttonStyle(CompatibilityPressStyle())
+                }
+                .padding(16)
+            }
+            .navigationBarTitle("视频播放", displayMode: .inline)
+            .navigationBarItems(trailing: Button("完成") { presentationMode.wrappedValue.dismiss() })
+        }
+        .navigationViewStyle(StackNavigationViewStyle())
+        .onAppear { controller.prepare() }
+        .onDisappear { controller.stop() }
+    }
+}
+
+private struct NativeAVPlayerView: UIViewControllerRepresentable {
+    let player: AVPlayer
+
+    func makeUIViewController(context _: Context) -> AVPlayerViewController {
+        let controller = AVPlayerViewController()
+        controller.player = player
+        controller.showsPlaybackControls = true
+        controller.allowsPictureInPicturePlayback = true
+        return controller
+    }
+
+    func updateUIViewController(_ controller: AVPlayerViewController, context _: Context) {
+        controller.player = player
     }
 }
