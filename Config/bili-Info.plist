@@ -25,7 +25,9 @@
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
 	<key>NSPhotoLibraryAddUsageDescription</key>
-	<string>用于将动态图片保存到系统照片图库。</string>
+	<string>用于将图片保存到系统照片图库。</string>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>用于从系统照片图库选择图片并验证保存功能。</string>
 	<key>UIViewControllerBasedStatusBarAppearance</key>
 	<false/>
 	<key>UIApplicationSceneManifest</key>
