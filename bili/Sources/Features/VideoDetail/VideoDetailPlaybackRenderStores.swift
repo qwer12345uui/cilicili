@@ -18,7 +18,6 @@ final class VideoDetailPlaybackRenderStore: ObservableObject {
     var qualityAccessoryButtonTitle: String { snapshot.qualityAccessoryButtonTitle }
     var qualityButtonSystemImage: String { snapshot.qualityButtonSystemImage }
     var qualityMenuItems: [VideoDetailPlaybackQualityMenuItem] { snapshot.qualityMenuItems }
-    var isSupplementingPlayQualities: Bool { snapshot.isSupplementingPlayQualities }
     var isSwitchingPlayQuality: Bool { snapshot.isSwitchingPlayQuality }
     var hasQualityMenu: Bool { !snapshot.qualityMenuItems.isEmpty }
 

@@ -7,9 +7,6 @@ extension VideoDetailViewModel {
         playURLLoadStartTime = CACurrentMediaTime()
         playURLElapsedMilliseconds = nil
         lastPlayURLSource = nil
-        cancelPlayURLSupplementTask()
-        cancelFastStartUpgradeTask()
-        isSupplementingPlayQualities = false
         if mode == .playbackRecovery {
             cancelStartupPlayURLTask()
         }

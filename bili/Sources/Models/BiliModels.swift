@@ -1726,29 +1726,82 @@ nonisolated struct PlayURLData: Decodable, Sendable {
         }
     }
 
+    nonisolated func hasPlayableMediaQuality(_ quality: Int) -> Bool {
+        hasPlayableQuality(quality) && hasMediaPayloadQuality(quality)
+    }
+
     nonisolated var advertisedQualities: Set<Int> {
-        Set(
-            (acceptQuality ?? [])
-                + (supportFormats ?? []).compactMap(\.quality)
-                + (dash?.video ?? []).compactMap(\.id)
-                + [quality].compactMap { $0 }
-        )
-    }
-
-    nonisolated var hasAdvertisedQualityMissingMediaStream: Bool {
-        let advertised = advertisedQualities
-        guard !advertised.isEmpty else { return false }
-
-        let streamedQualities = mediaStreamQualities
-        return advertised.contains { !streamedQualities.contains($0) }
-    }
-
-    nonisolated func preferredQualityForMissingStreamSupplement(fallback: Int?) -> Int? {
-        let missingQualities = advertisedQualities.subtracting(mediaStreamQualities)
-        if let fallback, missingQualities.contains(fallback) {
-            return fallback
+        let explicitQualities = explicitlyAdvertisedQualities
+        if !explicitQualities.isEmpty {
+            return explicitQualities
         }
-        return missingQualities.max() ?? fallback
+        return Set((dash?.video ?? []).compactMap(\.id) + [quality].compactMap { $0 })
+    }
+
+    nonisolated func hasExplicitlyUnavailableQuality(_ quality: Int) -> Bool {
+        let explicitQualities = explicitlyAdvertisedQualities
+        guard !explicitQualities.isEmpty else { return false }
+        return !explicitQualities.contains(quality)
+    }
+
+    nonisolated private var explicitlyAdvertisedQualities: Set<Int> {
+        Set((acceptQuality ?? []) + (supportFormats ?? []).compactMap(\.quality))
+    }
+
+    nonisolated func targetQualityAvailabilitySummary(
+        _ requestedQuality: Int,
+        cdnPreference: PlaybackCDNPreference = .automatic
+    ) -> String {
+        func qualityList(_ values: [Int]) -> String {
+            var seen = Set<Int>()
+            let unique = values.filter { seen.insert($0).inserted }
+            return unique.isEmpty ? "-" : unique.map(String.init).joined(separator: ",")
+        }
+
+        func streamSummary(_ stream: DASHStream) -> String {
+            let codec = stream.codecs?.replacingOccurrences(of: " ", with: "") ?? "-"
+            let frameRate = stream.displayFrameRate ?? "?"
+            let resolution = stream.resolutionLabel ?? "?"
+            let payload = stream.playURL(cdnPreference: cdnPreference) == nil ? "noURL" : "url"
+            let hardware = stream.isHardwareDecodingCompatibleVideo ? "hw" : "noHW"
+            return "q\(stream.id.map(String.init) ?? "-"):\(codec)@\(frameRate)/\(resolution)/\(payload)/\(hardware)"
+        }
+
+        let accept = qualityList(acceptQuality ?? [])
+        let support = qualityList((supportFormats ?? []).compactMap(\.quality))
+        let allVideoStreams = (dash?.video ?? []).filter { $0.id != nil }
+        let visibleVideoStreams = allVideoStreams.prefix(8).map(streamSummary)
+        let omittedStreamCount = max(allVideoStreams.count - visibleVideoStreams.count, 0)
+        let dashSummary = visibleVideoStreams.isEmpty
+            ? "-"
+            : visibleVideoStreams.joined(separator: ",") + (omittedStreamCount > 0 ? ",+\(omittedStreamCount)" : "")
+        let targetStreams = allVideoStreams.filter { $0.id == requestedQuality }
+        let targetRates = targetStreams.compactMap { DASHStream.numericFrameRate(from: $0.frameRate) }
+        let hasTargetPayload = targetStreams.contains { $0.playURL(cdnPreference: cdnPreference) != nil }
+        let isPlayable = hasPlayableMediaQuality(requestedQuality)
+        let reason: String
+        if isPlayable {
+            reason = "playable"
+        } else if hasExplicitlyUnavailableQuality(requestedQuality) {
+            reason = "notAdvertised"
+        } else if targetStreams.isEmpty {
+            reason = "noVideoStream"
+        } else if !hasTargetPayload {
+            reason = "videoURLMissing"
+        } else if targetStreams.allSatisfy({ !$0.isHardwareDecodingCompatibleVideo }) {
+            reason = "hardwareFiltered"
+        } else if !targetRates.isEmpty && targetRates.allSatisfy({ $0 < 50 }) {
+            reason = "notHighFrameRate"
+        } else if targetRates.isEmpty {
+            reason = "frameRateUnknown"
+        } else if dash?.bestAudioStream?.playURL(cdnPreference: cdnPreference) == nil {
+            reason = "audioMissing"
+        } else {
+            reason = "codecOrPairingFiltered"
+        }
+
+        let playableTitle = isPlayable ? "yes" : "no"
+        return "targetAvailability target=\(requestedQuality) accept=\(accept) support=\(support) dash=\(dashSummary) playable=\(playableTitle) reason=\(reason)"
     }
 
     nonisolated private var mediaStreamQualities: Set<Int> {
@@ -1763,7 +1816,7 @@ nonisolated struct PlayURLData: Decodable, Sendable {
     nonisolated func shouldRefetchForPreferredQuality(_ quality: Int) -> Bool {
         let playableVariants = playVariants.filter(\.isPlayable)
         guard !playableVariants.isEmpty else { return false }
-        guard !hasPlayableQuality(quality) else { return false }
+        guard !hasPlayableMediaQuality(quality) else { return false }
         return advertisedQualities.isEmpty || advertisedQualities.contains(quality)
     }
 
@@ -1827,30 +1880,6 @@ nonisolated struct PlayURLData: Decodable, Sendable {
                   let bestAudio,
                   let audioURL = audioPlayURL(for: bestAudio)
             else { continue }
-            variants.append(PlayVariant(
-                quality: quality,
-                title: support?.title ?? descriptions[quality] ?? Self.qualityTitle(quality),
-                videoURL: streamURL,
-                audioURL: audioURL,
-                videoStream: stream,
-                audioStream: bestAudio,
-                codec: stream.codecLabel ?? support?.codecLabel,
-                resolution: stream.resolutionLabel,
-                frameRate: stream.frameRate,
-                bandwidth: stream.bandwidth,
-                isHDR: Self.isHDR(quality: quality, title: support?.title ?? descriptions[quality]),
-                badge: support?.badge
-            ))
-        }
-
-        for stream in dash?.video ?? [] where !variants.contains(where: { $0.quality == (stream.id ?? 0) }) {
-            guard stream.isHardwareDecodingCompatibleVideo,
-                  let streamURL = stream.playURL(cdnPreference: cdnPreference),
-                  let bestAudio,
-                  let audioURL = audioPlayURL(for: bestAudio)
-            else { continue }
-            let quality = stream.id ?? 0
-            let support = supportByQuality[quality]
             variants.append(PlayVariant(
                 quality: quality,
                 title: support?.title ?? descriptions[quality] ?? Self.qualityTitle(quality),
@@ -1944,9 +1973,10 @@ nonisolated struct PlayURLData: Decodable, Sendable {
             else { continue }
 
             let support = supportByQuality[quality]
-            let representativeCandidates = videosByQuality[quality]?.filter { stream in
+            let advertisedStreams = videosByQuality[quality] ?? []
+            let representativeCandidates = advertisedStreams.filter { stream in
                 !requiresHardwareDecode || stream.isHardwareDecodingCompatibleVideo
-            } ?? []
+            }
             let representativeStream = DashStreamDispatcher.selectBestStream(
                 from: representativeCandidates,
                 preference: codecPreference
@@ -1963,7 +1993,8 @@ nonisolated struct PlayURLData: Decodable, Sendable {
                 frameRate: representativeStream?.frameRate,
                 bandwidth: representativeStream?.bandwidth,
                 isHDR: Self.isHDR(quality: quality, title: support?.title ?? descriptions[quality]),
-                badge: support?.badge
+                badge: support?.badge,
+                isAvailabilityPending: advertisedStreams.isEmpty
             ))
         }
     }
@@ -2127,6 +2158,7 @@ nonisolated struct PlayVariant: Identifiable, Hashable, Sendable {
     let isHDR: Bool
     let badge: String?
     let dynamicRangeOverride: BiliVideoDynamicRange?
+    let isAvailabilityPending: Bool
 
     init(
         quality: Int,
@@ -2141,7 +2173,8 @@ nonisolated struct PlayVariant: Identifiable, Hashable, Sendable {
         bandwidth: Int?,
         isHDR: Bool,
         badge: String?,
-        dynamicRangeOverride: BiliVideoDynamicRange? = nil
+        dynamicRangeOverride: BiliVideoDynamicRange? = nil,
+        isAvailabilityPending: Bool = false
     ) {
         self.quality = quality
         self.title = title
@@ -2156,6 +2189,7 @@ nonisolated struct PlayVariant: Identifiable, Hashable, Sendable {
         self.isHDR = isHDR
         self.badge = badge
         self.dynamicRangeOverride = dynamicRangeOverride
+        self.isAvailabilityPending = isAvailabilityPending
     }
 
     nonisolated var dynamicRange: BiliVideoDynamicRange {
@@ -2173,6 +2207,10 @@ nonisolated struct PlayVariant: Identifiable, Hashable, Sendable {
 
     nonisolated var isPlayable: Bool {
         videoURL != nil && isDynamicRangePlaybackCompatible
+    }
+
+    nonisolated var isSelectableFromQualityMenu: Bool {
+        isPlayable || isAvailabilityPending
     }
 
     nonisolated var isHardwareDecodingCompatible: Bool {
@@ -2224,7 +2262,8 @@ nonisolated struct PlayVariant: Identifiable, Hashable, Sendable {
             bandwidth: bandwidth,
             isHDR: isHDR,
             badge: badge,
-            dynamicRangeOverride: dynamicRangeOverride
+            dynamicRangeOverride: dynamicRangeOverride,
+            isAvailabilityPending: isAvailabilityPending
         )
     }
 
@@ -2293,7 +2332,7 @@ nonisolated struct PlayVariant: Identifiable, Hashable, Sendable {
         if let badge, !badge.isEmpty, !parts.contains(badge) {
             parts.append(badge)
         }
-        if !isPlayable {
+        if !isPlayable, !isAvailabilityPending {
             parts.append(unavailableReason)
         }
         return parts.joined(separator: " · ")
@@ -2301,7 +2340,7 @@ nonisolated struct PlayVariant: Identifiable, Hashable, Sendable {
 
     nonisolated var qualityMenuTitle: String {
         let title = BiliVideoQuality.title(for: quality)
-        guard !isPlayable else { return title }
+        guard !isPlayable, !isAvailabilityPending else { return title }
         return "\(title)（\(unavailableReason)）"
     }
 

@@ -20,7 +20,8 @@ extension VideoDetailViewModel {
 
         scheduleDetailAndPlaybackPreloadIfMissingCID(priority: .userInitiated)
 
-        if await applyCachedDetailForFastStartIfAvailable() {
+        if playbackOptions.usesStartupCaches,
+           await applyCachedDetailForFastStartIfAvailable() {
             await startPlaybackAfterFastStartActivation()
             return
         }

@@ -9,7 +9,6 @@ extension VideoDetailViewModel {
         playbackRecoveryAttemptCount = 0
         playbackRecoveryCoordinator.reset()
         lastBufferingCDNRefreshCount = 0
-        cancelFastStartUpgradeTask()
         cancelPlayVariantSwitchTask()
         return token
     }

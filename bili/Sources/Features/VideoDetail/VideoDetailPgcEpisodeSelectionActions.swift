@@ -59,6 +59,7 @@ extension VideoDetailViewModel {
     }
 
     func saveCurrentPlaybackProgressBeforeContentSwitch() {
+        guard playbackOptions.recordsPlaybackHistory else { return }
         guard !libraryStore.incognitoModeEnabled else { return }
         let time = currentPlaybackResumeTime()
         guard time.isFinite,

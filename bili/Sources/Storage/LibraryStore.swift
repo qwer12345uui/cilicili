@@ -131,6 +131,11 @@ final class LibraryStore: ObservableObject {
     @Published private(set) var pictureInPictureEnabled: Bool
     @Published private(set) var playerPerformanceOverlayEnabled: Bool
     @Published private(set) var diagnosticsBackgroundProcessingExperimentEnabled: Bool
+    @Published private(set) var resourceLoadingFirstScreenPriorityEnabled: Bool
+    @Published private(set) var resourceLoadingVisibleImagePriorityEnabled: Bool
+    @Published private(set) var resourceLoadingReadRequestCoalescingEnabled: Bool
+    @Published private(set) var resourceLoadingDynamicDiskSnapshotEnabled: Bool
+    @Published private(set) var resourceLoadingResumePacketWarmupEnabled: Bool
     @Published private(set) var videoRotationFrameReportOverlayEnabled: Bool
     @Published private(set) var playerControlEdgeScrimEnabled: Bool
     @Published private(set) var showsVideoDetailNetworkDiagnosticsButton: Bool
@@ -201,6 +206,11 @@ final class LibraryStore: ObservableObject {
     private static let pictureInPictureEnabledKey = "cc.bili.playback.pictureInPictureEnabled.v1"
     private static let playerPerformanceOverlayEnabledKey = "cc.bili.playback.performanceOverlayEnabled.v1"
     private static let diagnosticsBackgroundProcessingExperimentEnabledKey = PlayerDiagnosticsBackgroundProcessingExperiment.storageKey
+    private static let resourceLoadingFirstScreenPriorityEnabledKey = ResourceLoadingExperiment.Feature.firstScreenPriority.storageKey
+    private static let resourceLoadingVisibleImagePriorityEnabledKey = ResourceLoadingExperiment.Feature.visibleImagePriority.storageKey
+    private static let resourceLoadingReadRequestCoalescingEnabledKey = ResourceLoadingExperiment.Feature.readRequestCoalescing.storageKey
+    private static let resourceLoadingDynamicDiskSnapshotEnabledKey = ResourceLoadingExperiment.Feature.dynamicDiskSnapshot.storageKey
+    private static let resourceLoadingResumePacketWarmupEnabledKey = ResourceLoadingExperiment.Feature.resumePacketWarmup.storageKey
     private static let videoRotationFrameReportOverlayEnabledKey = "cc.bili.playback.rotationFrameReportOverlayEnabled.v1"
     nonisolated static let playerControlEdgeScrimEnabledKey = "cc.bili.playback.controlEdgeScrimEnabled.v1"
     private static let showsVideoDetailNetworkDiagnosticsButtonKey = "cc.bili.videoDetail.showsNetworkDiagnosticsButton.v1"
@@ -246,6 +256,9 @@ final class LibraryStore: ObservableObject {
         "cc.bili.playback.videoListenModeExperimentEnabled.v1",
         "cc.bili.playback.officialListenerPlaylistExperimentEnabled.v1",
         "cc.bili.playback.metalDanmakuRendererExperimentEnabled.v1",
+        "cc.bili.videoDetail.moreControlsSwiftUISheetExperimentEnabled.v1",
+        "cc.bili.playback.nativePlayerProgressSliderExperimentEnabled.v1",
+        "cc.bili.playback.iosNativePlaybackControlsExperimentEnabled.v1",
     ]
     private static let fastScrollImageLoadSuppressionExperimentEnabledKey = "cc.bili.display.fastScrollImageLoadSuppressionExperimentEnabled.v1"
     private static let remoteImageCDNFailoverExperimentEnabledKey = RemoteImageCDNFailoverExperiment.storageKey
@@ -267,7 +280,7 @@ final class LibraryStore: ObservableObject {
     nonisolated static let supportedPlaybackHistorySyncThresholdSeconds = [5, 10, 30]
     nonisolated static let supportedVideoQualities = BiliVideoQuality.supportedQualities
     nonisolated static let playbackCDNProbeRefreshIntervalRange: ClosedRange<Int> = 15...1440
-    nonisolated static let defaultPlaybackCDNProbeRefreshIntervalMinutes = 120
+    nonisolated static let defaultPlaybackCDNProbeRefreshIntervalMinutes = 1440
     nonisolated static let homeRefreshDistanceRange: ClosedRange<Double> = 70...180
     nonisolated static let defaultHomeRefreshTriggerDistance = 110.0
     nonisolated static let supportedRecommendMinimumDurations = [0, 30, 60, 90, 120]
@@ -292,7 +305,7 @@ final class LibraryStore: ObservableObject {
     }
 
     var automaticPlaybackCDNRecommendation: PlaybackCDNPreference? {
-        playbackCDNRecommendation(allowExpired: false)
+        playbackCDNRecommendation(allowExpired: true)
     }
 
     var activePlaybackCDNAvoidanceDescription: String? {
@@ -452,6 +465,21 @@ final class LibraryStore: ObservableObject {
         self.pictureInPictureEnabled = userDefaults.object(forKey: Self.pictureInPictureEnabledKey) as? Bool ?? false
         self.playerPerformanceOverlayEnabled = userDefaults.object(forKey: Self.playerPerformanceOverlayEnabledKey) as? Bool ?? false
         self.diagnosticsBackgroundProcessingExperimentEnabled = userDefaults.object(forKey: Self.diagnosticsBackgroundProcessingExperimentEnabledKey) as? Bool ?? false
+        self.resourceLoadingFirstScreenPriorityEnabled = userDefaults.object(
+            forKey: Self.resourceLoadingFirstScreenPriorityEnabledKey
+        ) as? Bool ?? true
+        self.resourceLoadingVisibleImagePriorityEnabled = userDefaults.object(
+            forKey: Self.resourceLoadingVisibleImagePriorityEnabledKey
+        ) as? Bool ?? true
+        self.resourceLoadingReadRequestCoalescingEnabled = userDefaults.object(
+            forKey: Self.resourceLoadingReadRequestCoalescingEnabledKey
+        ) as? Bool ?? true
+        self.resourceLoadingDynamicDiskSnapshotEnabled = userDefaults.object(
+            forKey: Self.resourceLoadingDynamicDiskSnapshotEnabledKey
+        ) as? Bool ?? true
+        self.resourceLoadingResumePacketWarmupEnabled = userDefaults.object(
+            forKey: Self.resourceLoadingResumePacketWarmupEnabledKey
+        ) as? Bool ?? true
         self.videoRotationFrameReportOverlayEnabled = userDefaults.object(forKey: Self.videoRotationFrameReportOverlayEnabledKey) as? Bool ?? false
         self.playerControlEdgeScrimEnabled = userDefaults.object(forKey: Self.playerControlEdgeScrimEnabledKey) as? Bool ?? true
         self.showsVideoDetailNetworkDiagnosticsButton = userDefaults.object(forKey: Self.showsVideoDetailNetworkDiagnosticsButtonKey) as? Bool ?? false
@@ -743,7 +771,7 @@ final class LibraryStore: ObservableObject {
 
     func effectivePlaybackCDNPreference(for preference: PlaybackCDNPreference) -> PlaybackCDNPreference {
         guard preference == .automatic else { return preference }
-        return playbackCDNRecommendation(allowExpired: false) ?? .automatic
+        return playbackCDNRecommendation(allowExpired: true) ?? .automatic
     }
 
     @discardableResult
@@ -761,8 +789,19 @@ final class LibraryStore: ObservableObject {
     }
 
     func setPlaybackCDNProbeSnapshot(_ snapshot: PlaybackCDNProbeSnapshot?) {
-        playbackCDNProbeSnapshot = snapshot
         let contextKey = currentPlaybackCDNProbeContextKey
+        let previousSnapshot = playbackCDNProbeSnapshotsByContext[contextKey]
+        let currentPreference = previousSnapshot?.recommendedPreference
+            ?? previousSnapshot?.actionableResults.first?.preference
+        let keepsCurrentRecommendation = playbackCDNPreference == .automatic
+            && currentPreference.map { !isPlaybackCDNTemporarilyAvoided($0) } != false
+        let snapshot = playbackCDNPreference == .automatic
+            ? snapshot?.stabilizedRecommendation(
+                previous: previousSnapshot,
+                keepsCurrentRecommendation: keepsCurrentRecommendation
+            )
+            : snapshot
+        playbackCDNProbeSnapshot = snapshot
         if let snapshot {
             playbackCDNProbeSnapshotsByContext[contextKey] = snapshot
             if let data = try? JSONEncoder().encode(snapshot) {
@@ -1005,6 +1044,36 @@ final class LibraryStore: ObservableObject {
     func setDiagnosticsBackgroundProcessingExperimentEnabled(_ isEnabled: Bool) {
         diagnosticsBackgroundProcessingExperimentEnabled = isEnabled
         userDefaults.set(isEnabled, forKey: Self.diagnosticsBackgroundProcessingExperimentEnabledKey)
+    }
+
+    func setResourceLoadingFirstScreenPriorityEnabled(_ isEnabled: Bool) {
+        resourceLoadingFirstScreenPriorityEnabled = isEnabled
+        userDefaults.set(isEnabled, forKey: Self.resourceLoadingFirstScreenPriorityEnabledKey)
+        if !isEnabled {
+            Task {
+                await ResourceLoadingForegroundPriorityGate.shared.reset()
+            }
+        }
+    }
+
+    func setResourceLoadingVisibleImagePriorityEnabled(_ isEnabled: Bool) {
+        resourceLoadingVisibleImagePriorityEnabled = isEnabled
+        userDefaults.set(isEnabled, forKey: Self.resourceLoadingVisibleImagePriorityEnabledKey)
+    }
+
+    func setResourceLoadingReadRequestCoalescingEnabled(_ isEnabled: Bool) {
+        resourceLoadingReadRequestCoalescingEnabled = isEnabled
+        userDefaults.set(isEnabled, forKey: Self.resourceLoadingReadRequestCoalescingEnabledKey)
+    }
+
+    func setResourceLoadingDynamicDiskSnapshotEnabled(_ isEnabled: Bool) {
+        resourceLoadingDynamicDiskSnapshotEnabled = isEnabled
+        userDefaults.set(isEnabled, forKey: Self.resourceLoadingDynamicDiskSnapshotEnabledKey)
+    }
+
+    func setResourceLoadingResumePacketWarmupEnabled(_ isEnabled: Bool) {
+        resourceLoadingResumePacketWarmupEnabled = isEnabled
+        userDefaults.set(isEnabled, forKey: Self.resourceLoadingResumePacketWarmupEnabledKey)
     }
 
     func setVideoRotationFrameReportOverlayEnabled(_ isEnabled: Bool) {

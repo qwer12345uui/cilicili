@@ -6,8 +6,8 @@ struct VideoDetailPlaybackRenderSnapshotFactory {
 
     var snapshot: VideoDetailPlaybackRenderSnapshot {
         VideoDetailPlaybackRenderSnapshot(
-            historyVideo: viewModel.detail,
-            historyCID: viewModel.selectedCID,
+            historyVideo: viewModel.playbackOptions.recordsPlaybackHistory ? viewModel.detail : nil,
+            historyCID: viewModel.playbackOptions.recordsPlaybackHistory ? viewModel.selectedCID : nil,
             duration: viewModel.detail.duration.map(TimeInterval.init),
             pages: viewModel.detail.pages ?? [],
             selectedCID: viewModel.selectedCID,
@@ -21,7 +21,6 @@ struct VideoDetailPlaybackRenderSnapshotFactory {
             qualityAccessoryButtonTitle: qualityAccessoryButtonTitle,
             qualityButtonSystemImage: qualityButtonSystemImage,
             qualityMenuItems: qualityMenuItems,
-            isSupplementingPlayQualities: viewModel.isSupplementingPlayQualities,
             isSwitchingPlayQuality: viewModel.isSwitchingPlayQuality
         )
     }

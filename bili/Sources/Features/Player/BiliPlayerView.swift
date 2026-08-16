@@ -391,6 +391,7 @@ struct BiliPlayerView: View {
 
     private func updateSeekTransitionSnapshot(isUserSeeking: Bool) {
         if isUserSeeking {
+            guard viewModel.shouldHoldSeekSnapshotAtInteractionStart else { return }
             holdCurrentFrameForSeek()
         } else {
             seekTransitionSnapshotModel.releaseForSeekTransition(

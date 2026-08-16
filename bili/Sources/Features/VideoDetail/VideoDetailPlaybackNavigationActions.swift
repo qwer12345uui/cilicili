@@ -16,12 +16,9 @@ extension VideoDetailViewModel {
         detailLoadingTask?.cancel()
         detailLoadingTask = nil
         detailLoadingToken = nil
-        cancelPlayURLSupplementTask()
         cancelStartupPlayURLTask()
-        cancelFastStartUpgradeTask()
         cancelHLSRenditionPrebuildTask()
         cancelSeekWarmups(clearRecent: true)
-        isSupplementingPlayQualities = false
         cancelPlayVariantSwitchTask()
         cancelRelatedPreloadTask()
         cancelRelatedArtworkPrefetchTask()

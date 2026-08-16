@@ -7,7 +7,8 @@ extension VideoDetailViewModel {
         mode: VideoDetailPlayURLLoadMode,
         deferredFallback: inout VideoDetailPlayURLFallback?
     ) async -> VideoDetailPlayURLCacheResolution? {
-        guard mode.allowsStartupCache,
+        guard playbackOptions.usesStartupCaches,
+              mode.allowsStartupCache,
               let pendingData = await VideoPreloadCenter.shared.cachedOrPendingPlayURL(
                 for: detail.bvid,
                 cid: cid,
@@ -26,7 +27,6 @@ extension VideoDetailViewModel {
             cacheKind: "PendingCache",
             fallbackSource: "pendingCacheFallbackAfterNetworkFailure",
             loadedSource: "pendingCache",
-            targetMissSource: "pendingCacheTargetMiss",
             loadedSignpost: "bvid=\(detail.bvid) pending cache",
             deferredFallback: &deferredFallback
         )

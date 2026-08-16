@@ -13,17 +13,51 @@ struct MinePlaybackToolsSection: View {
             }
 
             Toggle(isOn: Binding(
-                get: { libraryStore.playerPerformanceOverlayEnabled },
-                set: { libraryStore.setPlayerPerformanceOverlayEnabled($0) }
-            )) {
-                Label("播放性能浮窗", systemImage: "waveform.path.ecg.rectangle")
-            }
-
-            Toggle(isOn: Binding(
                 get: { libraryStore.diagnosticsBackgroundProcessingExperimentEnabled },
                 set: { libraryStore.setDiagnosticsBackgroundProcessingExperimentEnabled($0) }
             )) {
                 Label("播放诊断后台化实验", systemImage: "arrow.trianglehead.2.clockwise.rotate.90")
+            }
+
+            NavigationLink {
+                ResourceLoadingExperimentSettingsView(libraryStore: libraryStore)
+            } label: {
+                SettingsNavigationRow(
+                    title: "资源加载调度",
+                    subtitle: "已启用，可分别调整 5 项加载策略",
+                    systemImage: "arrow.triangle.2.circlepath"
+                )
+            }
+
+            Toggle(isOn: Binding(
+                get: { libraryStore.playerPerformanceOverlayEnabled },
+                set: { libraryStore.setPlayerPerformanceOverlayEnabled($0) }
+            )) {
+                Label("播放性能诊断", systemImage: "waveform.path.ecg.rectangle")
+            }
+
+            NavigationLink {
+                PlayerPerformanceLogView()
+            } label: {
+                SettingsNavigationRow(
+                    title: "启动链路性能日志",
+                    subtitle: "首帧、准备和缓冲",
+                    systemImage: "speedometer"
+                )
+            }
+
+            ForEach(Array(PlaybackPerformanceTestVideo.fixedSamples.enumerated()), id: \.element.id) { index, video in
+                NavigationLink {
+                    PlaybackPerformanceTestVideoView(testVideo: video)
+                } label: {
+                    VStack(alignment: .leading, spacing: 3) {
+                        Label("测试视频 \(index + 1)", systemImage: "play.rectangle")
+                        Text(video.title)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(2)
+                    }
+                }
             }
 
             Toggle(isOn: Binding(
@@ -66,16 +100,6 @@ struct MinePlaybackToolsSection: View {
                 Label("听视频列表排序", systemImage: libraryStore.videoListenPlaylistSortOrder.systemImage)
             }
             .pickerStyle(.navigationLink)
-
-            NavigationLink {
-                PlayerPerformanceLogView()
-            } label: {
-                SettingsNavigationRow(
-                    title: "播放性能日志",
-                    subtitle: "首帧、缓冲、自动优化记录",
-                    systemImage: "speedometer"
-                )
-            }
 
             NavigationLink {
                 ResourceCacheManagementView()

@@ -1,10 +1,13 @@
 import SwiftUI
+import UIKit
 
 struct PlayerPerformanceLogView: View {
     @EnvironmentObject private var libraryStore: LibraryStore
     @StateObject private var store = PlayerPerformanceStore.shared
+    @State private var didCopy = false
 
     var body: some View {
+        let reportableSessions = store.sessions.filter(PlayerPerformanceCopyTextFormatter.isReportableSession)
         List {
             if store.events.isEmpty && store.sessions.isEmpty {
                 ContentUnavailableView(
@@ -25,13 +28,16 @@ struct PlayerPerformanceLogView: View {
                 if !sampleGroups.isEmpty {
                     Section("启动样本") {
                         ForEach(Array(sampleGroups.enumerated()), id: \.element.id) { index, group in
-                            PlayerPerformanceSampleGroupRow(group: group, isRecommended: index == 0)
+                            PlayerPerformanceSampleGroupRow(
+                                group: group,
+                                isRecommended: index == 0 && group.hasSufficientSamples
+                            )
                         }
                     }
                 }
 
-                if !store.sessions.isEmpty {
-                    let exceptionSessions = store.sessions.filter {
+                if !reportableSessions.isEmpty {
+                    let exceptionSessions = reportableSessions.filter {
                         $0.failureMessage != nil
                             || $0.bufferCount >= 2
                             || $0.seekCount >= 12
@@ -48,7 +54,7 @@ struct PlayerPerformanceLogView: View {
                     }
 
                     Section("最近视频") {
-                        ForEach(store.sessions) { session in
+                        ForEach(reportableSessions) { session in
                             PlayerPerformanceSessionRow(session: session)
                         }
                     }
@@ -68,12 +74,32 @@ struct PlayerPerformanceLogView: View {
         .nativeTopScrollEdgeEffect()
         .hiddenInlineNavigationTitle()
         .toolbar {
-            ToolbarItem(placement: .topBarTrailing) {
-                Button("清空") {
-                    store.clear()
+            ToolbarItemGroup(placement: .topBarTrailing) {
+                Button {
+                    UIPasteboard.general.string = store.performanceLogCopyText()
+                    didCopy = true
+                    Task { @MainActor in
+                        try? await Task.sleep(nanoseconds: 1_200_000_000)
+                        didCopy = false
+                    }
+                } label: {
+                    Image(systemName: didCopy ? "checkmark" : "doc.on.doc")
                 }
-                .disabled(store.events.isEmpty)
+                .disabled(isEmpty)
+                .accessibilityLabel(didCopy ? "已复制性能日志" : "复制性能日志")
+
+                Button {
+                    store.clear()
+                } label: {
+                    Image(systemName: "trash")
+                }
+                .disabled(isEmpty)
+                .accessibilityLabel("清空性能日志")
             }
         }
+    }
+
+    private var isEmpty: Bool {
+        store.events.isEmpty && store.sessions.isEmpty
     }
 }

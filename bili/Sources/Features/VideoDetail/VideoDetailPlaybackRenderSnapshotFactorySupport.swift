@@ -16,7 +16,6 @@ extension VideoDetailPlaybackRenderSnapshotFactory {
     var qualityInlineButtonTitle: String {
         VideoDetailPlaybackQualityMenuBuilder.inlineQualityButtonTitle(
             selectedPlayVariant: selectedPlayVariant,
-            isSupplementingPlayQualities: viewModel.isSupplementingPlayQualities,
             isSwitchingPlayQuality: viewModel.isSwitchingPlayQuality
         )
     }
@@ -24,7 +23,6 @@ extension VideoDetailPlaybackRenderSnapshotFactory {
     var qualityAccessoryButtonTitle: String {
         VideoDetailPlaybackQualityMenuBuilder.accessoryQualityButtonTitle(
             selectedPlayVariant: selectedPlayVariant,
-            isSupplementingPlayQualities: viewModel.isSupplementingPlayQualities,
             isSwitchingPlayQuality: viewModel.isSwitchingPlayQuality
         )
     }
@@ -40,7 +38,6 @@ extension VideoDetailPlaybackRenderSnapshotFactory {
             playVariants: viewModel.playVariants,
             selectedPlayVariant: selectedPlayVariant,
             pendingPlayVariantID: viewModel.pendingPlayVariantID,
-            isSupplementingPlayQualities: viewModel.isSupplementingPlayQualities,
             isSwitchingPlayQuality: viewModel.isSwitchingPlayQuality
         )
     }

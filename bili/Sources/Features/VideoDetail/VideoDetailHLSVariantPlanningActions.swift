@@ -181,7 +181,7 @@ nonisolated enum HLSVideoRenditionPlanner {
     ) -> Set<VideoCodecFamily> {
         let order = preference.codecOrder
         guard let startupIndex = order.firstIndex(of: startupFamily) else { return [] }
-        return Set(order.dropFirst(startupIndex + 1).filter { $0 == .h264 || $0 == .hevc })
+        return Set(order.dropFirst(startupIndex + 1).filter { $0 != .unknown })
     }
 
     private static func streamRank(

@@ -68,25 +68,48 @@ final class PlaybackRecoveryCoordinatorTests: XCTestCase {
         let first = coordinator.receiveFailure(input(source: .playerCallback, reason: reason(.timeout)))
         let duplicate = coordinator.receiveFailure(input(source: .appResume, reason: reason(.timeout)))
 
-        XCTAssertEqual(first.action, .switchVariant)
+        XCTAssertEqual(first.action, .reloadPlayURL)
         XCTAssertEqual(duplicate.action, .ignore(.duplicateFailure))
     }
 
-    func testNetworkFailureSwitchesVariantWhenFallbackExists() {
+    func testNetworkFailureReloadsSameVariantBeforeFallingBack() {
         var coordinator = VideoDetailPlaybackRecoveryCoordinator()
         let decision = coordinator.receiveFailure(input(reason: reason(.network), hasFallbackVariant: true))
 
-        XCTAssertEqual(decision.action, .switchVariant)
+        XCTAssertEqual(decision.action, .reloadPlayURL)
         XCTAssertTrue(decision.shouldRefreshCDN)
+    }
+
+    func testNetworkFailureFallsBackAfterSameVariantRetry() {
+        var coordinator = VideoDetailPlaybackRecoveryCoordinator()
+        _ = coordinator.receiveFailure(input(reason: reason(.network), recoveryAttemptCount: 0))
+
+        let retry = coordinator.receiveFailure(input(reason: reason(.network), recoveryAttemptCount: 1))
+
+        XCTAssertEqual(retry.action, .switchVariant)
     }
 
     func testDecoderFailureSwitchesVariantWhenFallbackExists() {
         var coordinator = VideoDetailPlaybackRecoveryCoordinator()
-        let decision = coordinator.receiveFailure(input(reason: reason(.decoderFailed), hasFallbackVariant: true))
+        let decision = coordinator.receiveFailure(input(
+            reason: reason(.decoderFailed, layer: .avPlayerItem),
+            hasFallbackVariant: true
+        ))
 
         XCTAssertEqual(decision.action, .switchVariant)
-        XCTAssertTrue(decision.shouldRefreshCDN)
+        XCTAssertFalse(decision.shouldRefreshCDN)
         XCTAssertTrue(decision.shouldMarkFailedVariant)
+    }
+
+    func testLocalFailureDoesNotRefreshCDN() {
+        var coordinator = VideoDetailPlaybackRecoveryCoordinator()
+        let decision = coordinator.receiveFailure(input(
+            reason: reason(.unknown, layer: .local),
+            hasFallbackVariant: true
+        ))
+
+        XCTAssertEqual(decision.action, .switchVariant)
+        XCTAssertFalse(decision.shouldRefreshCDN)
     }
 
     func testNetworkFailureReloadsWhenNoFallbackExistsAndAttemptsRemain() {
@@ -142,10 +165,11 @@ final class PlaybackRecoveryCoordinatorTests: XCTestCase {
 
     private func reason(
         _ category: HLSBridgeRemoteFailureCategory,
-        statusCode: Int? = nil
+        statusCode: Int? = nil,
+        layer: HLSBridgeFailureReason.Layer = .remoteRange
     ) -> HLSBridgeFailureReason {
         HLSBridgeFailureReason(
-            layer: .remoteRange,
+            layer: layer,
             category: category,
             statusCode: statusCode,
             urlHost: "upos.example.test",
@@ -156,6 +180,35 @@ final class PlaybackRecoveryCoordinatorTests: XCTestCase {
 }
 
 final class VideoDetailPlaybackQualityMenuBuilderTests: XCTestCase {
+    func testQualityMenuAllowsAdvertisedQualityToLoadOnDemand() {
+        let onDemandVariant = PlayVariant(
+            quality: 112,
+            title: "1080P 高码率",
+            videoURL: nil,
+            audioURL: nil,
+            videoStream: nil,
+            audioStream: nil,
+            codec: "HEVC",
+            resolution: nil,
+            frameRate: nil,
+            bandwidth: nil,
+            isHDR: false,
+            badge: nil,
+            isAvailabilityPending: true
+        )
+
+        let item = VideoDetailPlaybackQualityMenuBuilder.makeQualityMenuItems(
+            playVariants: [onDemandVariant],
+            selectedPlayVariant: nil,
+            pendingPlayVariantID: nil,
+            isSwitchingPlayQuality: false
+        ).first
+
+        XCTAssertEqual(item?.systemImage, "arrow.down.circle")
+        XCTAssertEqual(item?.subtitle, "HEVC · DASH")
+        XCTAssertFalse(item?.isDisabled ?? true)
+    }
+
     func testQualityMenuSubtitleShowsProgressiveFallbackRoute() throws {
         let originalVariant = try dashVariant(
             stream: stream(id: 64, codecs: "hev1.1.6.L120.90", codecid: 12)
@@ -208,36 +261,6 @@ final class VideoDetailPlaybackQualityMenuBuilderTests: XCTestCase {
 
         XCTAssertEqual(item?.systemImage, "checkmark")
         XCTAssertEqual(item?.subtitle, "H.264 兜底")
-    }
-
-    func testSupplementingQualityDoesNotShowPrematureLoginLock() {
-        let unavailableVariant = PlayVariant(
-            quality: 80,
-            title: "1080P 高清",
-            videoURL: nil,
-            audioURL: nil,
-            videoStream: nil,
-            audioStream: nil,
-            codec: nil,
-            resolution: nil,
-            frameRate: nil,
-            bandwidth: nil,
-            isHDR: false,
-            badge: nil
-        )
-
-        let item = VideoDetailPlaybackQualityMenuBuilder.makeQualityMenuItems(
-            playVariants: [unavailableVariant],
-            selectedPlayVariant: nil,
-            pendingPlayVariantID: nil,
-            isSupplementingPlayQualities: true,
-            isSwitchingPlayQuality: false
-        ).first
-
-        XCTAssertEqual(item?.title, "1080P 高清")
-        XCTAssertEqual(item?.subtitle, "正在校验可用清晰度")
-        XCTAssertEqual(item?.systemImage, "arrow.triangle.2.circlepath")
-        XCTAssertTrue(item?.isDisabled ?? false)
     }
 
     private func dashVariant(stream videoStream: DASHStream) throws -> PlayVariant {

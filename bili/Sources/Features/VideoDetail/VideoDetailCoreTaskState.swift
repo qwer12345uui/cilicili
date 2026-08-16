@@ -6,8 +6,6 @@ struct VideoDetailCoreTaskState {
     var pageLoadingToken: UUID?
     var detailLoadingTask: Task<Void, Never>?
     var detailLoadingToken: UUID?
-    var playURLSupplementTask: Task<Void, Never>?
-    var playURLSupplementGeneration = 0
     var playVariantSwitchTask: Task<Void, Never>?
     var commentsLoadingTask: Task<Void, Never>?
     var commentsLoadingToken: UUID?
@@ -43,16 +41,6 @@ extension VideoDetailViewModel {
     var detailLoadingToken: UUID? {
         get { coreTaskState.detailLoadingToken }
         set { coreTaskState.detailLoadingToken = newValue }
-    }
-
-    var playURLSupplementTask: Task<Void, Never>? {
-        get { coreTaskState.playURLSupplementTask }
-        set { coreTaskState.playURLSupplementTask = newValue }
-    }
-
-    var playURLSupplementGeneration: Int {
-        get { coreTaskState.playURLSupplementGeneration }
-        set { coreTaskState.playURLSupplementGeneration = newValue }
     }
 
     var playVariantSwitchTask: Task<Void, Never>? {

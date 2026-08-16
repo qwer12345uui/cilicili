@@ -36,7 +36,6 @@ final class VideoDetailViewModel: ObservableObject {
             }
         }
     }
-    @Published var isSupplementingPlayQualities = false { didSet { scheduleRenderStoreSync(.playback) } }
     @Published var isSwitchingPlayQuality = false { didSet { scheduleRenderStoreSync(.playback) } }
     @Published var pendingPlayVariantID: String? { didSet { scheduleRenderStoreSync(.playback) } }
     @Published var playbackContentMode: PlayerPlaybackContentMode = .video {
@@ -124,6 +123,7 @@ final class VideoDetailViewModel: ObservableObject {
     var commentThreadState = VideoDetailCommentThreadState()
 
     let serviceDependencies: VideoDetailViewModelDependencies
+    let playbackOptions: VideoDetailPlaybackOptions
     var coreTaskState = VideoDetailCoreTaskState()
     var relatedTaskState = VideoDetailRelatedTaskState()
     var playbackWarmupTaskState = VideoDetailPlaybackWarmupTaskState()
@@ -155,6 +155,7 @@ final class VideoDetailViewModel: ObservableObject {
         libraryStore: LibraryStore,
         sessionStore: SessionStore,
         sponsorBlockService: SponsorBlockService,
+        playbackOptions: VideoDetailPlaybackOptions = VideoDetailPlaybackOptions(),
         videoListenPlaybackSessionStore: VideoListenPlaybackSessionStore? = nil
     ) {
         let resolvedVideoListenPlaybackSessionStore = videoListenPlaybackSessionStore
@@ -170,7 +171,10 @@ final class VideoDetailViewModel: ObservableObject {
             sessionStore: sessionStore,
             sponsorBlockService: sponsorBlockService
         )
-        if let resumeTime = seedVideo.historyResumeTime, resumeTime > 0.25 {
+        self.playbackOptions = playbackOptions
+        if playbackOptions.resumesPlaybackHistory,
+           let resumeTime = seedVideo.historyResumeTime,
+           resumeTime > 0.25 {
             pendingPlaybackHistoryResumeTime = resumeTime
             pendingPlaybackHistoryResumeCID = seedVideo.historyCID ?? selectedCID
         }

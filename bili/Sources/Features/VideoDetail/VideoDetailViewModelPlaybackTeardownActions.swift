@@ -2,9 +2,6 @@ import Foundation
 
 extension VideoDetailViewModel {
     nonisolated static func tearDownPlaybackWarmupTasks(_ state: inout VideoDetailPlaybackWarmupTaskState) {
-        state.fastStartUpgradeTask?.cancel()
-        state.fastStartUpgradeTask = nil
-        state.fastStartUpgradeGeneration += 1
         state.hlsRenditionPrebuildTask?.cancel()
         state.hlsRenditionPrebuildTask = nil
         state.hlsRenditionPrebuildGeneration += 1

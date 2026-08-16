@@ -2,7 +2,8 @@ import Foundation
 
 extension VideoDetailViewModel {
     func scheduleDetailAndPlaybackPreloadIfMissingCID(priority: TaskPriority = .utility) {
-        guard !isPlaybackInvalidatedForNavigation,
+        guard playbackOptions.usesStartupCaches,
+              !isPlaybackInvalidatedForNavigation,
               selectedCID == nil,
               !detail.bvid.isEmpty
         else { return }

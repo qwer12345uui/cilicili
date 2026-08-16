@@ -47,9 +47,7 @@ extension VideoDetailViewModel {
                 bvid: detail.bvid,
                 cid: cid,
                 page: page,
-                preferredQuality: adaptiveStartupPreferredQuality,
-                supplementsQualities: false,
-                preferProgressiveFastStart: false
+                preferredQuality: adaptiveStartupPreferredQuality
             )
         }
     }

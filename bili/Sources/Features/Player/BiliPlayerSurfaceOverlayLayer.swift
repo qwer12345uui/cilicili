@@ -58,16 +58,10 @@ struct BiliPlayerSurfaceOverlayLayer: View {
                 .zIndex(7)
             }
 
-            if state.showsInlineLoadingProgress {
-                PlayerInlineLoadingIndicator(
-                    message: state.isUserSeeking ? "正在定位" : "正在缓冲"
-                )
-                .padding(.top, state.isUserSeeking ? 0 : (state.presentation == .embedded ? 10 : 16))
-                .frame(
-                    maxWidth: .infinity,
-                    maxHeight: .infinity,
-                    alignment: state.isUserSeeking ? .center : .top
-                )
+            if state.showsInlineLoadingProgress, !state.isUserSeeking {
+                PlayerInlineLoadingIndicator(message: "正在缓冲")
+                .padding(.top, state.presentation == .embedded ? 10 : 16)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
                 .transition(.opacity.combined(with: .scale(scale: 0.96)))
                 .zIndex(6)
             }

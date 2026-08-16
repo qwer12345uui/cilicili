@@ -25,12 +25,6 @@ extension VideoDetailViewModel {
                 after: 0,
                 fadeDuration: fadeDuration ?? Self.playbackTransitionFadeDurationNanoseconds
             )
-            PlayerMetricsLog.record(
-                .qualitySupplement,
-                metricsID: self.detail.bvid,
-                title: self.detail.title,
-                message: "stagedStartup transitionFade"
-            )
             try? await Task.sleep(nanoseconds: fadeDuration ?? Self.playbackTransitionFadeDurationNanoseconds)
             guard !Task.isCancelled,
                   !self.isPlaybackInvalidatedForNavigation,

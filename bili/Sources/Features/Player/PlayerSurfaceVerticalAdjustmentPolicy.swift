@@ -14,6 +14,31 @@ enum PlayerSurfaceVerticalAdjustmentTarget: Equatable {
     }
 }
 
+nonisolated enum PlayerSurfaceGestureAxis: Equatable {
+    case horizontal
+    case vertical
+}
+
+nonisolated enum PlayerSurfaceGestureAxisPolicy {
+    static func axis(
+        translation: CGSize,
+        activationDistance: CGFloat,
+        dominanceRatio: CGFloat
+    ) -> PlayerSurfaceGestureAxis? {
+        let horizontalDistance = abs(translation.width)
+        let verticalDistance = abs(translation.height)
+        if horizontalDistance >= activationDistance,
+           horizontalDistance > verticalDistance * dominanceRatio {
+            return .horizontal
+        }
+        if verticalDistance >= activationDistance,
+           verticalDistance > horizontalDistance * dominanceRatio {
+            return .vertical
+        }
+        return nil
+    }
+}
+
 nonisolated enum PlayerSurfaceVerticalAdjustmentPolicy {
     static func target(startLocationX: CGFloat, width: CGFloat) -> PlayerSurfaceVerticalAdjustmentTarget? {
         guard width > 0, startLocationX >= 0, startLocationX <= width else { return nil }
@@ -25,10 +50,11 @@ nonisolated enum PlayerSurfaceVerticalAdjustmentPolicy {
         activationDistance: CGFloat,
         dominanceRatio: CGFloat
     ) -> Bool {
-        let horizontalDistance = abs(translation.width)
-        let verticalDistance = abs(translation.height)
-        return verticalDistance >= activationDistance
-            && verticalDistance > horizontalDistance * dominanceRatio
+        PlayerSurfaceGestureAxisPolicy.axis(
+            translation: translation,
+            activationDistance: activationDistance,
+            dominanceRatio: dominanceRatio
+        ) == .vertical
     }
 
     static func adjustedValue(

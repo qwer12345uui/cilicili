@@ -2,6 +2,32 @@ import XCTest
 @testable import bili
 
 final class ResourceLoadingServicesTests: XCTestCase {
+    func testWebPagePlayInfoStreamParserExtractsAcrossChunkBoundaries() throws {
+        var parser = BiliWebPagePlayInfoStreamParser()
+        let first = Data("<html><script>window.__playin".utf8)
+        let second = Data("fo__={\"data\":{\"title\":\"brace } and escaped \\\" quote\",\"dash\":{\"video\":[1]}}".utf8)
+        let third = Data("};window.__INITIAL_STATE__={}</script><body>rest</body>".utf8)
+
+        XCTAssertNil(parser.append(first))
+        XCTAssertNil(parser.append(second))
+        let json = try XCTUnwrap(parser.append(third))
+
+        XCTAssertEqual(
+            json,
+            "{\"data\":{\"title\":\"brace } and escaped \\\" quote\",\"dash\":{\"video\":[1]}}}"
+        )
+        XCTAssertLessThan(parser.buffer.count, first.count + second.count + third.count + 1)
+    }
+
+    func testWebPagePlayInfoStreamParserIgnoresBracesInsideStrings() throws {
+        var parser = BiliWebPagePlayInfoStreamParser()
+        let html = Data("prefix __playinfo__={\"value\":\"{nested}\",\"ok\":true};suffix".utf8)
+
+        let json = try XCTUnwrap(parser.append(html))
+
+        XCTAssertEqual(json, "{\"value\":\"{nested}\",\"ok\":true}")
+    }
+
     func testPlayURLCacheHonorsTTLAndKeyScope() async throws {
         let cache = PlayURLCache(capacity: 4, ttl: 0.05)
         let scope = loggedInScope(mid: 1001)
@@ -41,18 +67,63 @@ final class ResourceLoadingServicesTests: XCTestCase {
         let cache = PlayURLCache(capacity: 4, ttl: 60)
         let scope = loggedInScope(mid: 1001)
         let hdKey = playURLKey(bvid: "BV1", cid: 1, quality: 80)
-        let fastStartKey = playURLKey(bvid: "BV1", cid: 1, quality: 64, fnval: "0", platform: "html5", fastStart: true)
+        let differentKey = playURLKey(bvid: "BV1", cid: 1, quality: 64, fnval: "0", platform: "html5")
 
         await cache.store(try playablePlayURLData(quality: 80), for: hdKey, scope: scope)
 
         let hdCached = await cache.value(for: hdKey, scope: scope)
-        let fastStartCached = await cache.value(for: fastStartKey, scope: scope)
+        let differentCached = await cache.value(for: differentKey, scope: scope)
         XCTAssertNotNil(hdCached)
-        XCTAssertNil(fastStartCached)
+        XCTAssertNil(differentCached)
 
         await cache.invalidate(bvid: "BV1")
         let invalidatedCached = await cache.value(for: hdKey, scope: scope)
         XCTAssertNil(invalidatedCached)
+    }
+
+    func testPlayURLCacheKeepsFallbackOutOfRequestedQualityHits() async throws {
+        let cache = PlayURLCache(capacity: 4, ttl: 60)
+        let scope = loggedInScope(mid: 1001)
+        let targetKey = playURLKey(quality: 112)
+
+        await cache.store(try playablePlayURLData(quality: 80), for: targetKey, scope: scope)
+
+        let targetHit = await cache.value(
+            for: targetKey,
+            scope: scope,
+            requiredQuality: 112
+        )
+        let fallback = await cache.playableFallback(
+            bvid: targetKey.bvid,
+            cid: targetKey.cid,
+            scope: scope
+        )
+
+        XCTAssertNil(targetHit)
+        XCTAssertEqual(fallback?.quality, 80)
+    }
+
+    func testPlayURLCacheReusesOnlyVerifiedUnavailableQualityFallback() async throws {
+        let cache = PlayURLCache(capacity: 4, ttl: 60)
+        let scope = loggedInScope(mid: 1001)
+        let targetKey = playURLKey(quality: 112)
+
+        await cache.store(try playablePlayURLData(quality: 80), for: targetKey, scope: scope)
+
+        let strictHit = await cache.value(
+            for: targetKey,
+            scope: scope,
+            requiredQuality: 112
+        )
+        let verifiedFallbackHit = await cache.value(
+            for: targetKey,
+            scope: scope,
+            requiredQuality: 112,
+            allowsVerifiedLowerQualityFallback: true
+        )
+
+        XCTAssertNil(strictHit)
+        XCTAssertEqual(verifiedFallbackHit?.quality, 80)
     }
 
     func testPlayURLCacheRejectsGuestDataAndClearsForLoginChanges() async throws {
@@ -137,7 +208,19 @@ final class ResourceLoadingServicesTests: XCTestCase {
         )
     }
 
-    func testAuthoritativeUnavailablePreferredQualityUsesPlayableStartupFallback() throws {
+    func testAuthoritativeUnavailablePreferredQualityUsesNextLowerStartupFallback() throws {
+        let data = try playablePlayURLData(quality: 112)
+
+        XCTAssertTrue(
+            BiliAPIClient.canUseUnavailablePreferredStartupFallback(
+                data,
+                requestedQuality: 116,
+                isAuthoritativeSource: true
+            )
+        )
+    }
+
+    func testAuthoritativeUnavailablePreferredQualityUsesHighestAdvertisedFallback() throws {
         let data = try playablePlayURLData(quality: 80)
 
         XCTAssertTrue(
@@ -219,8 +302,6 @@ final class ResourceLoadingServicesTests: XCTestCase {
         XCTAssertTrue(data.shouldRefetchForPreferredQuality(112))
         XCTAssertTrue(data.shouldRefetchForPreferredQuality(80))
         XCTAssertFalse(data.shouldRefetchForPreferredQuality(32))
-        XCTAssertTrue(data.hasAdvertisedQualityMissingMediaStream)
-        XCTAssertEqual(data.preferredQualityForMissingStreamSupplement(fallback: 116), 112)
     }
 
     @MainActor
@@ -272,14 +353,14 @@ final class ResourceLoadingServicesTests: XCTestCase {
         XCTAssertFalse(header.contains("old-ticket"))
     }
 
-    func testPlayVariantsExposeAdvertisedLockedQualities() throws {
+    func testPlayVariantsExposeAdvertisedOnDemandQualities() throws {
         let json = """
         {
             "quality": 112,
             "accept_quality": [129, 116, 112],
             "accept_description": ["HDR Vivid", "1080P 高帧率", "1080P 高码率"],
             "support_formats": [
-                { "quality": 129, "new_description": "HDR Vivid" },
+                { "quality": 129, "new_description": "HDR Vivid", "codecs": ["hev1.2.4.L153.90"] },
                 { "quality": 116, "new_description": "1080P 高帧率" },
                 { "quality": 112, "new_description": "1080P 高码率" }
             ],
@@ -319,7 +400,7 @@ final class ResourceLoadingServicesTests: XCTestCase {
         let variants = data.playVariants(cdnPreference: .automatic, codecPreference: .auto)
         let highFrameVariant = try XCTUnwrap(variants.first { $0.quality == 116 })
         let playableVariant = try XCTUnwrap(variants.first { $0.quality == 112 })
-        let lockedVariant = try XCTUnwrap(variants.first { $0.quality == 129 })
+        let onDemandVariant = try XCTUnwrap(variants.first { $0.quality == 129 })
 
         XCTAssertTrue(highFrameVariant.isPlayable)
         XCTAssertEqual(highFrameVariant.qualityMenuTitle, "1080P 高帧率")
@@ -330,10 +411,13 @@ final class ResourceLoadingServicesTests: XCTestCase {
         XCTAssertTrue(playableVariant.subtitle.contains("30fps"))
         XCTAssertTrue(playableVariant.subtitle.contains("2.6 Mbps"))
         XCTAssertTrue(playableVariant.subtitle.contains("AVC"))
-        XCTAssertFalse(lockedVariant.isPlayable)
-        XCTAssertEqual(lockedVariant.title, "HDR Vivid")
-        XCTAssertTrue(lockedVariant.isHDR)
-        XCTAssertTrue(lockedVariant.qualityMenuTitle.contains("需要登录或权限"))
+        XCTAssertFalse(onDemandVariant.isPlayable)
+        XCTAssertTrue(onDemandVariant.isAvailabilityPending)
+        XCTAssertTrue(onDemandVariant.isSelectableFromQualityMenu)
+        XCTAssertEqual(onDemandVariant.title, "HDR Vivid")
+        XCTAssertEqual(onDemandVariant.subtitle, "HEVC · HDR")
+        XCTAssertTrue(onDemandVariant.isHDR)
+        XCTAssertFalse(onDemandVariant.qualityMenuTitle.contains("需要登录或权限"))
     }
 
     func testDashAudioMergesDolbyAndPrefersAACForPlayback() throws {
@@ -666,6 +750,54 @@ final class ResourceLoadingServicesTests: XCTestCase {
         XCTAssertEqual(third?.data, Data("3333".utf8))
     }
 
+    func testProgressiveMediaSegmentCacheInvalidatesOnlyMatchingURLs() async {
+        let cache = ProgressiveMediaSegmentCache(byteCapacity: 32, itemLimit: 4, maxEntryBytes: 8, ttl: 60)
+        let firstKey = ProgressiveMediaCacheKey(url: "https://example.com/a.mp4", rangeHeader: "bytes=0-3")
+        let secondKey = ProgressiveMediaCacheKey(url: "https://example.com/b.mp4", rangeHeader: "bytes=0-3")
+
+        await cache.store(progressiveResponse("1111"), for: firstKey)
+        await cache.store(progressiveResponse("2222"), for: secondKey)
+        await cache.invalidate(urls: [firstKey.url])
+
+        let first = await cache.response(for: firstKey)
+        let second = await cache.response(for: secondKey)
+        XCTAssertNil(first)
+        XCTAssertEqual(second?.data, Data("2222".utf8))
+    }
+
+    func testPlayURLDataCollectsPlaybackMediaURLs() throws {
+        let json = """
+        {
+            "quality": 80,
+            "dash": {
+                "video": [{
+                    "id": 80,
+                    "baseUrl": "https://video.example.test/main.m4s",
+                    "backupUrl": ["https://video.example.test/backup.m4s"],
+                    "bandwidth": 1000,
+                    "codecs": "avc1.640028"
+                }],
+                "audio": [{
+                    "id": 30280,
+                    "baseUrl": "https://audio.example.test/main.m4s",
+                    "bandwidth": 128,
+                    "codecs": "mp4a.40.2"
+                }]
+            }
+        }
+        """
+        let data = try JSONDecoder().decode(PlayURLData.self, from: Data(json.utf8))
+
+        XCTAssertEqual(
+            data.playbackMediaURLStrings,
+            [
+                "https://video.example.test/main.m4s",
+                "https://video.example.test/backup.m4s",
+                "https://audio.example.test/main.m4s"
+            ]
+        )
+    }
+
     func testURLSessionConfigurationAndHeaders() {
         let apiSession = BiliURLSessionFactory.makeAPISession()
         XCTAssertEqual(apiSession.configuration.timeoutIntervalForRequest, 12)
@@ -720,9 +852,7 @@ final class ResourceLoadingServicesTests: XCTestCase {
         quality: Int = 80,
         fnval: String = "4048",
         fnver: String = "0",
-        platform: String = "pc",
-        fastStart: Bool = false,
-        supplements: Bool = true
+        platform: String = "pc"
     ) -> PlayURLCacheKey {
         PlayURLCacheKey(
             bvid: bvid,
@@ -731,9 +861,7 @@ final class ResourceLoadingServicesTests: XCTestCase {
             audioLanguage: "default",
             fnval: fnval,
             fnver: fnver,
-            platform: platform,
-            prefersProgressiveFastStart: fastStart,
-            supplementsQualities: supplements
+            platform: platform
         )
     }
 

@@ -33,12 +33,6 @@ extension VideoDetailViewModel {
         playbackTransitionSnapshot = snapshot
         playbackTransitionFallbackCoverURL = fallbackCoverURL
         playbackTransitionOpacity = (snapshot != nil || fallbackCoverURL != nil) ? 1 : 0
-        PlayerMetricsLog.record(
-            .qualitySupplement,
-            metricsID: detail.bvid,
-            title: detail.title,
-            message: "stagedStartup transitionHold snapshot=\(snapshot != nil ? "frame" : "none") audioHandoff=\(keepsPlaybackActive)"
-        )
         releasePlaybackTransitionPlayer(after: Self.playbackTransitionMaximumRetainNanoseconds)
     }
 

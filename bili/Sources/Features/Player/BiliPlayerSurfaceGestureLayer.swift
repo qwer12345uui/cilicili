@@ -182,8 +182,11 @@ struct BiliPlayerSurfaceGestureLayer<Content: View>: View {
         let dx = value.translation.width
         let dy = value.translation.height
         if !isHorizontalSeeking {
-            guard abs(dx) >= horizontalSeekActivationDistance else { return }
-            guard abs(dx) > abs(dy) * horizontalSeekDominanceRatio else { return }
+            guard PlayerSurfaceGestureAxisPolicy.axis(
+                translation: CGSize(width: dx, height: dy),
+                activationDistance: horizontalSeekActivationDistance,
+                dominanceRatio: horizontalSeekDominanceRatio
+            ) == .horizontal else { return }
             let startProgress = clock.progress
             isHorizontalSeeking = true
             horizontalSeekStartProgress = startProgress
@@ -330,7 +333,7 @@ struct BiliPlayerSurfaceGestureLayer<Content: View>: View {
     }
 }
 
-private struct PlayerSurfaceVerticalAdjustmentIndicator: View {
+struct PlayerSurfaceVerticalAdjustmentIndicator: View {
     let target: PlayerSurfaceVerticalAdjustmentTarget
     let value: Float
 

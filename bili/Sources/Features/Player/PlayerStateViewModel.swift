@@ -3349,8 +3349,7 @@ final class PlayerStateViewModel: NSObject, ObservableObject {
         guard engine.hasMedia else { return }
         markUserSeekIntent()
         guard hasPresentedPlayback else { return }
-        let snapshot = engine.snapshot(durationHint: durationHint)
-        shouldResumePlaybackAfterUserScrub = wantsAutoplay || isPlaying || snapshot.isPlaying
+        shouldResumePlaybackAfterUserScrub = wantsAutoplay || isPlaying || playbackPhase == .playing
         if activeUserScrubSource == nil {
             activeUserScrubSource = source
             activeUserScrubStartedAt = CACurrentMediaTime()
@@ -3368,8 +3367,12 @@ final class PlayerStateViewModel: NSObject, ObservableObject {
         isBuffering = true
         loadingProgress = max(loadingProgress, 0.22)
         playbackPhase = .seeking
-        engine.pause()
+        engine.pauseForUserScrub()
         engine.setTemporaryAudioSuppressed(true)
+    }
+
+    var shouldHoldSeekSnapshotAtInteractionStart: Bool {
+        activeUserScrubSource == .pinnedProgress
     }
 
     func cancelUserScrubInteraction() {
@@ -3618,20 +3621,17 @@ final class PlayerStateViewModel: NSObject, ObservableObject {
 
     func setPictureInPictureEnabled(_ isEnabled: Bool) {
         let effectiveIsEnabled = isEnabled && playbackContentMode == .video
-        guard isPictureInPictureEnabled != effectiveIsEnabled else {
-            engine.setPictureInPictureEnabled(effectiveIsEnabled)
-            surfaceView?.setPictureInPictureEnabled(effectiveIsEnabled)
-            applyPictureInPicturePreferenceToNativePlaybackController()
-            return
-        }
         isPictureInPictureEnabled = effectiveIsEnabled
-        cancelPictureInPictureStartRetryTask()
         engine.setPictureInPictureEnabled(effectiveIsEnabled)
-        pictureInPictureController?.canStartPictureInPictureAutomaticallyFromInline = false
+        pictureInPictureController?.canStartPictureInPictureAutomaticallyFromInline = effectiveIsEnabled
         surfaceView?.setPictureInPictureEnabled(effectiveIsEnabled)
         applyPictureInPicturePreferenceToNativePlaybackController()
         if !effectiveIsEnabled {
+            let wasCustomPictureInPictureActive = pictureInPictureController?.isPictureInPictureActive == true
             stopPictureInPictureIfNeeded()
+            if !wasCustomPictureInPictureActive {
+                releasePictureInPictureControllerIfDisabled()
+            }
         } else {
             configurePictureInPictureIfNeeded()
         }
@@ -3671,6 +3671,7 @@ final class PlayerStateViewModel: NSObject, ObservableObject {
         let shouldPause = shouldPausePlaybackAfterPictureInPictureStops || isAppInBackground
         shouldPausePlaybackAfterPictureInPictureStops = false
         syncPictureInPictureState()
+        releasePictureInPictureControllerIfDisabled()
 
         guard !shouldPause else {
             pictureInPictureInlineRecoveryTask?.cancel()
@@ -3697,8 +3698,8 @@ final class PlayerStateViewModel: NSObject, ObservableObject {
     func restoreInlinePlaybackFromPictureInPictureIfNeeded() async -> Bool {
         syncPictureInPictureState()
         guard isPictureInPictureActive else { return false }
-        let didRestore = await restoreUserInterfaceForPictureInPictureStop?() ?? true
-        guard didRestore else { return false }
+        // This path is driven by the already-visible player when the app becomes active.
+        // Route restoration is only needed for the system PiP restore delegate.
         stopPictureInPictureIfNeeded()
         schedulePictureInPictureInlineRecovery()
         return true
@@ -5745,9 +5746,20 @@ final class PlayerStateViewModel: NSObject, ObservableObject {
 
         let controller = AVPictureInPictureController(contentSource: contentSource)
         controller.delegate = self
-        controller.canStartPictureInPictureAutomaticallyFromInline = false
+        controller.canStartPictureInPictureAutomaticallyFromInline = true
         pictureInPictureController = controller
         didConfigurePictureInPicture = true
+    }
+
+    private func releasePictureInPictureControllerIfDisabled() {
+        guard !isPictureInPictureEnabled,
+              let controller = pictureInPictureController,
+              !controller.isPictureInPictureActive
+        else { return }
+        controller.canStartPictureInPictureAutomaticallyFromInline = false
+        controller.delegate = nil
+        pictureInPictureController = nil
+        didConfigurePictureInPicture = false
     }
 
     private func applyPictureInPicturePreferenceToNativePlaybackController() {
@@ -5755,7 +5767,7 @@ final class PlayerStateViewModel: NSObject, ObservableObject {
         let isSupportedAndEnabled = isPictureInPictureEnabled
             && AVPictureInPictureController.isPictureInPictureSupported()
         nativePlaybackController.allowsPictureInPicturePlayback = isSupportedAndEnabled
-        nativePlaybackController.canStartPictureInPictureAutomaticallyFromInline = false
+        nativePlaybackController.canStartPictureInPictureAutomaticallyFromInline = isSupportedAndEnabled
     }
 
     private func invalidatePictureInPicturePlaybackState() {
@@ -5769,6 +5781,12 @@ final class PlayerStateViewModel: NSObject, ObservableObject {
             || pictureInPictureController?.isPictureInPictureActive == true
             || engine.isPictureInPictureActive
     }
+
+#if DEBUG
+    var hasConfiguredPictureInPictureControllerForTesting: Bool {
+        pictureInPictureController != nil
+    }
+#endif
 
     private func elapsedMessage() -> String {
         "\(elapsedMilliseconds())ms"
@@ -5839,21 +5857,34 @@ private struct PendingSeekRecoveryMetric {
 extension PlayerStateViewModel: AVPictureInPictureControllerDelegate {
     nonisolated func pictureInPictureControllerWillStartPictureInPicture(_ pictureInPictureController: AVPictureInPictureController) {
         Task { @MainActor [weak self] in
-            guard let self, !self.isTerminated else { return }
+            guard let self,
+                  !self.isTerminated,
+                  self.pictureInPictureController === pictureInPictureController,
+                  self.isPictureInPictureEnabled
+            else {
+                pictureInPictureController.stopPictureInPicture()
+                return
+            }
             self.isPictureInPictureActive = true
         }
     }
 
     nonisolated func pictureInPictureControllerWillStopPictureInPicture(_ pictureInPictureController: AVPictureInPictureController) {
         Task { @MainActor [weak self] in
-            guard let self, !self.isTerminated else { return }
+            guard let self,
+                  !self.isTerminated,
+                  self.pictureInPictureController === pictureInPictureController
+            else { return }
             self.handlePictureInPictureWillStop()
         }
     }
 
     nonisolated func pictureInPictureControllerDidStopPictureInPicture(_ pictureInPictureController: AVPictureInPictureController) {
         Task { @MainActor [weak self] in
-            guard let self, !self.isTerminated else { return }
+            guard let self,
+                  !self.isTerminated,
+                  self.pictureInPictureController === pictureInPictureController
+            else { return }
             self.handlePictureInPictureDidStop(isNativeController: false)
         }
     }
@@ -5863,7 +5894,10 @@ extension PlayerStateViewModel: AVPictureInPictureControllerDelegate {
         restoreUserInterfaceForPictureInPictureStopWithCompletionHandler completionHandler: @escaping (Bool) -> Void
     ) {
         Task { @MainActor [weak self] in
-            guard let self, !self.isTerminated else {
+            guard let self,
+                  !self.isTerminated,
+                  self.pictureInPictureController === pictureInPictureController
+            else {
                 completionHandler(false)
                 return
             }
@@ -5874,8 +5908,12 @@ extension PlayerStateViewModel: AVPictureInPictureControllerDelegate {
 
     nonisolated func pictureInPictureController(_ pictureInPictureController: AVPictureInPictureController, failedToStartPictureInPictureWithError error: Error) {
         Task { @MainActor [weak self] in
-            guard let self, !self.isTerminated else { return }
+            guard let self,
+                  !self.isTerminated,
+                  self.pictureInPictureController === pictureInPictureController
+            else { return }
             self.isPictureInPictureActive = false
+            self.releasePictureInPictureControllerIfDisabled()
             self.errorMessage = "画中画启动失败：\(error.localizedDescription)"
         }
     }

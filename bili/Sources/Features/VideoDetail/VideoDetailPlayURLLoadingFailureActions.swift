@@ -8,7 +8,7 @@ extension VideoDetailViewModel {
         mode: VideoDetailPlayURLLoadMode,
         deferredPlayableFallback: VideoDetailPlayURLFallback?
     ) async -> VideoDetailPlayURLFailureHandlingResult {
-        guard !Task.isCancelled else {
+        guard !Task.isCancelled, !Self.isExpectedPlayURLCancellation(error) else {
             return .aborted(signpostMessage: "bvid=\(detail.bvid) cancelled")
         }
         guard !isPlaybackInvalidatedForNavigation else {
@@ -25,5 +25,13 @@ extension VideoDetailViewModel {
         }
         handlePlayURLFailure(error)
         return .handled(signpostMessage: "bvid=\(detail.bvid) failed \(error.localizedDescription)")
+    }
+
+    nonisolated static func isExpectedPlayURLCancellation(_ error: Error) -> Bool {
+        if error is CancellationError || (error as? URLError)?.code == .cancelled {
+            return true
+        }
+        let nsError = error as NSError
+        return nsError.domain == NSURLErrorDomain && nsError.code == NSURLErrorCancelled
     }
 }

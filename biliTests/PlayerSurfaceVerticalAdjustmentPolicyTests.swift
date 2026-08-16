@@ -3,6 +3,32 @@ import XCTest
 @testable import bili
 
 final class PlayerSurfaceVerticalAdjustmentPolicyTests: XCTestCase {
+    func testAxisPolicyRequiresClearDirectionalIntent() {
+        XCTAssertEqual(
+            PlayerSurfaceGestureAxisPolicy.axis(
+                translation: CGSize(width: 12, height: 2),
+                activationDistance: 8,
+                dominanceRatio: 3
+            ),
+            .horizontal
+        )
+        XCTAssertEqual(
+            PlayerSurfaceGestureAxisPolicy.axis(
+                translation: CGSize(width: 2, height: -12),
+                activationDistance: 8,
+                dominanceRatio: 3
+            ),
+            .vertical
+        )
+        XCTAssertNil(
+            PlayerSurfaceGestureAxisPolicy.axis(
+                translation: CGSize(width: 12, height: 8),
+                activationDistance: 8,
+                dominanceRatio: 3
+            )
+        )
+    }
+
     func testUsesLeftHalfForBrightnessAndRightHalfForVolume() {
         XCTAssertEqual(
             PlayerSurfaceVerticalAdjustmentPolicy.target(startLocationX: 0, width: 400),

@@ -6,6 +6,14 @@ struct BiliPlayerControlsOverlayLayer: View {
     let state: BiliPlayerSurfaceChromeState
     let playbackControls: AnyView
 
+    init(
+        state: BiliPlayerSurfaceChromeState,
+        playbackControls: AnyView
+    ) {
+        self.state = state
+        self.playbackControls = playbackControls
+    }
+
     var body: some View {
         let safeAreaInsets = PlayerControlsSafeAreaInsets.current(isFullscreenActive: state.isFullscreenActive)
         let topInset = max(safeAreaInsets.top, state.contentInsets.top)
@@ -13,7 +21,7 @@ struct BiliPlayerControlsOverlayLayer: View {
         let bottomInset = max(safeAreaInsets.bottom, state.contentInsets.bottom)
         let trailingInset = max(safeAreaInsets.trailing, state.contentInsets.trailing)
         ZStack(alignment: .bottom) {
-            if isEdgeScrimEnabled, state.showsActivePlaybackControls, state.isPlaying {
+            if isEdgeScrimEnabled, state.showsActivePlaybackControls {
                 PlayerControlEdgeScrimLayer(contentInsets: state.contentInsets)
                     .transition(.opacity)
                     .zIndex(1)
@@ -76,11 +84,15 @@ private struct PlayerControlEdgeScrimLayer: View {
         GeometryReader { proxy in
             let visibleWidth = max(1, proxy.size.width - contentInsets.leading - contentInsets.trailing)
             let visibleHeight = max(1, proxy.size.height - contentInsets.top - contentInsets.bottom)
-            let height = min(max(visibleHeight * 0.22, 56), 150)
+            let height = min(max(visibleHeight * 0.28, 64), 170)
 
             VStack(spacing: 0) {
                 LinearGradient(
-                    colors: [.black.opacity(0.20), .clear],
+                    stops: [
+                        .init(color: .black.opacity(0.36), location: 0),
+                        .init(color: .black.opacity(0.15), location: 0.48),
+                        .init(color: .clear, location: 1),
+                    ],
                     startPoint: .top,
                     endPoint: .bottom
                 )
@@ -90,7 +102,11 @@ private struct PlayerControlEdgeScrimLayer: View {
                 Spacer(minLength: 0)
 
                 LinearGradient(
-                    colors: [.clear, .black.opacity(0.20)],
+                    stops: [
+                        .init(color: .clear, location: 0),
+                        .init(color: .black.opacity(0.18), location: 0.52),
+                        .init(color: .black.opacity(0.44), location: 1),
+                    ],
                     startPoint: .top,
                     endPoint: .bottom
                 )

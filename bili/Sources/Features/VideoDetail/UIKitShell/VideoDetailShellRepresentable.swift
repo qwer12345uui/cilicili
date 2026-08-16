@@ -2,8 +2,8 @@ import SwiftUI
 
 /// 把正式的 UIKit 详情页外壳 `VideoDetailShellViewController` 包回 SwiftUI。
 ///
-/// binding 与内容区回调从 SwiftUI 侧透传；播放器竖屏“更多”菜单由 UIKit
-/// 外壳直接呈现，避免嵌套 HostingController 的 sheet 状态丢失。
+/// binding 与内容区回调从 SwiftUI 侧透传；播放器竖屏“更多”菜单由详情页
+/// 最外层 SwiftUI sheet 宿主呈现，与评论回复共用同一条路由。
 struct VideoDetailShellRepresentable: UIViewControllerRepresentable {
     @EnvironmentObject private var dependencies: AppDependencies
     @Environment(\.openVideoOwnerRouteAction) private var openVideoOwnerRoute
@@ -11,8 +11,7 @@ struct VideoDetailShellRepresentable: UIViewControllerRepresentable {
     @ObservedObject var fullscreenCoordinator: VideoDetailFullscreenCoordinator
     @ObservedObject var runtimeSettings: VideoDetailRuntimeSettingsStore
     @Binding var selectedContentTab: VideoDetailContentTab
-    @Binding var replySheetComment: Comment?
-    @Binding var replySheetSecondaryID: Int?
+    @Binding var sheetRoute: VideoDetailSheetRoute?
     @Binding var isShowingDanmakuSettings: Bool
     @Binding var isShowingFavoriteFolders: Bool
     @Binding var isShowingCoinPicker: Bool
@@ -34,9 +33,31 @@ struct VideoDetailShellRepresentable: UIViewControllerRepresentable {
             onShowFavoriteFolders: { isShowingFavoriteFolders = true },
             onShowCoinPicker: { isShowingCoinPicker = true },
             onShowDanmakuSettings: { isShowingDanmakuSettings = true },
-            onReply: {
-                replySheetSecondaryID = nil
-                replySheetComment = $0
+            onPresentPlayerMoreControls: { playerViewModel, onDismiss in
+                guard sheetRoute == nil else {
+                    onDismiss()
+                    return
+                }
+                sheetRoute = .moreControls(
+                    VideoDetailMoreControlsSheetPresentation(
+                        playerViewModel: playerViewModel,
+                        onDismiss: onDismiss
+                    )
+                )
+            },
+            onDismissPlayerMoreControls: {
+                guard case .some(.moreControls(let presentation)) = sheetRoute else { return }
+                presentation.finish()
+                sheetRoute = nil
+            },
+            onReply: { comment in
+                guard sheetRoute == nil else { return }
+                sheetRoute = .commentThread(
+                    VideoDetailCommentThreadSheetPresentation(
+                        rootComment: comment,
+                        secondaryID: nil
+                    )
+                )
             },
             onNavigateBack: onNavigateBack
         )

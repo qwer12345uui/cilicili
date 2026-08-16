@@ -26,8 +26,7 @@ extension VideoDetailViewModel {
                         data,
                         cid: cid,
                         page: page,
-                        source: "detailWarmCache",
-                        schedulesSupplementalLoad: false
+                        source: "detailWarmCache"
                     )
                 }
             }
@@ -38,8 +37,7 @@ extension VideoDetailViewModel {
         _ data: PlayURLData,
         cid: Int?,
         page: Int?,
-        source: String = "unknown",
-        schedulesSupplementalLoad: Bool = true
+        source: String = "unknown"
     ) async {
         let bvid = detail.bvid
         guard isCurrentPlaybackContext(bvid: bvid, cid: cid, page: page) else { return }
@@ -60,12 +58,10 @@ extension VideoDetailViewModel {
             }
         }
         await schedulePostPlayURLApplicationWork(
-            variants: variants,
             selectedVariant: appliedState.selectedVariant,
             targetVariant: appliedState.targetVariant,
             cid: cid,
-            page: page,
-            schedulesSupplementalLoad: schedulesSupplementalLoad
+            page: page
         )
     }
 
@@ -75,6 +71,6 @@ extension VideoDetailViewModel {
     }
 
     private func shouldSkipWarmCacheForTargetQuality(_ data: PlayURLData) -> Bool {
-        shouldRefetchForPreferredQuality(data)
+        !hasRequestedPlayableVariant(in: playVariants(from: data))
     }
 }

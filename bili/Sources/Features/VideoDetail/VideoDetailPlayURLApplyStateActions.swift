@@ -33,9 +33,4 @@ extension VideoDetailViewModel {
         return libraryStore.videoCodecPreference.forcedUnavailableMessage
             ?? "当前视频没有可硬解的播放地址，可稍后重试或调整播放设置。"
     }
-
-    func clearSupplementalPlayURLState() {
-        cancelPlayURLSupplementTask()
-        isSupplementingPlayQualities = false
-    }
 }

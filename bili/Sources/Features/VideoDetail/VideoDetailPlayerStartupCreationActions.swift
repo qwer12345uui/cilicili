@@ -54,6 +54,7 @@ extension VideoDetailViewModel {
                   let playerViewModel,
                   self.stablePlayerViewModel === playerViewModel
             else { return false }
+            guard !self.canActivatePlaybackAfterNavigation else { return true }
             return await PictureInPictureRestoreCoordinator.shared.restorePlaybackUI(for: self.detail)
         }
         playerViewModel.onPlaybackFailureWithReason = { [weak self, weak playerViewModel] message, reason in

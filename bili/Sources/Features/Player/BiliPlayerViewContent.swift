@@ -196,7 +196,7 @@ private struct BiliPlayerMoreControlsSheet: View {
                         get: { libraryStore.playerPerformanceOverlayEnabled },
                         set: { libraryStore.setPlayerPerformanceOverlayEnabled($0) }
                     )) {
-                        Label("播放性能浮窗", systemImage: "waveform.path.ecg.rectangle")
+                        Label("播放性能诊断", systemImage: "waveform.path.ecg.rectangle")
                     }
 
                     Toggle(isOn: Binding(
@@ -208,6 +208,9 @@ private struct BiliPlayerMoreControlsSheet: View {
                 }
             }
             .foregroundStyle(.primary)
+            .scrollContentBackground(.hidden)
+            .listRowBackground(Color.clear)
+            .listStyle(.plain)
             .navigationTitle(
                 showsRateChoices
                     ? "倍速"
@@ -215,8 +218,13 @@ private struct BiliPlayerMoreControlsSheet: View {
             )
             .navigationBarTitleDisplayMode(.inline)
         }
+        .toolbarBackground(.hidden, for: .navigationBar)
+        .background {
+            BiliPlayerGlassSheetBackground()
+        }
         .presentationDetents([.medium])
         .presentationDragIndicator(.visible)
+        .presentationBackground(.clear)
     }
 
     private func showDanmakuSettings() {

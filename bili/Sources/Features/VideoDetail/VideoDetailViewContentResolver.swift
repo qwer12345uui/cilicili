@@ -7,8 +7,7 @@ struct VideoDetailViewContentResolver: View {
     @ObservedObject var fullscreenCoordinator: VideoDetailFullscreenCoordinator
     @ObservedObject var viewModel: VideoDetailViewModel
     @Binding var selectedContentTab: VideoDetailContentTab
-    @Binding var replySheetComment: Comment?
-    @Binding var replySheetSecondaryID: Int?
+    @Binding var sheetRoute: VideoDetailSheetRoute?
     @Binding var pendingCommentAnchor: VideoCommentAnchor?
     @Binding var isShowingDanmakuSettings: Bool
     @Binding var isShowingFavoriteFolders: Bool
@@ -22,8 +21,7 @@ struct VideoDetailViewContentResolver: View {
             fullscreenCoordinator: fullscreenCoordinator,
             runtimeSettings: runtimeSettings,
             selectedContentTab: $selectedContentTab,
-            replySheetComment: $replySheetComment,
-            replySheetSecondaryID: $replySheetSecondaryID,
+            sheetRoute: $sheetRoute,
             isShowingDanmakuSettings: $isShowingDanmakuSettings,
             isShowingFavoriteFolders: $isShowingFavoriteFolders,
             isShowingCoinPicker: $isShowingCoinPicker,
@@ -35,8 +33,7 @@ struct VideoDetailViewContentResolver: View {
             viewModel: viewModel,
             libraryStore: dependencies.libraryStore,
             sheetState: VideoDetailSheetState(
-                replySheetComment: $replySheetComment,
-                replySheetSecondaryID: $replySheetSecondaryID,
+                route: $sheetRoute,
                 isShowingFavoriteFolders: $isShowingFavoriteFolders,
                 isShowingCoinPicker: $isShowingCoinPicker,
                 isShowingDanmakuSettings: $isShowingDanmakuSettings,
@@ -75,9 +72,13 @@ struct VideoDetailViewContentResolver: View {
 
         self.pendingCommentAnchor = nil
         selectedContentTab = .comments
-        replySheetSecondaryID = loadedThread?.focusedReplyID
         guard let loadedThread else { return }
-        replySheetComment = loadedThread.rootComment
+        sheetRoute = .commentThread(
+            VideoDetailCommentThreadSheetPresentation(
+                rootComment: loadedThread.rootComment,
+                secondaryID: loadedThread.focusedReplyID
+            )
+        )
     }
 }
 

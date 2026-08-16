@@ -24,7 +24,7 @@ struct MinePlaybackPreferenceSection<ProbeSummary: View>: View {
             preferredVideoQualityPicker
             cellularPreferredVideoQualityPicker
             av1HardwareDecodeProbeButton
-            videoCodecPreferencePicker
+            videoCodecPreferenceLink
             forceHardwareDecodeToggle
             dolbyVisionRenderingPolicyPicker
             defaultPlaybackRatePicker
@@ -167,18 +167,18 @@ struct MinePlaybackPreferenceSection<ProbeSummary: View>: View {
         .pickerStyle(.navigationLink)
     }
 
-    private var videoCodecPreferencePicker: some View {
-        Picker(selection: Binding(
-            get: { libraryStore.videoCodecPreference },
-            set: { libraryStore.setVideoCodecPreference($0) }
-        )) {
-            ForEach(VideoCodecPreference.allCases) { preference in
-                Text(preference.title).tag(preference)
-            }
+    private var videoCodecPreferenceLink: some View {
+        NavigationLink {
+            VideoCodecSelectionSettingsView(libraryStore: libraryStore)
         } label: {
-            Label("首选编码", systemImage: "film.stack")
+            LabeledContent {
+                Text(libraryStore.videoCodecPreference.title)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.trailing)
+            } label: {
+                Label("视频编码", systemImage: "film.stack")
+            }
         }
-        .pickerStyle(.navigationLink)
     }
 
     private var av1HardwareDecodeProbeButton: some View {

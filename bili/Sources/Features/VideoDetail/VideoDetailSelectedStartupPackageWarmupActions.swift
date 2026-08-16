@@ -6,7 +6,7 @@ extension VideoDetailViewModel {
         targetVariant: PlayVariant?,
         cid: Int?,
         page: Int?
-    ) {
+    ) async {
         guard !isPlaybackInvalidatedForNavigation,
               let cid,
               let variant,
@@ -18,39 +18,27 @@ extension VideoDetailViewModel {
         let variantID = variant.id
         let durationHint = detail.duration.map(TimeInterval.init)
         let cdnPreference = libraryStore.effectivePlaybackCDNPreference
-        trackBackgroundTask(
-            Task(priority: .userInitiated) { [weak self, variant, targetVariant] in
-                guard let self,
-                      !Task.isCancelled,
-                      !self.isPlaybackInvalidatedForNavigation,
-                      self.detail.bvid == bvid,
-                      self.selectedCID == cid,
-                      self.selectedPlayVariant?.id == variantID
-                else { return }
-
-                let result = await VideoPreloadCenter.shared.prebuildStartupPackageAndWait(
-                    variant: variant,
-                    targetVariant: targetVariant,
-                    bvid: bvid,
-                    cid: cid,
-                    page: page,
-                    durationHint: durationHint,
-                    cdnPreference: cdnPreference,
-                    timeout: 0
-                )
-                guard !Task.isCancelled,
-                      !self.isPlaybackInvalidatedForNavigation,
-                      self.detail.bvid == bvid,
-                      self.selectedCID == cid,
-                      self.selectedPlayVariant?.id == variantID
-                else { return }
-                PlayerMetricsLog.record(
-                    .manifestStage,
-                    metricsID: bvid,
-                    title: self.detail.title,
-                    message: "startupWarmEarly=\(result.rawValue) q\(variant.quality)"
-                )
-            }
+        let result = await VideoPreloadCenter.shared.prebuildStartupPackageAndWait(
+            variant: variant,
+            targetVariant: targetVariant,
+            bvid: bvid,
+            cid: cid,
+            page: page,
+            durationHint: durationHint,
+            cdnPreference: cdnPreference,
+            timeout: 0
+        )
+        guard !Task.isCancelled,
+              !isPlaybackInvalidatedForNavigation,
+              detail.bvid == bvid,
+              selectedCID == cid,
+              selectedPlayVariant?.id == variantID
+        else { return }
+        PlayerMetricsLog.record(
+            .manifestStage,
+            metricsID: bvid,
+            title: detail.title,
+            message: "startupWarmEarly=\(result.rawValue) q\(variant.quality)"
         )
     }
 

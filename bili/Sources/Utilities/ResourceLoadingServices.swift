@@ -11,8 +11,6 @@ nonisolated struct PlayURLCacheKey: Hashable, Sendable {
     let fnval: String
     let fnver: String
     let platform: String
-    let prefersProgressiveFastStart: Bool
-    let supplementsQualities: Bool
 }
 
 nonisolated struct PlayURLCacheLoginScope: Hashable, Sendable {
@@ -42,6 +40,30 @@ nonisolated struct PlayURLCacheStatistics: Sendable {
     let stores: Int
     let evictions: Int
     let invalidations: Int
+}
+
+extension PlayURLData {
+    nonisolated var playbackMediaURLStrings: Set<String> {
+        var urls = Set<String>()
+        func append(_ value: String?) {
+            guard let value, URL(string: value) != nil else { return }
+            urls.insert(value)
+        }
+
+        durl?.forEach { item in
+            append(item.url)
+            item.backupURL?.forEach(append)
+        }
+        dash?.video?.forEach { stream in
+            append(stream.baseURL)
+            stream.backupURL?.forEach(append)
+        }
+        dash?.audio?.forEach { stream in
+            append(stream.baseURL)
+            stream.backupURL?.forEach(append)
+        }
+        return urls
+    }
 }
 
 nonisolated enum PlayURLMediaExpiration {
@@ -158,7 +180,12 @@ actor PlayURLCache {
         self.ttl = ttl
     }
 
-    func value(for key: PlayURLCacheKey, scope: PlayURLCacheLoginScope) -> PlayURLData? {
+    func value(
+        for key: PlayURLCacheKey,
+        scope: PlayURLCacheLoginScope,
+        requiredQuality: Int? = nil,
+        allowsVerifiedLowerQualityFallback: Bool = false
+    ) -> PlayURLData? {
         trimExpired()
         guard var entry = entries[key] else {
             misses += 1
@@ -181,14 +208,36 @@ actor PlayURLCache {
             misses += 1
             return nil
         }
+        if let requiredQuality,
+           !entry.data.hasPlayableMediaQuality(requiredQuality) {
+            let canReuseVerifiedFallback = allowsVerifiedLowerQualityFallback
+                && entry.data.hasPlayableStreamPayload
+                && !entry.data.shouldRefetchForPreferredQuality(requiredQuality)
+            guard canReuseVerifiedFallback else {
+                // An advertised quality without media must be revalidated rather
+                // than letting a lower rendition masquerade as the requested one.
+                misses += 1
+                return nil
+            }
+        }
         entry.lastAccessedAt = now
         entries[key] = entry
         hits += 1
         return entry.data
     }
 
-    func contains(_ key: PlayURLCacheKey, scope: PlayURLCacheLoginScope) -> Bool {
-        value(for: key, scope: scope) != nil
+    func contains(
+        _ key: PlayURLCacheKey,
+        scope: PlayURLCacheLoginScope,
+        requiredQuality: Int? = nil,
+        allowsVerifiedLowerQualityFallback: Bool = false
+    ) -> Bool {
+        value(
+            for: key,
+            scope: scope,
+            requiredQuality: requiredQuality,
+            allowsVerifiedLowerQualityFallback: allowsVerifiedLowerQualityFallback
+        ) != nil
     }
 
     func store(_ data: PlayURLData, for key: PlayURLCacheKey, scope: PlayURLCacheLoginScope) {
@@ -246,6 +295,13 @@ actor PlayURLCache {
         let oldCount = entries.count
         entries = entries.filter { $0.key.bvid != bvid }
         invalidations += max(0, oldCount - entries.count)
+    }
+
+    func mediaURLs(for bvid: String) -> Set<String> {
+        entries.reduce(into: Set<String>()) { result, pair in
+            guard pair.key.bvid == bvid else { return }
+            result.formUnion(pair.value.data.playbackMediaURLStrings)
+        }
     }
 
     func invalidateForLoginStateChange() {
@@ -407,6 +463,16 @@ nonisolated enum BiliURLSessionFactory {
         return configuration
     }
 
+    static func makeWebPageStreamingConfiguration() -> URLSessionConfiguration {
+        let configuration = makeAPIConfiguration()
+        configuration.requestCachePolicy = .reloadIgnoringLocalCacheData
+        configuration.urlCache = nil
+        configuration.waitsForConnectivity = false
+        configuration.timeoutIntervalForRequest = 8
+        configuration.timeoutIntervalForResource = 20
+        return configuration
+    }
+
     static func makePlaybackProbeSession() -> URLSession {
         let configuration = URLSessionConfiguration.ephemeral
         configuration.requestCachePolicy = .reloadIgnoringLocalCacheData
@@ -473,6 +539,311 @@ nonisolated enum BiliURLSessionFactory {
             headers["Cookie"] = cookieHeader
         }
         return headers
+    }
+}
+
+nonisolated struct BiliWebPagePlayInfoStreamResult: Sendable {
+    let json: String?
+    let fullPageData: Data?
+    let receivedByteCount: Int
+    let expectedByteCount: Int64?
+    let elapsedMilliseconds: Int
+}
+
+nonisolated struct BiliWebPagePlayInfoStreamParser: Sendable {
+    private static let markers = [
+        Array("window.__playinfo__=".utf8),
+        Array("window.__playinfo__ =".utf8),
+        Array("__playinfo__=".utf8)
+    ]
+    private static let maximumMarkerLength = markers.map(\.count).max() ?? 0
+
+    private(set) var buffer = Data()
+    private var markerSearchStart = 0
+    private var scanIndex: Int?
+    private var objectStartIndex: Int?
+    private var depth = 0
+    private var isInsideString = false
+    private var isEscaped = false
+    private(set) var extractedJSON: String?
+
+    mutating func append(_ chunk: Data) -> String? {
+        if !chunk.isEmpty {
+            buffer.append(chunk)
+        }
+        if let extractedJSON {
+            return extractedJSON
+        }
+        if scanIndex == nil {
+            locateMarker()
+        }
+        guard var index = scanIndex else { return nil }
+
+        if objectStartIndex == nil {
+            while index < buffer.count {
+                if buffer[index] == UInt8(ascii: "{") {
+                    objectStartIndex = index
+                    depth = 1
+                    index += 1
+                    break
+                }
+                index += 1
+            }
+            scanIndex = index
+            guard objectStartIndex != nil else { return nil }
+        }
+
+        while index < buffer.count {
+            let byte = buffer[index]
+            if isInsideString {
+                if isEscaped {
+                    isEscaped = false
+                } else if byte == UInt8(ascii: "\\") {
+                    isEscaped = true
+                } else if byte == UInt8(ascii: "\"") {
+                    isInsideString = false
+                }
+            } else if byte == UInt8(ascii: "\"") {
+                isInsideString = true
+            } else if byte == UInt8(ascii: "{") {
+                depth += 1
+            } else if byte == UInt8(ascii: "}") {
+                depth -= 1
+                if depth == 0, let objectStartIndex {
+                    let jsonData = buffer.subdata(in: objectStartIndex..<(index + 1))
+                    guard let json = String(data: jsonData, encoding: .utf8) else {
+                        return nil
+                    }
+                    extractedJSON = json
+                    scanIndex = index + 1
+                    return json
+                }
+            }
+            index += 1
+        }
+        scanIndex = index
+        return nil
+    }
+
+    private mutating func locateMarker() {
+        for marker in Self.markers {
+            guard buffer.count >= marker.count else { continue }
+            let lastStart = buffer.count - marker.count
+            guard markerSearchStart <= lastStart else { continue }
+            for candidate in markerSearchStart...lastStart {
+                var matches = true
+                for offset in marker.indices where buffer[candidate + offset] != marker[offset] {
+                    matches = false
+                    break
+                }
+                if matches {
+                    scanIndex = candidate + marker.count
+                    return
+                }
+            }
+        }
+        markerSearchStart = max(0, buffer.count - Self.maximumMarkerLength + 1)
+    }
+}
+
+nonisolated final class BiliWebPagePlayInfoStreamingSession: @unchecked Sendable {
+    static let shared = BiliWebPagePlayInfoStreamingSession()
+
+    private let delegate: BiliWebPagePlayInfoStreamingDelegate
+    private let session: URLSession
+
+    private init() {
+        let delegate = BiliWebPagePlayInfoStreamingDelegate()
+        self.delegate = delegate
+        session = URLSession(
+            configuration: BiliURLSessionFactory.makeWebPageStreamingConfiguration(),
+            delegate: delegate,
+            delegateQueue: delegate.delegateQueue
+        )
+    }
+
+    func fetch(
+        request: URLRequest,
+        priority: Float = URLSessionTask.highPriority
+    ) async throws -> BiliWebPagePlayInfoStreamResult {
+        try await delegate.fetch(session: session, request: request, priority: priority)
+    }
+}
+
+private nonisolated final class BiliWebPagePlayInfoStreamingDelegate: NSObject, URLSessionDataDelegate, @unchecked Sendable {
+    let delegateQueue: OperationQueue
+
+    private let lock = NSLock()
+    private var handlers: [Int: BiliWebPagePlayInfoStreamHandler] = [:]
+
+    override init() {
+        delegateQueue = OperationQueue()
+        delegateQueue.maxConcurrentOperationCount = 2
+        delegateQueue.qualityOfService = .userInitiated
+        super.init()
+    }
+
+    func fetch(
+        session: URLSession,
+        request: URLRequest,
+        priority: Float
+    ) async throws -> BiliWebPagePlayInfoStreamResult {
+        let taskBox = BiliWebPagePlayInfoStreamingTaskBox()
+        return try await withTaskCancellationHandler {
+            try await withCheckedThrowingContinuation { continuation in
+                let handler = BiliWebPagePlayInfoStreamHandler(continuation: continuation)
+                let task = session.dataTask(with: request)
+                task.priority = priority
+                lock.lock()
+                handlers[task.taskIdentifier] = handler
+                lock.unlock()
+                taskBox.bind(task)
+                task.resume()
+            }
+        } onCancel: {
+            taskBox.cancel()
+        }
+    }
+
+    func urlSession(
+        _: URLSession,
+        dataTask: URLSessionDataTask,
+        didReceive response: URLResponse,
+        completionHandler: @escaping (URLSession.ResponseDisposition) -> Void
+    ) {
+        guard let handler = handler(for: dataTask.taskIdentifier) else {
+            completionHandler(.cancel)
+            return
+        }
+        handler.receive(response: response)
+        completionHandler(.allow)
+    }
+
+    func urlSession(
+        _: URLSession,
+        dataTask: URLSessionDataTask,
+        didReceive data: Data
+    ) {
+        guard let handler = handler(for: dataTask.taskIdentifier) else { return }
+        if handler.receive(data: data) {
+            removeHandler(for: dataTask.taskIdentifier)
+            dataTask.cancel()
+        }
+    }
+
+    func urlSession(
+        _: URLSession,
+        task: URLSessionTask,
+        didCompleteWithError error: Error?
+    ) {
+        removeHandler(for: task.taskIdentifier)?.complete(error: error)
+    }
+
+    private func handler(for taskIdentifier: Int) -> BiliWebPagePlayInfoStreamHandler? {
+        lock.lock()
+        let handler = handlers[taskIdentifier]
+        lock.unlock()
+        return handler
+    }
+
+    @discardableResult
+    private func removeHandler(for taskIdentifier: Int) -> BiliWebPagePlayInfoStreamHandler? {
+        lock.lock()
+        let handler = handlers.removeValue(forKey: taskIdentifier)
+        lock.unlock()
+        return handler
+    }
+}
+
+private nonisolated final class BiliWebPagePlayInfoStreamHandler: @unchecked Sendable {
+    private let lock = NSLock()
+    private let startedAt = Date()
+    private var continuation: CheckedContinuation<BiliWebPagePlayInfoStreamResult, Error>?
+    private var parser = BiliWebPagePlayInfoStreamParser()
+    private var response: URLResponse?
+
+    init(continuation: CheckedContinuation<BiliWebPagePlayInfoStreamResult, Error>) {
+        self.continuation = continuation
+    }
+
+    func receive(response: URLResponse) {
+        lock.lock()
+        self.response = response
+        lock.unlock()
+    }
+
+    func receive(data: Data) -> Bool {
+        lock.lock()
+        guard let continuation else {
+            lock.unlock()
+            return false
+        }
+        guard let json = parser.append(data) else {
+            lock.unlock()
+            return false
+        }
+        self.continuation = nil
+        let result = makeResult(json: json, fullPageData: nil)
+        lock.unlock()
+        continuation.resume(returning: result)
+        return true
+    }
+
+    func complete(error: Error?) {
+        lock.lock()
+        guard let continuation else {
+            lock.unlock()
+            return
+        }
+        self.continuation = nil
+        if let error {
+            lock.unlock()
+            continuation.resume(throwing: error)
+            return
+        }
+        guard response != nil else {
+            lock.unlock()
+            continuation.resume(throwing: URLError(.badServerResponse))
+            return
+        }
+        let result = makeResult(json: parser.append(Data()), fullPageData: parser.buffer)
+        lock.unlock()
+        continuation.resume(returning: result)
+    }
+
+    private func makeResult(json: String?, fullPageData: Data?) -> BiliWebPagePlayInfoStreamResult {
+        let expectedByteCount = response?.expectedContentLength ?? NSURLSessionTransferSizeUnknown
+        return BiliWebPagePlayInfoStreamResult(
+            json: json,
+            fullPageData: fullPageData,
+            receivedByteCount: parser.buffer.count,
+            expectedByteCount: expectedByteCount > 0 ? expectedByteCount : nil,
+            elapsedMilliseconds: max(0, Int((Date().timeIntervalSince(startedAt) * 1_000).rounded()))
+        )
+    }
+}
+
+private nonisolated final class BiliWebPagePlayInfoStreamingTaskBox: @unchecked Sendable {
+    private let lock = NSLock()
+    private var task: URLSessionTask?
+    private var isCancelled = false
+
+    func bind(_ task: URLSessionTask) {
+        lock.lock()
+        self.task = task
+        let shouldCancel = isCancelled
+        lock.unlock()
+        if shouldCancel {
+            task.cancel()
+        }
+    }
+
+    func cancel() {
+        lock.lock()
+        isCancelled = true
+        let task = task
+        lock.unlock()
+        task?.cancel()
     }
 }
 
@@ -592,12 +963,14 @@ nonisolated enum BiliNetworkRetry {
         session: URLSession,
         request: URLRequest,
         priority: Float = URLSessionTask.defaultPriority,
+        priorityHandle: BiliNetworkTaskPriorityHandle? = nil,
         policy: BiliNetworkRetryPolicy
     ) async throws -> (Data, URLResponse) {
         try await data(
             sessionProvider: { session },
             request: request,
             priority: priority,
+            priorityHandle: priorityHandle,
             policy: policy
         )
     }
@@ -606,6 +979,7 @@ nonisolated enum BiliNetworkRetry {
         sessionProvider: @escaping @Sendable () -> URLSession,
         request: URLRequest,
         priority: Float = URLSessionTask.defaultPriority,
+        priorityHandle: BiliNetworkTaskPriorityHandle? = nil,
         policy: BiliNetworkRetryPolicy
     ) async throws -> (Data, URLResponse) {
         let canRetryRequest = policy.canRetry(request)
@@ -618,7 +992,8 @@ nonisolated enum BiliNetworkRetry {
                 let (data, response) = try await dataOnce(
                     session: sessionProvider(),
                     request: request,
-                    priority: priority
+                    priority: priority,
+                    priorityHandle: priorityHandle
                 )
                 if canRetryRequest,
                    attempt < policy.attempts - 1,
@@ -673,12 +1048,14 @@ nonisolated enum BiliNetworkRetry {
     private static func dataOnce(
         session: URLSession,
         request: URLRequest,
-        priority: Float
+        priority: Float,
+        priorityHandle: BiliNetworkTaskPriorityHandle?
     ) async throws -> (Data, URLResponse) {
         let taskBox = BiliNetworkURLSessionTaskBox()
         return try await withTaskCancellationHandler {
             try await withCheckedThrowingContinuation { continuation in
                 let task = session.dataTask(with: request) { data, response, error in
+                    priorityHandle?.unbind()
                     if let error {
                         continuation.resume(throwing: error)
                         return
@@ -689,7 +1066,10 @@ nonisolated enum BiliNetworkRetry {
                     }
                     continuation.resume(returning: (data, response))
                 }
-                task.priority = priority
+                priorityHandle?.bind(task: task, fallbackPriority: priority)
+                if priorityHandle == nil {
+                    task.priority = priority
+                }
                 taskBox.task = task
                 task.resume()
             }
@@ -788,6 +1168,113 @@ nonisolated enum BiliNetworkRetry {
     ) async throws {
         guard delayNanoseconds > 0 else { return }
         try await Task.sleep(nanoseconds: delayNanoseconds)
+    }
+}
+
+nonisolated final class BiliNetworkTaskPriorityHandle: @unchecked Sendable {
+    private let lock = NSLock()
+    private var task: URLSessionTask?
+    private var requestedPriority: Float
+
+    init(priority: Float) {
+        requestedPriority = Self.normalized(priority)
+    }
+
+    func promote(to priority: Float) {
+        let normalizedPriority = Self.normalized(priority)
+        lock.lock()
+        guard normalizedPriority > requestedPriority else {
+            lock.unlock()
+            return
+        }
+        requestedPriority = normalizedPriority
+        let task = task
+        lock.unlock()
+        task?.priority = normalizedPriority
+    }
+
+    func bind(task: URLSessionTask, fallbackPriority: Float) {
+        lock.lock()
+        requestedPriority = max(requestedPriority, Self.normalized(fallbackPriority))
+        self.task = task
+        let priority = requestedPriority
+        lock.unlock()
+        task.priority = priority
+    }
+
+    func unbind() {
+        lock.lock()
+        task = nil
+        lock.unlock()
+    }
+
+    private static func normalized(_ priority: Float) -> Float {
+        min(max(priority, URLSessionTask.lowPriority), URLSessionTask.highPriority)
+    }
+}
+
+actor BiliReadRequestCoalescer {
+    static let shared = BiliReadRequestCoalescer()
+
+    private struct Entry {
+        let id: UUID
+        let task: Task<Data, Error>
+    }
+
+    private var entries: [String: Entry] = [:]
+
+    func data(
+        for key: String,
+        operation: @escaping @Sendable () async throws -> Data
+    ) async throws -> Data {
+        let startedAt = Date()
+        if let entry = entries[key] {
+            do {
+                let data = try await entry.task.value
+                ResourceLoadingDiagnostics.shared.record(
+                    .readRequestShared,
+                    durationMilliseconds: elapsedMilliseconds(since: startedAt)
+                )
+                return data
+            } catch {
+                ResourceLoadingDiagnostics.shared.record(
+                    .readRequestFailure,
+                    durationMilliseconds: elapsedMilliseconds(since: startedAt),
+                    details: ["role": "shared"]
+                )
+                throw error
+            }
+        }
+
+        let entry = Entry(
+            id: UUID(),
+            task: Task { try await operation() }
+        )
+        entries[key] = entry
+        defer {
+            if entries[key]?.id == entry.id {
+                entries[key] = nil
+            }
+        }
+        do {
+            let data = try await entry.task.value
+            ResourceLoadingDiagnostics.shared.record(
+                .readRequestOwner,
+                durationMilliseconds: elapsedMilliseconds(since: startedAt)
+            )
+            return data
+        } catch {
+            ResourceLoadingDiagnostics.shared.record(
+                .readRequestFailure,
+                durationMilliseconds: elapsedMilliseconds(since: startedAt),
+                details: ["role": "owner"]
+            )
+            throw error
+        }
+    }
+
+    private func elapsedMilliseconds(since startedAt: Date) -> Int {
+        max(0, Int((Date().timeIntervalSince(startedAt) * 1_000).rounded()))
     }
 }
 
@@ -942,6 +1429,24 @@ actor BiliAPIResponseMemoryCache {
         misses = 0
         stores = 0
         evictions = 0
+    }
+
+    func invalidate(bvid: String) {
+        guard !bvid.isEmpty else { return }
+        let removedKeys = entries.keys.filter { key in
+            guard let requestURLString = key.split(separator: "\n", maxSplits: 1).first,
+                  let components = URLComponents(string: String(requestURLString))
+            else { return false }
+            return components.queryItems?.contains(where: {
+                $0.name.caseInsensitiveCompare("bvid") == .orderedSame && $0.value == bvid
+            }) == true
+        }
+        for key in removedKeys {
+            guard let entry = entries.removeValue(forKey: key) else { continue }
+            estimatedBytes -= entry.data.count
+            evictions += 1
+        }
+        estimatedBytes = max(0, estimatedBytes)
     }
 
     func statistics() -> BiliAPIResponseMemoryCacheStatistics {
@@ -1099,6 +1604,17 @@ actor ProgressiveMediaSegmentCache {
         evictions += entries.count
         entries.removeAll()
         estimatedBytes = 0
+    }
+
+    func invalidate(urls: Set<String>) {
+        guard !urls.isEmpty else { return }
+        let removedKeys = entries.keys.filter { urls.contains($0.url) }
+        for key in removedKeys {
+            guard let entry = entries.removeValue(forKey: key) else { continue }
+            estimatedBytes -= entry.bytes
+            evictions += 1
+        }
+        estimatedBytes = max(0, estimatedBytes)
     }
 
     func statistics() -> ProgressiveMediaCacheStatistics {
@@ -1580,6 +2096,26 @@ nonisolated enum ResourceCacheCenter {
     static func clearPlayURL() async {
         await PlayURLCache.shared.clearMemoryCache()
         await VideoPreloadCenter.shared.clearPlayURLCache()
+    }
+
+    static func clearPlaybackPerformanceTestCache(
+        bvid: String,
+        mediaURLs: Set<String>,
+        api: BiliAPIClient? = nil
+    ) async {
+        let playURLMediaURLs = await PlayURLCache.shared.mediaURLs(for: bvid)
+        let preloadMediaURLs = await VideoPreloadCenter.shared.performanceTestMediaURLs(for: bvid)
+        var resolvedMediaURLs = mediaURLs
+        resolvedMediaURLs.formUnion(playURLMediaURLs)
+        resolvedMediaURLs.formUnion(preloadMediaURLs)
+
+        await api?.clearPlaybackPerformanceTestState(bvid: bvid)
+        await PlayURLCache.shared.invalidate(bvid: bvid)
+        await VideoPreloadCenter.shared.invalidatePerformanceTestCaches(for: bvid)
+        await BiliAPIResponseMemoryCache.shared.invalidate(bvid: bvid)
+        await ProgressiveMediaSegmentCache.shared.invalidate(urls: resolvedMediaURLs)
+        await VideoRangeCache.shared.invalidate(urls: resolvedMediaURLs)
+        await LocalHLSBridge.clearWarmupCache(for: resolvedMediaURLs)
     }
 
     static func clearImages(includeDisk: Bool) async {

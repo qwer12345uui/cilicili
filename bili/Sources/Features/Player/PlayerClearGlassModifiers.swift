@@ -40,6 +40,14 @@ extension View {
     }
 }
 
+struct BiliPlayerGlassSheetBackground: View {
+    var body: some View {
+        Rectangle()
+            .fill(Color.clear)
+            .biliRegularGlassEffect(interactive: false, in: Rectangle())
+    }
+}
+
 private struct BiliPlayerClearGlassModifier<GlassShape: Shape>: ViewModifier {
     let interactive: Bool
     let shape: GlassShape

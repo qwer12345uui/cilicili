@@ -44,7 +44,6 @@ extension VideoDetailViewModel {
         clearVideoListenAudioVariants()
         playVariants = []
         selectedPlayVariant = nil
-        isSupplementingPlayQualities = false
         playURLElapsedMilliseconds = elapsedMilliseconds(since: playURLLoadStartTime)
         playURLState = .failed(playURLFailureMessage(for: error))
     }

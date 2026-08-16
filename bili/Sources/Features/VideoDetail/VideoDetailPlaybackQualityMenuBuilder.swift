@@ -3,7 +3,6 @@ import Foundation
 enum VideoDetailPlaybackQualityMenuBuilder {
     static func inlineQualityButtonTitle(
         selectedPlayVariant: PlayVariant?,
-        isSupplementingPlayQualities _: Bool,
         isSwitchingPlayQuality: Bool
     ) -> String {
         if isSwitchingPlayQuality {
@@ -14,7 +13,6 @@ enum VideoDetailPlaybackQualityMenuBuilder {
 
     static func accessoryQualityButtonTitle(
         selectedPlayVariant: PlayVariant?,
-        isSupplementingPlayQualities _: Bool,
         isSwitchingPlayQuality: Bool
     ) -> String {
         if isSwitchingPlayQuality {
@@ -27,27 +25,25 @@ enum VideoDetailPlaybackQualityMenuBuilder {
         playVariants: [PlayVariant],
         selectedPlayVariant: PlayVariant?,
         pendingPlayVariantID: String?,
-        isSupplementingPlayQualities: Bool = false,
         isSwitchingPlayQuality: Bool
     ) -> [VideoDetailPlaybackQualityMenuItem] {
         compactQualityVariants(from: playVariants).map { variant in
             let systemImage: String
-            let isResolvingAvailability = isSupplementingPlayQualities && !variant.isPlayable
-            if isResolvingAvailability || isPending(variant, pendingPlayVariantID: pendingPlayVariantID, playVariants: playVariants) {
+            if isPending(variant, pendingPlayVariantID: pendingPlayVariantID, playVariants: playVariants) {
                 systemImage = "arrow.triangle.2.circlepath"
             } else if selectedPlayVariant?.quality == variant.quality {
                 systemImage = "checkmark"
+            } else if variant.isAvailabilityPending {
+                systemImage = "arrow.down.circle"
             } else {
                 systemImage = variant.isPlayable ? "circle" : "lock.fill"
             }
             return VideoDetailPlaybackQualityMenuItem(
                 variant: variant,
-                title: isResolvingAvailability ? variant.title : variant.qualityMenuTitle,
-                subtitle: isResolvingAvailability
-                    ? "正在校验可用清晰度"
-                    : routeSubtitle(for: variant, selectedPlayVariant: selectedPlayVariant),
+                title: variant.qualityMenuTitle,
+                subtitle: routeSubtitle(for: variant, selectedPlayVariant: selectedPlayVariant),
                 systemImage: systemImage,
-                isDisabled: !variant.isPlayable || isSwitchingPlayQuality
+                isDisabled: !variant.isSelectableFromQualityMenu || isSwitchingPlayQuality
             )
         }
     }
@@ -76,10 +72,18 @@ enum VideoDetailPlaybackQualityMenuBuilder {
         for menuVariant: PlayVariant,
         selectedPlayVariant: PlayVariant?
     ) -> String? {
+        if menuVariant.isAvailabilityPending {
+            return advertisedFormatSubtitle(for: menuVariant)
+        }
         let isSelectedQuality = selectedPlayVariant?.quality == menuVariant.quality
         let routeVariant = isSelectedQuality ? (selectedPlayVariant ?? menuVariant) : menuVariant
         let isFallbackRoute = isSelectedQuality && selectedPlayVariant?.id != menuVariant.id
         return routeSubtitle(for: routeVariant, isFallbackRoute: isFallbackRoute)
+    }
+
+    private static func advertisedFormatSubtitle(for variant: PlayVariant) -> String {
+        let details = variant.subtitle.trimmingCharacters(in: .whitespacesAndNewlines)
+        return details.isEmpty ? "DASH" : "\(details) · DASH"
     }
 
     private static func routeSubtitle(

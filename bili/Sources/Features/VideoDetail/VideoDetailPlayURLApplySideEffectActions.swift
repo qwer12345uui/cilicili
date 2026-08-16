@@ -5,31 +5,29 @@ extension VideoDetailViewModel {
     private static var coldStartPackageWarmupPlayerCreationWait: TimeInterval { 0.08 }
     private static var cachedPlayURLStartupPackageWarmupPlayerCreationWait: TimeInterval { 0.16 }
     private static var historyResumeWarmupPlayerCreationWait: TimeInterval {
-        PlaybackEnvironment.current.shouldPreferConservativePlayback ? 0.18 : 0.12
+        let normalBudget = PlaybackEnvironment.current.shouldPreferConservativePlayback ? 0.18 : 0.12
+        return ResourceLoadingExperiment.resumeWarmupWait(normalBudget: normalBudget)
     }
 
     func schedulePostPlayURLApplicationWork(
-        variants: [PlayVariant],
         selectedVariant: PlayVariant?,
         targetVariant: PlayVariant?,
         cid: Int?,
-        page: Int?,
-        schedulesSupplementalLoad: Bool
+        page: Int?
     ) async {
         guard !isPlaybackInvalidatedForNavigation else { return }
-        cancelFastStartUpgradeTask()
         let resumeTime = consumePendingPlaybackHistoryResumeTime(for: cid)
+        await scheduleSelectedStartupPackageWarmupBeforeFirstFrame(
+            selectedVariant,
+            targetVariant: targetVariant,
+            cid: cid,
+            page: page
+        )
         let historyResumeWarmupTask = historyResumeWarmupTaskBeforePlayerCreation(
             selectedVariant,
             cid: cid,
             page: page,
             resumeTime: resumeTime
-        )
-        scheduleSelectedStartupPackageWarmupBeforeFirstFrame(
-            selectedVariant,
-            targetVariant: targetVariant,
-            cid: cid,
-            page: page
         )
         scheduleSelectedStartupPackageWarmupAfterFirstFrame(selectedVariant, cid: cid, page: page)
         await waitForStartupPackageWarmupBeforePlayerCreationIfNeeded(
@@ -47,7 +45,11 @@ extension VideoDetailViewModel {
         updateStablePlayerViewModelIfNeeded(resumeTimeOverride: resumeTime)
         playURLState = .loaded
         warmSelectedVariantAfterFirstFrameIfNeeded(selectedVariant, cid: cid, page: page)
-        scheduleAutomaticCDNRecommendationAfterFirstFrameIfNeeded(cid: cid, page: page)
+        scheduleAutomaticCDNRecommendationAfterFirstFrameIfNeeded(
+            variant: selectedVariant,
+            cid: cid,
+            page: page
+        )
         rankPlaybackCDNCandidatesAfterFirstFrameIfNeeded(selectedVariant, cid: cid)
         scheduleHLSRenditionPrebuildAfterFirstFrameIfNeeded(
             startupVariant: selectedVariant,
@@ -55,14 +57,6 @@ extension VideoDetailViewModel {
             cid: cid,
             page: page
         )
-        clearSupplementalPlayURLState()
-        if schedulesSupplementalLoad {
-            scheduleSupplementalTargetQualityLoadIfNeeded(
-                variants: variants,
-                cid: cid,
-                page: page
-            )
-        }
     }
 
     private func historyResumeWarmupTaskBeforePlayerCreation(
@@ -130,6 +124,15 @@ extension VideoDetailViewModel {
                 "q\(selectedVariant.quality)"
             ].joined(separator: " ")
         )
+        guard ResourceLoadingExperiment.isFeatureEnabled(.resumePacketWarmup) else { return }
+        ResourceLoadingDiagnostics.shared.record(
+            didWarm ? .resumeWarmupHit : .resumeWarmupTimeout,
+            durationMilliseconds: Int(elapsedMilliseconds.rounded()),
+            details: [
+                "budget": "\(Int((Self.historyResumeWarmupPlayerCreationWait * 1_000).rounded()))ms",
+                "quality": "q\(selectedVariant.quality)"
+            ]
+        )
     }
 
     private func waitForStartupPackageWarmupBeforePlayerCreationIfNeeded(
@@ -170,6 +173,7 @@ extension VideoDetailViewModel {
             metricsID: bvid,
             message: [
                 "startupWarmWait=\(result.rawValue)",
+                "mode=\(AVPlayerStartupPathOptimizationExperiment.stored() ? "packetGate" : "legacyWait")",
                 "\(Int(elapsedMilliseconds.rounded()))ms",
                 "budget=\(Int((timeout * 1000).rounded()))ms",
                 "codec=\(selectedVariant.codec?.replacingOccurrences(of: " ", with: "_") ?? "-")"
@@ -178,9 +182,14 @@ extension VideoDetailViewModel {
     }
 
     private func startupPackageWarmupPlayerCreationWaitForCurrentLoad() -> TimeInterval {
+        let normalBudget: TimeInterval
         if lastPlayURLSource?.localizedCaseInsensitiveContains("cache") == true {
-            return Self.cachedPlayURLStartupPackageWarmupPlayerCreationWait
+            normalBudget = Self.cachedPlayURLStartupPackageWarmupPlayerCreationWait
+        } else {
+            normalBudget = Self.coldStartPackageWarmupPlayerCreationWait
         }
-        return Self.coldStartPackageWarmupPlayerCreationWait
+        return AVPlayerStartupPathOptimizationExperiment.playerCreationWarmupWait(
+            normalBudget: normalBudget
+        )
     }
 }

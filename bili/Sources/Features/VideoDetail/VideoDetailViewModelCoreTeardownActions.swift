@@ -10,9 +10,6 @@ extension VideoDetailViewModel {
         state.detailLoadingTask?.cancel()
         state.detailLoadingTask = nil
         state.detailLoadingToken = nil
-        state.playURLSupplementTask?.cancel()
-        state.playURLSupplementTask = nil
-        state.playURLSupplementGeneration += 1
         state.playVariantSwitchTask?.cancel()
         state.playVariantSwitchTask = nil
         state.commentsLoadingTask?.cancel()

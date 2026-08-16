@@ -16,6 +16,9 @@ extension HomeViewModel {
         updateFeed(mergedFeed.videos)
         updateLastSeenMarkerIndex(mergedFeed.lastSeenMarkerIndex)
         exposureRecorder.recordIfNeeded(mergedFeed.videos, mode: mode)
+        Task {
+            await ResourceLoadingForegroundPriorityGate.shared.beginFirstScreenPriorityWindow(for: .home)
+        }
         mediaPreloadCoordinator.scheduleImagePrefetch(for: mergedFeed.videos)
         mediaPreloadCoordinator.schedulePlaybackPreload(for: newVideos, initialDelay: 0.75)
         scheduleRecommendMetadataHydration(
@@ -53,6 +56,9 @@ extension HomeViewModel {
         updateFeed(snapshot.videos)
         updateLastSeenMarkerIndex(snapshot.lastSeenMarkerIndex)
         state = .loaded
+        Task {
+            await ResourceLoadingForegroundPriorityGate.shared.beginFirstScreenPriorityWindow(for: .home)
+        }
         mediaPreloadCoordinator.scheduleImagePrefetch(for: Array(snapshot.videos.prefix(8)))
     }
 

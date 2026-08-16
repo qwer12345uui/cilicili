@@ -177,7 +177,6 @@ extension VideoDetailViewModel {
         let resumeTime = currentPlaybackResumeTime()
         let shouldResumePlayback = currentPlaybackIntent()
         let playbackRate = stablePlayerViewModel?.playbackRate ?? .x10
-        cancelFastStartUpgradeTask()
         cancelHLSRenditionPrebuildTask()
         cancelSeekWarmups()
         playbackContentMode = nextMode

@@ -21,6 +21,7 @@ enum VideoStartupPackageWarmupWaitResult: String, Sendable {
     case ready
     case timeout
     case missing
+    case deferred
 }
 
 actor VideoPreloadCenter {
@@ -754,6 +755,13 @@ actor VideoPreloadCenter {
             if let task = bvidPlayInfoTasks[key] {
                 if let maximumPendingWait {
                     guard maximumPendingWait > 0 else { return nil }
+                    if AVPlayerStartupPathOptimizationExperiment.stored() {
+                        guard await PendingTaskDeadline.finishes(
+                            task,
+                            within: maximumPendingWait
+                        ) else { return nil }
+                        return await task.value
+                    }
                     return await waitForCachedBVIDPlayInfo(
                         bvid: bvid,
                         preferredQuality: effectivePreferredQuality,
@@ -1010,6 +1018,19 @@ actor VideoPreloadCenter {
         }
         if let maximumPendingWait {
             guard maximumPendingWait > 0 else { return nil }
+            if AVPlayerStartupPathOptimizationExperiment.stored() {
+                guard await PendingTaskDeadline.finishes(
+                    task,
+                    within: maximumPendingWait
+                ) else { return nil }
+                _ = await task.value
+                return cachedPlayURL(
+                    for: bvid,
+                    cid: cid,
+                    page: page,
+                    preferredQuality: preferredQuality
+                )
+            }
             return await waitForCachedPlayURL(
                 bvid: bvid,
                 cid: cid,
@@ -1045,22 +1066,10 @@ actor VideoPreloadCenter {
         let task = tasks[pendingKey]
         else { return nil }
 
-        let timeoutTask = Task(priority: .utility) {
-            try? await Task.sleep(nanoseconds: maximumPendingWait)
-            return false
-        }
-        let didFinish = await withTaskGroup(of: Bool.self, returning: Bool.self) { group in
-            group.addTask {
-                await task.value != nil
-            }
-            group.addTask {
-                await timeoutTask.value
-            }
-            let result = await group.next() ?? false
-            group.cancelAll()
-            timeoutTask.cancel()
-            return result
-        }
+        let didFinish = await PendingTaskDeadline.finishes(
+            task,
+            within: maximumPendingWait
+        )
         guard didFinish else { return nil }
         return cachedPlayURL(for: bvid, cid: cid, page: page, preferredQuality: preferredQuality)
     }
@@ -1130,19 +1139,15 @@ actor VideoPreloadCenter {
         let warmupTask = Task(priority: .userInitiated) {
             await Self.warmPlayableMedia(source, bvid: bvid)
         }
-        let timeoutTask = Task(priority: .utility) {
-            try? await Task.sleep(nanoseconds: UInt64(timeout * 1_000_000_000))
+        let didFinish = await PendingTaskDeadline.finishes(
+            warmupTask,
+            within: UInt64(max(timeout, 0) * 1_000_000_000)
+        )
+        guard didFinish else {
+            warmupTask.cancel()
             return false
         }
-        let didWarm = await withTaskGroup(of: Bool.self, returning: Bool.self) { group in
-            group.addTask { await warmupTask.value }
-            group.addTask { await timeoutTask.value }
-            let result = await group.next() ?? false
-            group.cancelAll()
-            warmupTask.cancel()
-            timeoutTask.cancel()
-            return result
-        }
+        let didWarm = await warmupTask.value
         if didWarm {
             mediaWarmupCache["manual|\(bvid)|\(variant.quality)|\(source.identity)"] = Date()
             trimMediaWarmupCacheIfNeeded()
@@ -1172,42 +1177,20 @@ actor VideoPreloadCenter {
             return true
         }
         if let existingTask = mediaWarmupTasks[key] {
-            let timeoutTask = Task(priority: .utility) {
-                try? await Task.sleep(nanoseconds: UInt64(timeout * 1_000_000_000))
-                return false
-            }
-            let didWarm = await withTaskGroup(of: Bool.self, returning: Bool.self) { group in
-                group.addTask {
-                    _ = await existingTask.value
-                    return await self.mediaWarmupCache[key] != nil
-                }
-                group.addTask { await timeoutTask.value }
-                let result = await group.next() ?? false
-                group.cancelAll()
-                timeoutTask.cancel()
-                return result
-            }
-            return didWarm
+            guard await PendingTaskDeadline.finishes(
+                existingTask,
+                within: UInt64(max(timeout, 0) * 1_000_000_000)
+            ) else { return false }
+            return mediaWarmupCache[key] != nil
         }
 
         scheduleMediaWarmup(source, bvid: bvid, key: key, delay: delay)
         guard let scheduledTask = mediaWarmupTasks[key] else { return false }
-        let timeoutTask = Task(priority: .utility) {
-            try? await Task.sleep(nanoseconds: UInt64(timeout * 1_000_000_000))
-            return false
-        }
-        let didWarm = await withTaskGroup(of: Bool.self, returning: Bool.self) { group in
-            group.addTask {
-                _ = await scheduledTask.value
-                return await self.mediaWarmupCache[key] != nil
-            }
-            group.addTask { await timeoutTask.value }
-            let result = await group.next() ?? false
-            group.cancelAll()
-            timeoutTask.cancel()
-            return result
-        }
-        return didWarm
+        guard await PendingTaskDeadline.finishes(
+            scheduledTask,
+            within: UInt64(max(timeout, 0) * 1_000_000_000)
+        ) else { return false }
+        return mediaWarmupCache[key] != nil
     }
 
     func warmVariant(
@@ -1258,7 +1241,19 @@ actor VideoPreloadCenter {
         }
         let warmupKeys = Array(Set(candidateKeys + [warmupMatch.key]))
         let timeoutSeconds = max(timeout, 0)
-        guard timeoutSeconds > 0 else { return .timeout }
+        guard timeoutSeconds > 0 else {
+            return AVPlayerStartupPathOptimizationExperiment.stored() ? .deferred : .timeout
+        }
+
+        if AVPlayerStartupPathOptimizationExperiment.stored() {
+            let timeoutNanoseconds = UInt64((timeoutSeconds * 1_000_000_000).rounded())
+            guard await PendingTaskDeadline.finishes(
+                warmupMatch.task,
+                within: timeoutNanoseconds
+            ) else { return .timeout }
+            trimExpiredMediaWarmups()
+            return isAnyMediaWarmupCached(warmupKeys) ? .ready : .missing
+        }
 
         let deadline = CACurrentMediaTime() + timeoutSeconds
         while true {
@@ -1332,15 +1327,18 @@ actor VideoPreloadCenter {
                         waitsForDemuxWarmup: false
                     )
                 }
-                let rangesTask = Task(priority: .userInitiated) {
-                    await Self.warmPlayableMedia(
+                let packetsTask = Task(priority: .userInitiated) {
+                    await Self.warmStartupPackets(
                         source,
                         bvid: bvid,
                         cdnPreference: cdnPreference
                     )
                 }
                 let didPrebuild = await prebuildTask.value
-                if didPrebuild {
+                let packetWarmup = await packetsTask.value
+                let didWarmStartupPackets = packetWarmup.isReady
+                let didCompleteStartupPackage = didPrebuild && didWarmStartupPackets
+                if didCompleteStartupPackage {
                     self.markMediaWarmupReady(key)
                 }
                 await PlayerMetricsLog.record(
@@ -1348,13 +1346,12 @@ actor VideoPreloadCenter {
                     metricsID: bvid,
                     message: "startupPrebuild=\(didPrebuild ? "ready" : "skip") variant=q\(variant.quality)"
                 )
-                let didWarmRanges = await rangesTask.value
                 await PlayerMetricsLog.record(
                     .manifestStage,
                     metricsID: bvid,
-                    message: "startupRanges=\(didWarmRanges ? "ready" : "skip") variant=q\(variant.quality)"
+                    message: "startupRanges=\(didWarmStartupPackets ? "ready" : "skip") packets=\(packetWarmup.diagnosticState) variant=q\(variant.quality)"
                 )
-                self.finishMediaWarmup(key, didWarm: didPrebuild)
+                self.finishMediaWarmup(key, didWarm: didCompleteStartupPackage)
             }
         } else {
             didCreateWarmup = false
@@ -1414,19 +1411,15 @@ actor VideoPreloadCenter {
         let warmupTask = Task(priority: .userInitiated) {
             await Self.warmPlayableMedia(source, bvid: bvid, around: playbackTime)
         }
-        let timeoutTask = Task(priority: .utility) {
-            try? await Task.sleep(nanoseconds: UInt64(timeout * 1_000_000_000))
+        let didFinish = await PendingTaskDeadline.finishes(
+            warmupTask,
+            within: UInt64(max(timeout, 0) * 1_000_000_000)
+        )
+        guard didFinish else {
+            warmupTask.cancel()
             return false
         }
-        let didWarm = await withTaskGroup(of: Bool.self, returning: Bool.self) { group in
-            group.addTask { await warmupTask.value }
-            group.addTask { await timeoutTask.value }
-            let result = await group.next() ?? false
-            group.cancelAll()
-            warmupTask.cancel()
-            timeoutTask.cancel()
-            return result
-        }
+        let didWarm = await warmupTask.value
         if didWarm {
             mediaWarmupCache[key] = Date()
             trimMediaWarmupCacheIfNeeded()
@@ -1465,19 +1458,15 @@ actor VideoPreloadCenter {
         let warmupTask = Task(priority: .userInitiated) {
             await Self.warmPlayableMediaBatch(sources, bvid: bvid, around: playbackTime)
         }
-        let timeoutTask = Task(priority: .utility) {
-            try? await Task.sleep(nanoseconds: UInt64(timeout * 1_000_000_000))
+        let didFinish = await PendingTaskDeadline.finishes(
+            warmupTask,
+            within: UInt64(max(timeout, 0) * 1_000_000_000)
+        )
+        guard didFinish else {
+            warmupTask.cancel()
             return false
         }
-        let didWarm = await withTaskGroup(of: Bool.self, returning: Bool.self) { group in
-            group.addTask { await warmupTask.value }
-            group.addTask { await timeoutTask.value }
-            let result = await group.next() ?? false
-            group.cancelAll()
-            warmupTask.cancel()
-            timeoutTask.cancel()
-            return result
-        }
+        let didWarm = await warmupTask.value
         if didWarm {
             mediaWarmupCache[key] = Date()
             trimMediaWarmupCacheIfNeeded()
@@ -1542,6 +1531,43 @@ actor VideoPreloadCenter {
             bvidPlayInfoTaskPreferredQualities[key] = nil
         }
         activeOrder.removeAll { $0.hasPrefix("\(bvid)|") }
+    }
+
+    func invalidatePerformanceTestCaches(for bvid: String) {
+        guard !bvid.isEmpty else { return }
+        invalidatePlayURLCache(for: bvid)
+        detailTasks[bvid]?.cancel()
+        detailTasks[bvid] = nil
+        detailTaskUserInitiatedFlags[bvid] = nil
+        relatedTasks[bvid]?.cancel()
+        relatedTasks[bvid] = nil
+        detailCache[bvid] = nil
+        relatedCache[bvid] = nil
+
+        let warmupKeys = mediaWarmupRecords
+            .filter { $0.value.bvid == bvid }
+            .map(\.key)
+        for key in warmupKeys {
+            mediaWarmupTasks[key]?.cancel()
+            mediaWarmupTasks[key] = nil
+            mediaWarmupRecords[key] = nil
+            mediaWarmupCache[key] = nil
+        }
+        if focusedPlaybackBVID == bvid {
+            focusedPlaybackBVID = nil
+            focusedPlaybackUntil = nil
+        }
+    }
+
+    func performanceTestMediaURLs(for bvid: String) -> Set<String> {
+        var urls = Set<String>()
+        for (key, entry) in playURLCache where key.hasPrefix("\(bvid)|") {
+            urls.formUnion(entry.data.playbackMediaURLStrings)
+        }
+        for (key, entry) in bvidPlayInfoCache where key.hasPrefix("\(bvid)|") {
+            urls.formUnion(entry.data.playbackMediaURLStrings)
+        }
+        return urls
     }
 
     func cancelMediaWarmups(clearCache: Bool = false) {
@@ -1960,7 +1986,7 @@ actor VideoPreloadCenter {
         let policy: String
         if preferredQuality == 126 {
             policy = "dolbyAutoStrictV4"
-        } else if preference == .preferAV1, PlaybackCodecPolicy.canDecodeAV1 {
+        } else if preference.codecOrder.first == .av1, PlaybackCodecPolicy.canDecodeAV1 {
             policy = "av1FirstHardwareV1"
         } else {
             policy = "hevcFirstV2"
@@ -2085,12 +2111,12 @@ actor VideoPreloadCenter {
                     waitsForDemuxWarmup: false
                 )
             }
-            let rangesTask: Task<Bool, Never>?
+            let packetsTask: Task<HLSStartupPacketWarmupResult, Never>?
             if routePlanOnly {
-                rangesTask = nil
+                packetsTask = nil
             } else {
-                rangesTask = Task(priority: priority) {
-                    await Self.warmPlayableMedia(
+                packetsTask = Task(priority: priority) {
+                    await Self.warmStartupPackets(
                         data,
                         bvid: bvid,
                         preferredQuality: preferredQuality,
@@ -2099,24 +2125,29 @@ actor VideoPreloadCenter {
                 }
             }
             let didPrebuild = await prebuildTask.value
-            if didPrebuild {
+            let packetWarmup: HLSStartupPacketWarmupResult?
+            if let packetsTask {
+                packetWarmup = await packetsTask.value
+            } else {
+                packetWarmup = nil
+            }
+            let didWarmStartupPackets = packetWarmup?.isReady == true
+            let didCompleteStartupPackage = didPrebuild && didWarmStartupPackets
+            if didCompleteStartupPackage {
                 self.markMediaWarmupReady(key)
             }
-            let didWarmRanges: Bool
-            if let rangesTask {
-                didWarmRanges = await rangesTask.value
-            } else {
-                didWarmRanges = false
-            }
+            let packetState = routePlanOnly
+                ? "deferred"
+                : (packetWarmup?.diagnosticState ?? "video=skip audio=skip")
             await PlayerMetricsLog.record(
                 .manifestStage,
                 metricsID: bvid,
-                message: "startupPackage routePlan=\(didPrebuild ? "ready" : "skip") ranges=\(routePlanOnly ? "deferred" : (didWarmRanges ? "ready" : "skip"))"
+                message: "startupPackage routePlan=\(didPrebuild ? "ready" : "skip") ranges=\(didWarmStartupPackets ? "ready" : (routePlanOnly ? "deferred" : "skip")) packets=\(packetState)"
             )
             PlayerMetricsLog.logger.info(
-                "playInfoStartupWarmupComplete bvid=\(bvid, privacy: .public) mode=\(routePlanOnly ? "routePlanOnly" : "full", privacy: .public) routePlan=\(didPrebuild ? "ready" : "skip", privacy: .public) ranges=\(routePlanOnly ? "deferred" : (didWarmRanges ? "ready" : "skip"), privacy: .public)"
+                "playInfoStartupWarmupComplete bvid=\(bvid, privacy: .public) mode=\(routePlanOnly ? "routePlanOnly" : "full", privacy: .public) routePlan=\(didPrebuild ? "ready" : "skip", privacy: .public) ranges=\(didWarmStartupPackets ? "ready" : (routePlanOnly ? "deferred" : "skip"), privacy: .public) packets=\(packetState, privacy: .public)"
             )
-            self.finishMediaWarmup(key, didWarm: didPrebuild)
+            self.finishMediaWarmup(key, didWarm: didCompleteStartupPackage)
         }
     }
 
@@ -2520,21 +2551,10 @@ actor VideoPreloadCenter {
         ),
               let source = PlayableMediaWarmupSource(variant: startupVariant)
         else { return false }
-        let targetVariant = preferredPlayableVariant(
-            in: variants,
-            preferredQuality: targetPreferredQuality
-        )
-        let alternateSources = buildsBridge
-            ? []
-            : startupRoutePlanAlternateSources(
-                startupVariant: startupVariant,
-                targetVariant: targetVariant,
-                variants: variants
-            )
         let durationHint = data.dash?.duration.map(TimeInterval.init)
         return await prebuildPlayableManifest(
             source,
-            alternateSources: alternateSources,
+            alternateSources: [],
             bvid: bvid,
             durationHint: durationHint,
             cdnPreference: cdnPreference,
@@ -2599,96 +2619,57 @@ actor VideoPreloadCenter {
         )
     }
 
-    private nonisolated static func startupRoutePlanAlternateSources(
-        startupVariant: PlayVariant,
-        targetVariant: PlayVariant?,
-        variants: [PlayVariant]
-    ) -> [PlayableMediaWarmupSource] {
-        let limit = startupRoutePlanAlternateLimit
-        guard limit > 0,
-              shouldPrebuildStartupRouteAlternates(from: startupVariant, to: targetVariant),
-              let targetVariant
-        else { return [] }
-        let candidates = sortedPlayableVariants(variants)
-            .filter { isStartupRouteAlternate($0, forStartupVariant: startupVariant) }
-        guard !candidates.isEmpty else { return [] }
-
-        var selected = [PlayVariant]()
-        var seen = Set<String>()
-        func append(_ variant: PlayVariant?) {
-            guard selected.count < limit,
-                  let variant,
-                  seen.insert(variant.id).inserted
-            else { return }
-            selected.append(variant)
+    private nonisolated static func warmStartupPackets(
+        _ source: PlayableMediaWarmupSource,
+        bvid: String,
+        cdnPreference: PlaybackCDNPreference
+    ) async -> HLSStartupPacketWarmupResult {
+        guard let videoTrack = source.videoTrack,
+              let audioTrack = source.audioTrack,
+              let audioURL = source.audioURL
+        else {
+            return HLSStartupPacketWarmupResult(videoReady: false, audioReady: false)
         }
 
-        if isStartupRouteAlternate(targetVariant, forStartupVariant: startupVariant) {
-            append(targetVariant)
-        }
-        for quality in startupRouteAlternateQualityOrder(targetQuality: targetVariant.quality) {
-            append(candidates.first { $0.quality == quality })
-        }
-        for candidate in candidates {
-            append(candidate)
-        }
-        return selected.compactMap(PlayableMediaWarmupSource.init(variant:))
+        let headers = Self.httpHeaders(referer: "https://www.bilibili.com/video/\(bvid)")
+        return await LocalHLSBridge.warmStartupPackets(
+            videoTrack: HLSBridgeTrack(
+                url: source.videoURL,
+                fallbackURLs: videoTrack.backupPlayURLs(cdnPreference: cdnPreference),
+                stream: videoTrack,
+                mediaType: .video,
+                dynamicRange: source.dynamicRange
+            ),
+            audioTrack: HLSBridgeTrack(
+                url: audioURL,
+                fallbackURLs: audioTrack.fallbackPlayURLs(
+                    cdnPreference: cdnPreference,
+                    selectedURL: audioURL
+                ),
+                stream: audioTrack,
+                mediaType: .audio
+            ),
+            headers: headers
+        )
     }
 
-    private nonisolated static var startupRoutePlanAlternateLimit: Int {
-        let environment = PlaybackEnvironment.current
-        guard !environment.shouldPreferConservativePlayback else { return 0 }
-        switch environment.networkClass {
-        case .wifi:
-            return 3
-        case .unknown:
-            return 2
-        case .cellular, .constrained:
-            return 0
+    private nonisolated static func warmStartupPackets(
+        _ data: PlayURLData,
+        bvid: String,
+        preferredQuality: Int?,
+        cdnPreference: PlaybackCDNPreference
+    ) async -> HLSStartupPacketWarmupResult {
+        let source: PlayableMediaWarmupSource? = await MainActor.run {
+            guard let variant = preferredPlayableVariant(
+                in: data.playVariants(cdnPreference: cdnPreference),
+                preferredQuality: preferredQuality
+            ) else { return nil }
+            return PlayableMediaWarmupSource(variant: variant)
         }
-    }
-
-    private nonisolated static func shouldPrebuildStartupRouteAlternates(
-        from startupVariant: PlayVariant,
-        to targetVariant: PlayVariant?
-    ) -> Bool {
-        guard let targetVariant,
-              startupVariant.isPlayable,
-              targetVariant.isPlayable,
-              startupVariant.id != targetVariant.id,
-              startupVariant.audioURL == targetVariant.audioURL,
-              targetVariant.audioURL != nil,
-              targetVariant.videoStream?.isHardwareDecodingCompatibleVideo == true,
-              targetVariant.dynamicRange == .sdr,
-              targetVariant.quality >= 74,
-              variant(targetVariant, isBetterThan: startupVariant)
-        else { return false }
-        return true
-    }
-
-    private nonisolated static func isStartupRouteAlternate(
-        _ variant: PlayVariant,
-        forStartupVariant startupVariant: PlayVariant
-    ) -> Bool {
-        variant.isPlayable
-            && variant.id != startupVariant.id
-            && variant.audioURL == startupVariant.audioURL
-            && variant.dynamicRange == startupVariant.dynamicRange
-            && variant.videoStream?.isHardwareDecodingCompatibleVideo == true
-            && variant.videoURL != nil
-            && variantsShareVideoCodecFamily(variant, startupVariant)
-            && variantsShareStartupFrameRateClass(variant, startupVariant)
-    }
-
-    private nonisolated static func startupRouteAlternateQualityOrder(targetQuality: Int) -> [Int] {
-        var qualities = [Int]()
-        func append(_ quality: Int) {
-            guard !qualities.contains(quality) else { return }
-            qualities.append(quality)
+        guard let source else {
+            return HLSStartupPacketWarmupResult(videoReady: false, audioReady: false)
         }
-        append(targetQuality)
-        [112, 80, 64, 32].forEach(append)
-        return qualities
+        return await warmStartupPackets(source, bvid: bvid, cdnPreference: cdnPreference)
     }
 
     private nonisolated static func warmPlayableMedia(
@@ -2782,25 +2763,19 @@ actor VideoPreloadCenter {
     ) -> PlayVariant? {
         let playableVariants = sortedPlayableVariants(variants)
 
-        if let preferredQuality {
-            if let exact = playableVariants.first(where: { $0.satisfiesPreferredQuality(preferredQuality) }) {
-                return exact
-            }
-            let fallbackQualities = [112, 80, 116, 120, 74, 64, 32, 16, 6]
-            for quality in fallbackQualities {
-                if let variant = playableVariants.first(where: { $0.quality == quality }) {
-                    return variant
-                }
-            }
+        guard let preferredQuality else { return playableVariants.first }
+        if let exact = playableVariants.first(where: { $0.satisfiesPreferredQuality(preferredQuality) }) {
+            return exact
         }
-
-        let preferredQualities = PlaybackEnvironment.current.preferredQualityLadder
-        for quality in preferredQualities {
+        guard let preferredIndex = LibraryStore.supportedVideoQualities.firstIndex(of: preferredQuality) else {
+            return nil
+        }
+        for quality in LibraryStore.supportedVideoQualities.dropFirst(preferredIndex + 1) {
             if let variant = playableVariants.first(where: { $0.quality == quality }) {
                 return variant
             }
         }
-        return playableVariants.first
+        return nil
     }
 
     private nonisolated static func sortedPlayableVariants(_ variants: [PlayVariant]) -> [PlayVariant] {
@@ -2820,36 +2795,6 @@ actor VideoPreloadCenter {
                 }
                 return (lhs.bandwidth ?? 0) > (rhs.bandwidth ?? 0)
             }
-    }
-
-    private nonisolated static func variant(_ candidate: PlayVariant, isBetterThan current: PlayVariant) -> Bool {
-        if candidate.isProgressiveFastStart != current.isProgressiveFastStart {
-            return !candidate.isProgressiveFastStart && current.isProgressiveFastStart
-        }
-        if candidate.quality != current.quality {
-            return candidate.quality > current.quality
-        }
-        let candidateFPS = playbackFrameRate(candidate)
-        let currentFPS = playbackFrameRate(current)
-        if candidateFPS != currentFPS {
-            return candidateFPS > currentFPS
-        }
-        return (candidate.bandwidth ?? 0) > (current.bandwidth ?? 0)
-    }
-
-    private nonisolated static func variantsShareStartupFrameRateClass(_ lhs: PlayVariant, _ rhs: PlayVariant) -> Bool {
-        let lhsIsHighFrameRate = playbackFrameRate(lhs) >= 50
-        let rhsIsHighFrameRate = playbackFrameRate(rhs) >= 50
-        return lhsIsHighFrameRate == rhsIsHighFrameRate
-    }
-
-    private nonisolated static func variantsShareVideoCodecFamily(_ lhs: PlayVariant, _ rhs: PlayVariant) -> Bool {
-        guard let lhsCodec = videoCodecFamily(lhs),
-              let rhsCodec = videoCodecFamily(rhs)
-        else {
-            return true
-        }
-        return lhsCodec == rhsCodec
     }
 
     private nonisolated static func videoCodecFamily(_ variant: PlayVariant) -> String? {
@@ -3092,6 +3037,46 @@ actor VideoRangeCache {
         storeCountSinceTrim = 0
     }
 
+    func invalidate(urls: Set<String>) {
+        guard !urls.isEmpty else { return }
+        trimTask?.cancel()
+        trimTask = nil
+        var removedBytes: Int64 = 0
+
+        for urlString in urls {
+            guard let url = URL(string: urlString) else { continue }
+            let urlHash = Self.stableCacheHash(url.absoluteString)
+            let pendingEntries = pendingRangesByURLHash.removeValue(forKey: urlHash) ?? []
+            for pendingEntry in pendingEntries {
+                let key = cacheKey(url: url, range: pendingEntry.range)
+                pendingFetches[key]?.cancel()
+                pendingFetches[key] = nil
+            }
+            let cachedEntries = cachedRangesByURLHash.removeValue(forKey: urlHash) ?? []
+            for cachedEntry in cachedEntries {
+                if let fileSize = try? cachedEntry.fileURL.resourceValues(forKeys: [.fileSizeKey]).fileSize {
+                    removedBytes += Int64(fileSize)
+                }
+                try? fileManager.removeItem(at: cachedEntry.fileURL)
+            }
+            if let files = try? fileManager.contentsOfDirectory(
+                at: rootURL,
+                includingPropertiesForKeys: [.fileSizeKey]
+            ) {
+                for fileURL in files where fileURL.lastPathComponent.hasPrefix("\(urlHash)-") {
+                    if let fileSize = try? fileURL.resourceValues(forKeys: [.fileSizeKey]).fileSize {
+                        removedBytes += Int64(fileSize)
+                    }
+                    try? fileManager.removeItem(at: fileURL)
+                }
+            }
+        }
+
+        if let estimatedCacheBytes {
+            self.estimatedCacheBytes = max(0, estimatedCacheBytes - removedBytes)
+        }
+    }
+
     func trim(to targetBytes: Int64) {
         trimCache(to: max(0, targetBytes))
     }
@@ -3287,15 +3272,19 @@ nonisolated final class VideoRangePendingCompletion: @unchecked Sendable {
     private var result: Result<Data, Error>?
 
     func value() async throws -> Data {
-        try await withCheckedThrowingContinuation { continuation in
-            lock.lock()
-            if let result {
+        try await withTaskCancellationHandler {
+            try await withCheckedThrowingContinuation { continuation in
+                lock.lock()
+                if let result {
+                    lock.unlock()
+                    continuation.resume(with: result)
+                    return
+                }
+                self.continuation = continuation
                 lock.unlock()
-                continuation.resume(with: result)
-                return
             }
-            self.continuation = continuation
-            lock.unlock()
+        } onCancel: {
+            complete(.failure(CancellationError()))
         }
     }
 
@@ -3401,7 +3390,7 @@ nonisolated enum RemoteImageCachePolicy: Hashable, Sendable {
     }
 }
 
-nonisolated enum RemoteImageLoadPriority: Sendable {
+nonisolated enum RemoteImageLoadPriority: Sendable, Equatable {
     case visible
     case prefetch
 
@@ -3411,6 +3400,18 @@ nonisolated enum RemoteImageLoadPriority: Sendable {
             return .userInitiated
         case .prefetch:
             return .utility
+        }
+    }
+
+    var networkTaskPriority: Float {
+        guard ResourceLoadingExperiment.isFeatureEnabled(.visibleImagePriority) else {
+            return URLSessionTask.defaultPriority
+        }
+        switch self {
+        case .visible:
+            return URLSessionTask.highPriority
+        case .prefetch:
+            return 0.25
         }
     }
 }
@@ -3940,7 +3941,13 @@ actor RemoteImageCache {
     static let shared = RemoteImageCache()
 
     private let cache = NSCache<NSURL, UIImage>()
-    private var inFlight: [ImageCacheKey: Task<UIImage?, Never>] = [:]
+    private struct InFlightImageLoad {
+        let task: Task<UIImage?, Never>
+        let priorityHandle: BiliNetworkTaskPriorityHandle?
+        var priority: RemoteImageLoadPriority
+    }
+
+    private var inFlight: [ImageCacheKey: InFlightImageLoad] = [:]
     private var inFlightOrder: [ImageCacheKey] = []
     private var diskRequests: [ImageCacheKey: DiskRequestEntry] = [:]
     private var storedKeys = Set<ImageCacheKey>()
@@ -3979,7 +3986,7 @@ actor RemoteImageCache {
         }
         storedKeys.removeAll()
         guard cancelInFlight else { return }
-        inFlight.values.forEach { $0.cancel() }
+        inFlight.values.forEach { $0.task.cancel() }
         inFlight.removeAll()
         inFlightOrder.removeAll()
         failedLoads.removeAll()
@@ -3988,7 +3995,7 @@ actor RemoteImageCache {
     func refreshNetworkSessionForPathChange() {
         applyAdaptiveBudgetIfNeeded()
         RemoteImageCDNHealthMemory.shared.reset()
-        inFlight.values.forEach { $0.cancel() }
+        inFlight.values.forEach { $0.task.cancel() }
         inFlight.removeAll()
         inFlightOrder.removeAll()
         failedLoads.removeAll()
@@ -4237,17 +4244,25 @@ actor RemoteImageCache {
             return nil
         }
 
-        if cachePolicy == .standard, let task = inFlight[key] {
+        if cachePolicy == .standard, var load = inFlight[key] {
             if RemoteImageDiagnosticsSettings.isRecordingEnabled {
                 inFlightReuseCount += 1
             }
+            if ResourceLoadingExperiment.isFeatureEnabled(.visibleImagePriority),
+               priority == .visible,
+               load.priority == .prefetch {
+                load.priority = .visible
+                load.priorityHandle?.promote(to: priority.networkTaskPriority)
+                inFlight[key] = load
+                ResourceLoadingDiagnostics.shared.record(.visibleImagePromoted)
+            }
             touchDiskRequest(key)
-            let image = await task.value
+            let image = await load.task.value
             finish(key: key, image: image)
             return image
         }
 
-        let task = makeLoadTask(
+        let load = makeLoadTask(
             url: url,
             originalURL: originalURL,
             scale: scale,
@@ -4257,8 +4272,8 @@ actor RemoteImageCache {
             decodePolicy: decodePolicy
         )
         registerInFlightTask(key)
-        inFlight[key] = task
-        let image = await task.value
+        inFlight[key] = load
+        let image = await load.task.value
         finish(key: key, image: image)
         return image
     }
@@ -4308,7 +4323,7 @@ actor RemoteImageCache {
         cachePolicy: RemoteImageCachePolicy,
         priority: RemoteImageLoadPriority,
         decodePolicy: RemoteImageDecodePolicy
-    ) -> Task<UIImage?, Never> {
+    ) -> InFlightImageLoad {
         let session = session
         let effectiveTargetPixelSize = effectiveTargetPixelSize(
             targetPixelSize,
@@ -4338,11 +4353,17 @@ actor RemoteImageCache {
             originalURL: originalURL,
             experimentEnabled: usesCDNFailover
         )
-        return Task(priority: priority.taskPriority) { () -> UIImage? in
+        let networkPriority = priority.networkTaskPriority
+        let priorityHandle = ResourceLoadingExperiment.isFeatureEnabled(.visibleImagePriority)
+            ? BiliNetworkTaskPriorityHandle(priority: networkPriority)
+            : nil
+        let task = Task(priority: priority.taskPriority) { () -> UIImage? in
             do {
                 let (data, response) = try await BiliNetworkRetry.data(
                     session: session,
                     request: request,
+                    priority: networkPriority,
+                    priorityHandle: priorityHandle,
                     policy: retryPolicy
                 )
                 if let response = response as? HTTPURLResponse,
@@ -4375,6 +4396,11 @@ actor RemoteImageCache {
                 return nil
             }
         }
+        return InFlightImageLoad(
+            task: task,
+            priorityHandle: priorityHandle,
+            priority: priority
+        )
     }
 
     private static func imageRequest(url: URL, cachePolicy: RemoteImageCachePolicy) -> URLRequest {
@@ -4523,7 +4549,7 @@ actor RemoteImageCache {
         while inFlightOrder.count > maximumInFlightLoads {
             let evicted = inFlightOrder.removeFirst()
             guard evicted != key else { continue }
-            inFlight[evicted]?.cancel()
+            inFlight[evicted]?.task.cancel()
             inFlight[evicted] = nil
         }
     }

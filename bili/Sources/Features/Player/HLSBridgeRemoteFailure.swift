@@ -62,7 +62,12 @@ struct HLSBridgeFailureReason: Sendable, Equatable {
     }
 
     var shouldRecordSourceFailure: Bool {
-        category != .cancelled
+        switch layer {
+        case .remoteRange, .proxy, .stream:
+            return category != .cancelled
+        case .avPlayerItem, .local:
+            return false
+        }
     }
 
     var sourceAvoidanceReason: String {

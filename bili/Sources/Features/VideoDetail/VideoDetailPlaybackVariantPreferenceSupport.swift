@@ -1,43 +1,36 @@
 import Foundation
 
 extension VideoDetailViewModel {
+    var requestedPlaybackQuality: Int? {
+        didSelectPlayVariantManually
+            ? manuallySelectedPlayVariantQuality
+            : targetPlaybackPreferredQuality
+    }
+
+    func hasRequestedPlayableVariant(in variants: [PlayVariant]) -> Bool {
+        guard let requestedPlaybackQuality else { return true }
+        return variants.contains { $0.satisfiesPreferredQuality(requestedPlaybackQuality) }
+    }
+
     func preferredDefaultVariant(in variants: [PlayVariant]) -> PlayVariant? {
         preferredDefaultVariant(in: variants, preferredQuality: nil)
     }
 
     func preferredDefaultVariant(in variants: [PlayVariant], preferredQuality: Int?) -> PlayVariant? {
         let playableVariants = sortedPlayVariants(variants).filter(\.isPlayable)
-        let playbackEnvironment = PlaybackEnvironment.current
-
-        if let preferredVariant = storedPreferredVariant(in: playableVariants, preferredQuality: preferredQuality) {
-            return preferredVariant
-        }
-        if preferredQuality != nil {
-            return nil
-        }
-
-        if let defaultVariant = playableVariants.first(where: { $0.quality == LibraryStore.defaultPreferredVideoQuality }) {
-            return defaultVariant
-        }
-
-        let preferredQualities = playbackEnvironment.preferredQualityLadder
-        for quality in preferredQualities {
-            if let variant = playableVariants.first(where: { $0.quality == quality }) {
-                return variant
-            }
-        }
-
-        return playableVariants.first ?? variants.first
+        let requestedQuality = preferredQuality ?? requestedPlaybackQuality
+        guard let requestedQuality else { return playableVariants.first ?? variants.first }
+        return Self.preferredPlayableVariant(
+            in: playableVariants,
+            preferredQuality: requestedQuality
+        )
     }
 
-    private func storedPreferredVariant(in playableVariants: [PlayVariant], preferredQuality: Int?) -> PlayVariant? {
-        guard let preferredQuality = preferredQuality
-                ?? (didSelectPlayVariantManually
-                    ? manuallySelectedPlayVariantQuality
-                    : targetPlaybackPreferredQuality)
-        else { return nil }
-        let sortedVariants = sortedPlayVariants(playableVariants)
-        if let exactVariant = sortedVariants.first(where: { $0.satisfiesPreferredQuality(preferredQuality) }) {
+    nonisolated static func preferredPlayableVariant(
+        in sortedPlayableVariants: [PlayVariant],
+        preferredQuality: Int
+    ) -> PlayVariant? {
+        if let exactVariant = sortedPlayableVariants.first(where: { $0.satisfiesPreferredQuality(preferredQuality) }) {
             return exactVariant
         }
 
@@ -46,7 +39,7 @@ extension VideoDetailViewModel {
         }
         let fallbackQualities = LibraryStore.supportedVideoQualities.dropFirst(preferredIndex + 1)
         for quality in fallbackQualities {
-            if let variant = sortedVariants.first(where: { $0.quality == quality }) {
+            if let variant = sortedPlayableVariants.first(where: { $0.quality == quality }) {
                 return variant
             }
         }

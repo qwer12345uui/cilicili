@@ -9,7 +9,6 @@ extension VideoDetailViewModel {
         cacheKind: String,
         fallbackSource: String,
         loadedSource: String,
-        targetMissSource: String,
         loadedSignpost: String,
         deferredFallback: inout VideoDetailPlayURLFallback?
     ) async -> VideoDetailPlayURLCacheResolution? {
@@ -28,8 +27,7 @@ extension VideoDetailViewModel {
             return nil
         }
 
-        if shouldRefetchForPreferredQuality(data),
-           libraryStore.effectivePreferredVideoQuality != nil {
+        if !hasRequestedPlayableVariant(in: playVariants(from: data)) {
             rememberDeferredPlayableFallback(
                 data,
                 source: fallbackSource,
@@ -40,12 +38,11 @@ extension VideoDetailViewModel {
             return nil
         }
 
-        let source = shouldRefetchForPreferredQuality(data) ? targetMissSource : loadedSource
         await applyCachedPlayURLData(
             data,
             cid: cid,
             page: page,
-            source: source
+            source: loadedSource
         )
         return .loaded(signpostMessage: loadedSignpost)
     }

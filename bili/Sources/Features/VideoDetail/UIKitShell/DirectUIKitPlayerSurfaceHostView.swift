@@ -38,6 +38,7 @@ final class DirectUIKitPlayerSurfaceHostView: UIView, VideoDetailPlayerSurfaceHo
         super.init(frame: .zero)
 
         backgroundColor = .black
+        isUserInteractionEnabled = false
         surfaceView.backgroundColor = .black
         surfaceView.disablesImplicitLayoutAnimations = true
         surfaceView.configureSurfaceHandoff(
@@ -108,6 +109,7 @@ final class DirectUIKitPlayerSurfaceHostView: UIView, VideoDetailPlayerSurfaceHo
     private func bindSurface(to playerViewModel: PlayerStateViewModel, startsPlayback: Bool) {
         surfaceView.configureBoundsRefresh(for: playerViewModel)
         surfaceView.setPictureInPictureEnabled(isPictureInPictureEnabled)
+        surfaceView.setShowsSystemPlaybackControls(false)
         surfaceView.setPlayerViewModel(playerViewModel, prefersNativePlaybackControls: false)
         playerViewModel.setPictureInPictureEnabled(isPictureInPictureEnabled)
         playerViewModel.attachSurface(
@@ -122,4 +124,5 @@ final class DirectUIKitPlayerSurfaceHostView: UIView, VideoDetailPlayerSurfaceHo
             playerViewModel.play()
         }
     }
+
 }

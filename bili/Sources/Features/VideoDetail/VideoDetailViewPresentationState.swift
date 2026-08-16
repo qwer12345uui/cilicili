@@ -2,8 +2,7 @@ import Foundation
 
 struct VideoDetailViewPresentationState {
     var selectedContentTab: VideoDetailContentTab = .detail
-    var replySheetComment: Comment?
-    var replySheetSecondaryID: Int?
+    var sheetRoute: VideoDetailSheetRoute?
     var isShowingDanmakuSettings = false
     var isShowingFavoriteFolders = false
     var isShowingCoinPicker = false

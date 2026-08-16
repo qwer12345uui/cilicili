@@ -100,6 +100,7 @@ final class VideoDetailShellSurfaceHost: UIView {
         backgroundColor = .black
         overlayHostingController.view.backgroundColor = .clear
         overlayHostingController.view.isOpaque = false
+        overlayHostingController.view.isUserInteractionEnabled = true
         if #available(iOS 16.4, *) {
             overlayHostingController.safeAreaRegions = []
         }
@@ -131,6 +132,7 @@ final class VideoDetailShellSurfaceHost: UIView {
                 }
             }
             .store(in: &cancellables)
+
     }
 
     @available(*, unavailable)
@@ -173,6 +175,7 @@ final class VideoDetailShellSurfaceHost: UIView {
         UIView.performWithoutAnimation {
             overlayHostingController.view.isHidden = false
             overlayHostingController.view.isUserInteractionEnabled = !active
+            surfaceHostView.hostedView.isUserInteractionEnabled = false
         }
     }
 
@@ -277,6 +280,7 @@ extension VideoDetailShellSurfaceHost: PlayerSurfaceHosting {
 
 private struct VideoDetailShellOverlaySnapshot: Equatable {
     var historyVideo: VideoItem
+    var recordsPlaybackHistory = true
     var historyCID: Int?
     var historyDuration: TimeInterval?
     var isDanmakuEnabled = true
@@ -286,6 +290,7 @@ private struct VideoDetailShellOverlaySnapshot: Equatable {
 
     init(
         detail: VideoItem,
+        recordsPlaybackHistory: Bool,
         selectedCID: Int?,
         isDanmakuEnabled: Bool,
         isSwitchingPlayQuality: Bool,
@@ -293,7 +298,8 @@ private struct VideoDetailShellOverlaySnapshot: Equatable {
         isSwitchingVideoListenMode: Bool
     ) {
         self.historyVideo = detail
-        self.historyCID = selectedCID ?? detail.cid
+        self.recordsPlaybackHistory = recordsPlaybackHistory
+        self.historyCID = recordsPlaybackHistory ? (selectedCID ?? detail.cid) : nil
         self.historyDuration = detail.duration.map(TimeInterval.init)
         self.isDanmakuEnabled = isDanmakuEnabled
         self.isSwitchingPlayQuality = isSwitchingPlayQuality
@@ -317,6 +323,7 @@ private final class VideoDetailShellOverlayState: ObservableObject {
         self.experimentState = experimentState
         self.snapshot = VideoDetailShellOverlaySnapshot(
             detail: detailViewModel.detail,
+            recordsPlaybackHistory: detailViewModel.playbackOptions.recordsPlaybackHistory,
             selectedCID: detailViewModel.selectedCID,
             isDanmakuEnabled: detailViewModel.isDanmakuEnabled,
             isSwitchingPlayQuality: detailViewModel.isSwitchingPlayQuality,
@@ -339,6 +346,7 @@ private final class VideoDetailShellOverlayState: ObservableObject {
             let (playbackContentMode, isSwitchingVideoListenMode) = listenMode
             return VideoDetailShellOverlaySnapshot(
                 detail: detail,
+                recordsPlaybackHistory: detailViewModel.playbackOptions.recordsPlaybackHistory,
                 selectedCID: selectedCID,
                 isDanmakuEnabled: isDanmakuEnabled,
                 isSwitchingPlayQuality: isSwitchingPlayQuality,
@@ -590,7 +598,6 @@ private struct SurfaceOnlyPlayerOverlayRoot: View {
                 renderState: renderState,
                 contentInsets: videoInsets
             )
-
             ZStack {
                 if isAudioOnlyPlayback {
                     VideoListenArtworkLayer(
@@ -632,7 +639,8 @@ private struct SurfaceOnlyPlayerOverlayRoot: View {
                                 BiliPlayerNativeControlsHost(
                                     context: renderContext,
                                     renderState: renderState,
-                                    actions: nativeActions
+                                    actions: nativeActions,
+                                    progressStyle: .telegram
                                 )
                             )
                         )
@@ -779,10 +787,7 @@ private struct SurfaceOnlyPlayerOverlayRoot: View {
     }
 
     private var backButton: some View {
-        VideoDetailPlayerSurfaceBackButtonHost(
-            action: handleBackButton,
-            usesGlass: !showsPausedThemeMask
-        )
+        VideoDetailPlayerSurfaceBackButtonHost(action: handleBackButton)
             .environment(\.playerNativeControlMetrics, controlMetrics)
     }
 
@@ -890,7 +895,7 @@ private struct SurfaceOnlyPlayerOverlayRoot: View {
             seekPreviewModel: seekPreviewModel,
             playbackProgressCoordinator: playbackProgressCoordinator,
             progressReporter: progressReporter,
-            historyVideo: overlaySnapshot.historyVideo,
+            historyVideo: overlaySnapshot.recordsPlaybackHistory ? overlaySnapshot.historyVideo : nil,
             historyCID: overlaySnapshot.historyCID,
             historyDuration: overlaySnapshot.historyDuration,
             configuration: configuration,
@@ -904,7 +909,6 @@ private struct SurfaceOnlyPlayerOverlayRoot: View {
 
     private var moreControlsButton: some View {
         SurfaceOnlyUIKitMoreControlsButton(
-            usesGlass: !showsPausedThemeMask,
             metrics: controlMetrics,
             onPressBegan: {
                 isMoreControlsButtonPressed = true
@@ -943,14 +947,6 @@ private struct SurfaceOnlyPlayerOverlayRoot: View {
 
     private var moreControlsButtonWidth: CGFloat {
         controlMetrics.controlHeight + 10
-    }
-
-    private var showsPausedThemeMask: Bool {
-        surfaceState.hasPresentedPlayback
-            && !surfaceState.isPlaying
-            && !surfaceState.isUserSeeking
-            && !surfaceState.isBuffering
-            && surfaceState.errorMessage == nil
     }
 
     private func persistentMoreControlsButton(contentInsets: EdgeInsets) -> some View {
@@ -1069,7 +1065,7 @@ private struct SurfaceOnlyPlayerOverlayRoot: View {
         renderState: BiliPlayerViewRenderState,
         contentInsets: EdgeInsets
     ) -> BiliPlayerSurfaceChromeState {
-        BiliPlayerSurfaceChromeState(
+        return BiliPlayerSurfaceChromeState(
             presentation: context.configuration.presentation,
             surfaceOverlay: context.configuration.surfaceOverlay,
             rotationSnapshot: nil,
@@ -1118,6 +1114,7 @@ private struct SurfaceOnlyPlayerOverlayRoot: View {
 
     private func updateSeekTransitionSnapshot(isUserSeeking: Bool) {
         if isUserSeeking {
+            guard viewModel.shouldHoldSeekSnapshotAtInteractionStart else { return }
             holdCurrentFrameForSeek()
         } else {
             seekTransitionSnapshotModel.releaseForSeekTransition(
@@ -1549,7 +1546,7 @@ private struct SurfaceOnlyMoreControlsNavigationContent: View {
                     get: { libraryStore.playerPerformanceOverlayEnabled },
                     set: { libraryStore.setPlayerPerformanceOverlayEnabled($0) }
                 )) {
-                    Label("播放性能浮窗", systemImage: "waveform.path.ecg.rectangle")
+                    Label("播放性能诊断", systemImage: "waveform.path.ecg.rectangle")
                 }
 
                 Toggle(isOn: Binding(
@@ -1592,8 +1589,7 @@ private struct SurfaceOnlyMoreControlsNavigationContent: View {
             .navigationTitle("播放设置")
             .navigationBarTitleDisplayMode(.inline)
         }
-        .toolbarBackground(.automatic, for: .navigationBar)
-        .background(Color.clear)
+        .toolbarBackground(.hidden, for: .navigationBar)
     }
 
     private var decodeTitle: String {
@@ -2020,7 +2016,7 @@ private struct SurfaceOnlyLandscapeMoreContent: View {
                     }
 
                     SurfaceOnlyLandscapeToggleRow(
-                        title: "播放性能浮窗",
+                        title: "播放性能诊断",
                         systemImage: "waveform.path.ecg.rectangle",
                         accessory: performanceOverlayAccessory,
                         isOn: Binding(
@@ -2911,7 +2907,6 @@ private struct SurfaceOnlyDanmakuSettingsPage: View {
 }
 
 private struct SurfaceOnlyUIKitMoreControlsButton: UIViewRepresentable {
-    let usesGlass: Bool
     let metrics: PlayerNativeControlMetrics
     let onPressBegan: () -> Void
     let onPressEnded: () -> Void
@@ -2930,6 +2925,7 @@ private struct SurfaceOnlyUIKitMoreControlsButton: UIViewRepresentable {
             configuration: configuration,
             primaryAction: context.coordinator.primaryAction
         )
+        configure(button)
         button.addAction(context.coordinator.pressBeganAction, for: .touchDown)
         button.addAction(
             context.coordinator.pressEndedAction,
@@ -2943,24 +2939,47 @@ private struct SurfaceOnlyUIKitMoreControlsButton: UIViewRepresentable {
         context.coordinator.onPressBegan = onPressBegan
         context.coordinator.onPressEnded = onPressEnded
         context.coordinator.action = action
-        button.configuration = configuration
+        configure(button)
     }
 
     private var configuration: UIButton.Configuration {
-        var configuration = usesGlass
-            ? UIButton.Configuration.clearGlass()
-            : UIButton.Configuration.plain()
-        configuration.image = UIImage(
+        var configuration = UIButton.Configuration.clearGlass()
+        configuration.baseForegroundColor = .white
+        configuration.contentInsets = .zero
+        return configuration
+    }
+
+    private func configure(_ button: UIButton) {
+        button.configuration = configuration
+        button.tintColor = .white
+
+        let iconView: UIImageView
+        if let existingIconView = button.viewWithTag(Self.iconViewTag) as? UIImageView {
+            iconView = existingIconView
+        } else {
+            iconView = UIImageView()
+            iconView.tag = Self.iconViewTag
+            iconView.contentMode = .center
+            iconView.tintColor = .white
+            iconView.isUserInteractionEnabled = false
+            iconView.translatesAutoresizingMaskIntoConstraints = false
+            button.addSubview(iconView)
+            NSLayoutConstraint.activate([
+                iconView.centerXAnchor.constraint(equalTo: button.centerXAnchor),
+                iconView.centerYAnchor.constraint(equalTo: button.centerYAnchor)
+            ])
+        }
+
+        iconView.image = UIImage(
             systemName: "ellipsis",
             withConfiguration: UIImage.SymbolConfiguration(
                 pointSize: metrics.iconSize,
                 weight: .semibold
             )
         )
-        configuration.baseForegroundColor = .white
-        configuration.contentInsets = .zero
-        return configuration
     }
+
+    private static let iconViewTag = 1_634_081
 
     final class Coordinator {
         var onPressBegan: () -> Void

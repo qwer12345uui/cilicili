@@ -16,7 +16,6 @@ struct VideoDetailPlaybackRenderSnapshot: Equatable {
     var qualityAccessoryButtonTitle = "清晰度"
     var qualityButtonSystemImage = "slider.horizontal.3"
     var qualityMenuItems: [VideoDetailPlaybackQualityMenuItem] = []
-    var isSupplementingPlayQualities = false
     var isSwitchingPlayQuality = false
 
     init(
@@ -35,7 +34,6 @@ struct VideoDetailPlaybackRenderSnapshot: Equatable {
         qualityAccessoryButtonTitle: String = "清晰度",
         qualityButtonSystemImage: String = "slider.horizontal.3",
         qualityMenuItems: [VideoDetailPlaybackQualityMenuItem] = [],
-        isSupplementingPlayQualities: Bool = false,
         isSwitchingPlayQuality: Bool = false
     ) {
         self.historyVideo = historyVideo
@@ -53,7 +51,6 @@ struct VideoDetailPlaybackRenderSnapshot: Equatable {
         self.qualityAccessoryButtonTitle = qualityAccessoryButtonTitle
         self.qualityButtonSystemImage = qualityButtonSystemImage
         self.qualityMenuItems = qualityMenuItems
-        self.isSupplementingPlayQualities = isSupplementingPlayQualities
         self.isSwitchingPlayQuality = isSwitchingPlayQuality
     }
 

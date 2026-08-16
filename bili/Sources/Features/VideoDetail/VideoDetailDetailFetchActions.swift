@@ -19,6 +19,9 @@ extension VideoDetailViewModel {
     func fetchFullDetail(identity: VideoDetailLoadIdentity, priority: TaskPriority) async throws -> VideoItem {
         switch identity {
         case .bvid(let bvid):
+            if !playbackOptions.usesStartupCaches {
+                return try await api.fetchVideoDetail(bvid: bvid, bypassesCache: true)
+            }
             return try await VideoPreloadCenter.shared.detail(
                 for: bvid,
                 api: api,

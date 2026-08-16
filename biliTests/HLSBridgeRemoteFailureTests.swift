@@ -2,6 +2,7 @@ import AVFoundation
 import XCTest
 import Network
 import CoreGraphics
+import QuartzCore
 @testable import bili
 
 final class HLSBridgeRemoteFailureTests: XCTestCase {
@@ -84,9 +85,11 @@ final class HLSBridgeRemoteFailureTests: XCTestCase {
             code: -1,
             userInfo: [NSLocalizedDescriptionKey: "boom"]
         ))
+        XCTAssertEqual(reason.layer, .local)
         XCTAssertEqual(reason.category, .unknown)
         XCTAssertTrue(reason.isRecoverableByRebuild)
         XCTAssertTrue(reason.allowsSameSourceRecovery)
+        XCTAssertFalse(reason.shouldRecordSourceFailure)
         XCTAssertEqual(reason.proxyHTTPStatus.statusCode, 502)
     }
 
@@ -99,6 +102,7 @@ final class HLSBridgeRemoteFailureTests: XCTestCase {
         XCTAssertEqual(decoderNotFound.category, .decoderFailed)
         XCTAssertTrue(decoderNotFound.isRecoverableByRebuild)
         XCTAssertFalse(decoderNotFound.allowsSameSourceRecovery)
+        XCTAssertFalse(decoderNotFound.shouldRecordSourceFailure)
 
         let unsupportedFormat = HLSBridgeRemoteFailure.reason(for: NSError(
             domain: AVFoundationErrorDomain,
@@ -895,6 +899,20 @@ final class HLSProxyHTTPResponseBuilderTests: XCTestCase {
 
 #if DEBUG
 final class LocalHLSProxyServerIntegrationTests: XCTestCase {
+    func testParallelBridgesUseDistinctSystemAssignedPorts() async throws {
+        let videoURL = try XCTUnwrap(URL(string: "https://upos.example.test/video.m4s"))
+        let audioURL = try XCTUnwrap(URL(string: "https://upos.example.test/audio.m4s"))
+        let plan = makeRoutePlan(videoURL: videoURL, audioURL: audioURL)
+
+        async let first = LocalHLSBridge.makeForTesting(from: plan)
+        async let second = LocalHLSBridge.makeForTesting(from: plan)
+        let bridges = try await [first, second]
+        defer { bridges.forEach { $0.stop() } }
+
+        let ports = try bridges.map { try XCTUnwrap($0.masterPlaylistURL.port) }
+        XCTAssertEqual(Set(ports).count, bridges.count)
+    }
+
     func testServesLocalPlaylistsAndTranslatesSegmentRangeRequests() async throws {
         let videoData = testData(byteCount: 512)
         let audioData = testData(byteCount: 128)
@@ -987,6 +1005,69 @@ final class LocalHLSProxyServerIntegrationTests: XCTestCase {
         XCTAssertTrue(requests.contains { $0.path == "/video-backup.m4s" && $0.rangeHeader == "bytes=40-49" })
     }
 
+    func testStartupHedgeUsesBackupWhenPrimaryFirstChunkIsSlow() async throws {
+        let byteCount = 640 * 1024
+        let primaryData = testData(byteCount: byteCount, seed: 13)
+        let fallbackData = testData(byteCount: byteCount, seed: 17)
+        let audioData = testData(byteCount: 64, seed: 19)
+        let upstream = try TestHTTPRangeServer(routes: [
+            "/video-primary.m4s": .data(
+                primaryData,
+                contentType: "video/mp4",
+                responseDelayNanoseconds: 900_000_000
+            ),
+            "/video-backup.m4s": .data(fallbackData, contentType: "video/mp4"),
+            "/audio.m4s": .data(audioData, contentType: "audio/mp4")
+        ])
+        try await upstream.start()
+        defer { upstream.stop() }
+
+        let cacheNonce = UUID().uuidString
+        var primaryComponents = try XCTUnwrap(URLComponents(
+            url: upstream.url(path: "/video-primary.m4s"),
+            resolvingAgainstBaseURL: false
+        ))
+        primaryComponents.queryItems = [URLQueryItem(name: "test", value: cacheNonce)]
+        let primaryURL = try XCTUnwrap(primaryComponents.url)
+        var fallbackComponents = try XCTUnwrap(URLComponents(
+            url: upstream.url(path: "/video-backup.m4s"),
+            resolvingAgainstBaseURL: false
+        ))
+        fallbackComponents.queryItems = [URLQueryItem(name: "test", value: cacheNonce)]
+        let fallbackURL = try XCTUnwrap(fallbackComponents.url)
+
+        let bridge = try await LocalHLSBridge.makeForTesting(
+            from: makeRoutePlan(
+                videoURL: primaryURL,
+                videoFallbackURLs: [fallbackURL],
+                audioURL: upstream.url(path: "/audio.m4s"),
+                videoReferenceRange: HTTPByteRange(start: 0, endInclusive: Int64(byteCount - 1))
+            ),
+            headers: ["User-Agent": "LocalHLSProxyServerIntegrationTests/1.0"],
+            metricsID: "local-hls-proxy-hedge-test"
+        )
+        defer { bridge.stop() }
+
+        let segmentURL = bridge.masterPlaylistURL
+            .deletingLastPathComponent()
+            .appendingPathComponent("media/video/segment-0.m4s")
+        let start = CACurrentMediaTime()
+        let segment = try await fetch(segmentURL)
+        let elapsedMilliseconds = PlayerMetricsLog.elapsedMilliseconds(since: start)
+        let requests = await upstream.recordedRequests()
+
+        XCTAssertEqual(segment.response.statusCode, 200)
+        XCTAssertEqual(
+            segment.data,
+            fallbackData,
+            "elapsed=\(elapsedMilliseconds) requests=\(requests.map(\.path))"
+        )
+        XCTAssertLessThan(elapsedMilliseconds, 850, "requests=\(requests.map(\.path))")
+
+        XCTAssertTrue(requests.contains { $0.path == "/video-primary.m4s" }, "requests=\(requests.map(\.path))")
+        XCTAssertTrue(requests.contains { $0.path == "/video-backup.m4s" }, "requests=\(requests.map(\.path))")
+    }
+
     private func makeRoutePlan(
         videoURL: URL,
         videoFallbackURLs: [URL] = [],
@@ -1076,13 +1157,30 @@ private final class TestHTTPRangeServer: @unchecked Sendable {
         let statusCode: Int
         let reason: String
         let contentType: String
+        let responseDelayNanoseconds: UInt64
 
-        static func data(_ data: Data, contentType: String) -> Route {
-            Route(data: data, statusCode: 200, reason: "OK", contentType: contentType)
+        static func data(
+            _ data: Data,
+            contentType: String,
+            responseDelayNanoseconds: UInt64 = 0
+        ) -> Route {
+            Route(
+                data: data,
+                statusCode: 200,
+                reason: "OK",
+                contentType: contentType,
+                responseDelayNanoseconds: responseDelayNanoseconds
+            )
         }
 
         static func status(_ statusCode: Int, reason: String) -> Route {
-            Route(data: nil, statusCode: statusCode, reason: reason, contentType: "text/plain; charset=utf-8")
+            Route(
+                data: nil,
+                statusCode: statusCode,
+                reason: reason,
+                contentType: "text/plain; charset=utf-8",
+                responseDelayNanoseconds: 0
+            )
         }
     }
 
@@ -1227,11 +1325,19 @@ private final class TestHTTPRangeServer: @unchecked Sendable {
                 reason: "Partial Content",
                 body: body,
                 contentType: route.contentType,
+                responseDelayNanoseconds: route.responseDelayNanoseconds,
                 extraHeaders: ["Content-Range": "bytes \(range.start)-\(range.endInclusive)/\(data.count)"],
                 to: connection
             )
         } else {
-            send(statusCode: 200, reason: "OK", body: data, contentType: route.contentType, to: connection)
+            send(
+                statusCode: 200,
+                reason: "OK",
+                body: data,
+                contentType: route.contentType,
+                responseDelayNanoseconds: route.responseDelayNanoseconds,
+                to: connection
+            )
         }
     }
 
@@ -1240,6 +1346,7 @@ private final class TestHTTPRangeServer: @unchecked Sendable {
         reason: String,
         body: Data,
         contentType: String,
+        responseDelayNanoseconds: UInt64 = 0,
         extraHeaders: [String: String] = [:],
         to connection: NWConnection
     ) {
@@ -1254,9 +1361,19 @@ private final class TestHTTPRangeServer: @unchecked Sendable {
             .joined(separator: "\r\n") + "\r\n\r\n"
         var response = Data(headerText.utf8)
         response.append(body)
-        connection.send(content: response, completion: .contentProcessed { _ in
-            connection.cancel()
-        })
+        let sendResponse = {
+            connection.send(content: response, completion: .contentProcessed { _ in
+                connection.cancel()
+            })
+        }
+        if responseDelayNanoseconds > 0 {
+            queue.asyncAfter(
+                deadline: .now() + .nanoseconds(Int(responseDelayNanoseconds)),
+                execute: sendResponse
+            )
+        } else {
+            sendResponse()
+        }
     }
 
     private enum TestHTTPRangeServerError: Error {
@@ -1319,6 +1436,18 @@ final class HLSVideoRenditionPlannerTests: XCTestCase {
         )
 
         XCTAssertTrue(renditions.isEmpty)
+    }
+
+    func testDisabledCodecsStayOutOfPlayableVariants() throws {
+        let data = try playURLDataWithHEVCAndH264()
+        let preference = VideoCodecPreference(codecOrder: [.av1])
+
+        let variants = data.playVariants(
+            cdnPreference: .automatic,
+            codecPreference: preference
+        )
+
+        XCTAssertFalse(variants.contains(where: \.isPlayable))
     }
 
     func testCodecFallbackVariantKeepsQualityAndAudioButSwapsVideoCodec() throws {

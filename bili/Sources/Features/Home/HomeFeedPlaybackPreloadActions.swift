@@ -24,6 +24,12 @@ extension HomeFeedMediaPreloadCoordinator {
         playbackPreloadTask = Task(priority: .utility) { [api, cdnPreference] in
             let startupDelay = max(0.05, min(initialDelay, 0.24))
             try? await Task.sleep(nanoseconds: UInt64(startupDelay * 1_000_000_000))
+            let foregroundDelay = await ResourceLoadingForegroundPriorityGate.shared
+                .backgroundDelayNanoseconds(for: .home)
+            if foregroundDelay > 0 {
+                try? await Task.sleep(nanoseconds: foregroundDelay)
+            }
+            guard !Task.isCancelled else { return }
             for (index, video) in candidates.enumerated() {
                 guard !Task.isCancelled else { return }
                 let isPrimary = index == 0

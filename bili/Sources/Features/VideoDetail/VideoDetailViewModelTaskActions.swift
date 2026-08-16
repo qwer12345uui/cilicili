@@ -55,25 +55,6 @@ extension VideoDetailViewModel {
         danmakuStartupLoadToken = nil
     }
 
-    func cancelPlayURLSupplementTask(advancesGeneration: Bool = true) {
-        playURLSupplementTask?.cancel()
-        playURLSupplementTask = nil
-        if advancesGeneration {
-            advancePlayURLSupplementGeneration()
-        }
-    }
-
-    @discardableResult
-    func advancePlayURLSupplementGeneration() -> Int {
-        playURLSupplementGeneration += 1
-        return playURLSupplementGeneration
-    }
-
-    func clearPlayURLSupplementTaskIfCurrent(generation: Int) {
-        guard playURLSupplementGeneration == generation else { return }
-        playURLSupplementTask = nil
-    }
-
     @discardableResult
     func advanceStartupPlayURLGeneration() -> Int {
         startupPlayURLGeneration += 1

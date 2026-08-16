@@ -12,6 +12,7 @@ struct PlayerNativePlaybackControls: View {
     let isFullscreenActive: Bool
     let controlsAccessory: AnyView?
     let controlsCenterAccessory: AnyView?
+    let progressStyle: PlayerNativeProgressStyle
     let actions: PlayerNativePlaybackControlsActions
 
     var body: some View {
@@ -23,6 +24,7 @@ struct PlayerNativePlaybackControls: View {
                         clock: clock,
                         canSeek: canSeek,
                         sliderVisualScale: metrics.sliderVisualScale,
+                        style: progressStyle,
                         onScrubStart: actions.onScrubStart,
                         onScrubChanged: actions.onScrubChanged,
                         onScrubEnded: actions.onScrubEnded,

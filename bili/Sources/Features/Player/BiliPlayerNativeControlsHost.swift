@@ -4,6 +4,7 @@ struct BiliPlayerNativeControlsHost: View {
     let context: BiliPlayerViewRenderContext
     let renderState: BiliPlayerViewRenderState
     var actions: PlayerNativePlaybackControlsActions?
+    var progressStyle: PlayerNativeProgressStyle = .standard
 
     var body: some View {
         PlayerNativePlaybackControls(
@@ -19,6 +20,7 @@ struct BiliPlayerNativeControlsHost: View {
             isFullscreenActive: context.configuration.isFullscreenActive,
             controlsAccessory: context.configuration.controlsAccessory,
             controlsCenterAccessory: context.configuration.controlsCenterAccessory,
+            progressStyle: progressStyle,
             actions: actions ?? nativePlaybackControlsActions
         )
     }

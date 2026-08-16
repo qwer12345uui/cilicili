@@ -11,7 +11,8 @@ final class VideoDetailViewModelHolder: ObservableObject {
         api: BiliAPIClient,
         libraryStore: LibraryStore,
         sessionStore: SessionStore,
-        sponsorBlockService: SponsorBlockService
+        sponsorBlockService: SponsorBlockService,
+        playbackOptions: VideoDetailPlaybackOptions = VideoDetailPlaybackOptions()
     ) {
         guard viewModel == nil else { return }
         installViewModel(
@@ -20,7 +21,8 @@ final class VideoDetailViewModelHolder: ObservableObject {
                 api: api,
                 libraryStore: libraryStore,
                 sessionStore: sessionStore,
-                sponsorBlockService: sponsorBlockService
+                sponsorBlockService: sponsorBlockService,
+                playbackOptions: playbackOptions
             )
         )
     }
@@ -34,14 +36,16 @@ final class VideoDetailViewModelHolder: ObservableObject {
         api: BiliAPIClient,
         libraryStore: LibraryStore,
         sessionStore: SessionStore,
-        sponsorBlockService: SponsorBlockService
+        sponsorBlockService: SponsorBlockService,
+        playbackOptions: VideoDetailPlaybackOptions
     ) -> VideoDetailViewModel {
         VideoDetailViewModel(
             seedVideo: seedVideo,
             api: api,
             libraryStore: libraryStore,
             sessionStore: sessionStore,
-            sponsorBlockService: sponsorBlockService
+            sponsorBlockService: sponsorBlockService,
+            playbackOptions: playbackOptions
         )
     }
 

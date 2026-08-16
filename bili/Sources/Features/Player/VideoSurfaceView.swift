@@ -106,7 +106,9 @@ final class VideoSurfaceContainerView: UIView {
     var disablesImplicitLayoutAnimations = false
 
     private weak var playerViewModel: PlayerStateViewModel?
+    private let nativeSurfaceGestureController = NativePlayerSurfaceGestureController()
     private(set) var prefersNativePlaybackControls = true
+    private var showsSystemPlaybackControls = false
     private var isPictureInPictureEnabled = false
     private var isNativePlaybackControllerEnabled = false
     private var usesLiveSurfaceDuringLayoutTransition = false
@@ -167,6 +169,7 @@ final class VideoSurfaceContainerView: UIView {
         if !prefersNativePlaybackControls {
             setNativePlaybackControllerEnabled(false)
         }
+        configureNativeSurfaceGestures()
     }
 
     func setPictureInPictureEnabled(_ isEnabled: Bool) {
@@ -176,6 +179,17 @@ final class VideoSurfaceContainerView: UIView {
         }
         isPictureInPictureEnabled = isEnabled
         configureNativePlayerViewController()
+    }
+
+    func setShowsSystemPlaybackControls(_ showsPlaybackControls: Bool) {
+        guard showsSystemPlaybackControls != showsPlaybackControls else {
+            configureNativePlayerViewController()
+            configureNativeSurfaceGestures()
+            return
+        }
+        showsSystemPlaybackControls = showsPlaybackControls
+        configureNativePlayerViewController()
+        configureNativeSurfaceGestures()
     }
 
     func makePlaybackTransitionSnapshotView() -> UIView? {
@@ -364,6 +378,7 @@ final class VideoSurfaceContainerView: UIView {
         guard isNativePlaybackControllerEnabled != resolvedIsEnabled else {
             if resolvedIsEnabled {
                 installNativePlayerViewControllerIfPossible()
+                configureNativeSurfaceGestures()
             }
             return
         }
@@ -372,7 +387,9 @@ final class VideoSurfaceContainerView: UIView {
         if resolvedIsEnabled {
             configureNativePlayerViewController()
             installNativePlayerViewControllerIfPossible()
+            configureNativeSurfaceGestures()
         } else {
+            nativeSurfaceGestureController.detach()
             removeNativePlayerViewController()
         }
     }
@@ -494,15 +511,35 @@ final class VideoSurfaceContainerView: UIView {
     }
 
     private func configureNativePlayerViewController() {
-        nativePlayerViewController.showsPlaybackControls = false
+        nativePlayerViewController.showsPlaybackControls = showsSystemPlaybackControls
+        nativePlayerViewController.allowsVideoFrameAnalysis = !showsSystemPlaybackControls
+        nativePlayerViewController.speeds = showsSystemPlaybackControls
+            ? []
+            : AVPlaybackSpeed.systemDefaultSpeeds
         nativePlayerViewController.videoGravity = .resizeAspect
-        nativePlayerViewController.allowsPictureInPicturePlayback = isPictureInPictureEnabled
+        let isPictureInPictureAllowed = isPictureInPictureEnabled
             && AVPictureInPictureController.isPictureInPictureSupported()
-        nativePlayerViewController.canStartPictureInPictureAutomaticallyFromInline = false
+        nativePlayerViewController.allowsPictureInPicturePlayback = isPictureInPictureAllowed
+        nativePlayerViewController.canStartPictureInPictureAutomaticallyFromInline = isPictureInPictureAllowed
         nativePlayerViewController.requiresLinearPlayback = false
         nativePlayerViewController.updatesNowPlayingInfoCenter = false
         nativePlayerViewController.view.backgroundColor = .black
         nativePlayerViewController.view.isOpaque = true
+    }
+
+    private func configureNativeSurfaceGestures() {
+        guard isNativePlaybackControllerEnabled,
+              showsSystemPlaybackControls,
+              let playerViewModel,
+              !playerViewModel.isTerminated
+        else {
+            nativeSurfaceGestureController.detach()
+            return
+        }
+        nativeSurfaceGestureController.attach(
+            to: nativePlayerViewController,
+            viewModel: playerViewModel
+        )
     }
 
     private func installNativePlayerViewControllerIfPossible() {

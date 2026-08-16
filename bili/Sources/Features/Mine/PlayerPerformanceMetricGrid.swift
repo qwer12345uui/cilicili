@@ -12,7 +12,9 @@ struct PlayerPerformanceMetricGrid: View {
             alignment: .leading,
             spacing: 8
         ) {
-            PlayerPerformanceMillisecondsMetric(title: "总首帧", milliseconds: group.averageFirstFrameMilliseconds, icon: "bolt.fill")
+            PlayerPerformanceMillisecondsMetric(title: "平均首帧", milliseconds: group.averageFirstFrameMilliseconds, icon: "bolt.fill")
+            PlayerPerformanceMillisecondsMetric(title: "首帧 P50", milliseconds: group.p50FirstFrameMilliseconds, icon: "chart.bar")
+            PlayerPerformanceMillisecondsMetric(title: "首帧 P90", milliseconds: group.p90FirstFrameMilliseconds, icon: "chart.bar.fill")
             PlayerPerformanceMillisecondsMetric(title: "播放器首帧", milliseconds: group.averagePlayerFirstFrameMilliseconds, icon: "play.rectangle")
             PlayerPerformanceMillisecondsMetric(title: "播放地址", milliseconds: group.averagePlayURLMilliseconds, icon: "link")
             PlayerPerformanceMillisecondsMetric(title: "Prepare", milliseconds: group.averagePrepareMilliseconds, icon: "gearshape")

@@ -20,12 +20,7 @@ extension VideoDetailViewModel {
             }
             throw error
         }
-        return await supplementInitialTargetQualityIfNeeded(
-            startupData,
-            bvid: bvid,
-            cid: cid,
-            page: page
-        )
+        return startupData
     }
 
     func fetchStartupPlayURL(
@@ -53,22 +48,4 @@ extension VideoDetailViewModel {
         )
     }
 
-    private func supplementInitialTargetQualityIfNeeded(
-        _ data: PlayURLData,
-        bvid: String,
-        cid: Int,
-        page: Int?
-    ) async -> PlayURLData {
-        guard shouldRefetchForPreferredQuality(data),
-              let preferredQuality = targetPlaybackPreferredQuality
-        else { return data }
-
-        PlayerMetricsLog.record(
-            .qualitySupplement,
-            metricsID: detail.bvid,
-            title: detail.title,
-            message: "initialTargetDeferred preferred=\(preferredQuality)"
-        )
-        return data
-    }
 }

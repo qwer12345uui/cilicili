@@ -29,11 +29,19 @@ extension VideoDetailViewModel {
         PlaybackCDNProbeCoordinator.shared.refreshIfNeeded(libraryStore: libraryStore)
     }
 
-    func scheduleAutomaticCDNRecommendationAfterFirstFrameIfNeeded(cid: Int?, page: Int?) {
+    func scheduleAutomaticCDNRecommendationAfterFirstFrameIfNeeded(
+        variant: PlayVariant?,
+        cid: Int?,
+        page: Int?
+    ) {
         guard libraryStore.playbackCDNPreference == .automatic,
               let cid,
+              let variant,
               !isPlaybackInvalidatedForNavigation
         else { return }
+
+        let playbackURLs = automaticCDNProbeURLs(for: variant)
+        guard !playbackURLs.isEmpty else { return }
 
         let bvid = detail.bvid
         trackBackgroundTask(
@@ -53,8 +61,25 @@ extension VideoDetailViewModel {
                     "VideoDetailCDNRecommendation",
                     message: "postFirstFrame bvid=\(bvid) cid=\(cid)"
                 )
-                PlaybackCDNProbeCoordinator.shared.refreshIfNeeded(libraryStore: self.libraryStore)
+                PlaybackCDNProbeCoordinator.shared.refreshAfterSuccessfulPlaybackIfNeeded(
+                    libraryStore: self.libraryStore,
+                    playbackURLs: playbackURLs
+                )
             }
         )
+    }
+
+    private func automaticCDNProbeURLs(for variant: PlayVariant) -> [URL] {
+        var urls = [variant.videoURL, variant.audioURL].compactMap { $0 }
+        if let stream = variant.videoStream {
+            urls += [URL(string: stream.baseURL)].compactMap { $0 }
+            urls += stream.backupPlayURLs
+        }
+        if let stream = variant.audioStream {
+            urls += [URL(string: stream.baseURL)].compactMap { $0 }
+            urls += stream.backupPlayURLs
+        }
+        var seen = Set<String>()
+        return urls.filter { seen.insert($0.absoluteString).inserted }
     }
 }

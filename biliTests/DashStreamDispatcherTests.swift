@@ -107,6 +107,21 @@ final class DashStreamDispatcherTests: XCTestCase {
         XCTAssertEqual(selected?.bandwidth, higher.bandwidth)
     }
 
+    func testCustomOrderExcludesDisabledCodecAndUsesConfiguredPriority() {
+        let h264 = stream(codecs: "avc1.64002a", bandwidth: 4_000)
+        let hevc = stream(codecs: "hev1.1.6.L120.90", bandwidth: 12_000)
+        let av1 = stream(codecs: "av01.0.08M.08", bandwidth: 8_000)
+        let preference = VideoCodecPreference(codecOrder: [.h264, .av1])
+
+        let selected = CoreVideoPlayerManager.selectBestStream(
+            from: [hevc, av1, h264],
+            preference: preference,
+            supportsAV1HardwareDecode: true
+        )
+
+        XCTAssertEqual(selected?.codecs, h264.codecs)
+    }
+
     private func stream(
         codecs: String,
         bandwidth: Int = 1_000

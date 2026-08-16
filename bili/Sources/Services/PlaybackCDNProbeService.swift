@@ -25,6 +25,7 @@ struct PlaybackCDNProbeResult: Identifiable, Codable, Equatable, Sendable {
     let httpStatusCode: Int?
     let hostWasRewritten: Bool
     let isWeakReference: Bool
+    let isCandidateCompatible: Bool
     let probedHost: String?
     let probePathDescription: String?
 
@@ -38,6 +39,7 @@ struct PlaybackCDNProbeResult: Identifiable, Codable, Equatable, Sendable {
         case httpStatusCode
         case hostWasRewritten
         case isWeakReference
+        case isCandidateCompatible
         case probedHost
         case probePathDescription
     }
@@ -52,6 +54,7 @@ struct PlaybackCDNProbeResult: Identifiable, Codable, Equatable, Sendable {
         httpStatusCode: Int? = nil,
         hostWasRewritten: Bool = false,
         isWeakReference: Bool = false,
+        isCandidateCompatible: Bool = true,
         probedHost: String? = nil,
         probePathDescription: String? = nil
     ) {
@@ -64,6 +67,7 @@ struct PlaybackCDNProbeResult: Identifiable, Codable, Equatable, Sendable {
         self.httpStatusCode = httpStatusCode
         self.hostWasRewritten = hostWasRewritten
         self.isWeakReference = isWeakReference
+        self.isCandidateCompatible = isCandidateCompatible
         self.probedHost = probedHost
         self.probePathDescription = probePathDescription
     }
@@ -79,6 +83,7 @@ struct PlaybackCDNProbeResult: Identifiable, Codable, Equatable, Sendable {
         self.httpStatusCode = try container.decodeIfPresent(Int.self, forKey: .httpStatusCode)
         self.hostWasRewritten = try container.decodeIfPresent(Bool.self, forKey: .hostWasRewritten) ?? false
         self.isWeakReference = try container.decodeIfPresent(Bool.self, forKey: .isWeakReference) ?? false
+        self.isCandidateCompatible = try container.decodeIfPresent(Bool.self, forKey: .isCandidateCompatible) ?? true
         self.probedHost = try container.decodeIfPresent(String.self, forKey: .probedHost)
         self.probePathDescription = try container.decodeIfPresent(String.self, forKey: .probePathDescription)
     }
@@ -122,6 +127,8 @@ struct PlaybackCDNProbeResult: Identifiable, Codable, Equatable, Sendable {
 
 struct PlaybackCDNProbeSnapshot: Codable, Equatable, Sendable {
     static let defaultFreshnessInterval: TimeInterval = 24 * 60 * 60
+    private static let minimumSwitchAdvantageMilliseconds = 80
+    private static let minimumSwitchAdvantageRatio = 0.25
 
     let probedAt: Date
     let recommendedPreference: PlaybackCDNPreference?
@@ -146,6 +153,81 @@ struct PlaybackCDNProbeSnapshot: Codable, Equatable, Sendable {
     func isExpired(now: Date = Date(), freshnessInterval: TimeInterval = Self.defaultFreshnessInterval) -> Bool {
         now.timeIntervalSince(probedAt) >= freshnessInterval
     }
+
+    func stabilizedRecommendation(
+        previous: PlaybackCDNProbeSnapshot?,
+        keepsCurrentRecommendation: Bool = true
+    ) -> PlaybackCDNProbeSnapshot {
+        guard let previous,
+              let currentPreference = previous.recommendedPreference
+                ?? previous.actionableResults.first?.preference,
+              previous.result(for: currentPreference)?.isActionableForPlaybackRecommendation == true
+        else { return self }
+
+        if !keepsCurrentRecommendation {
+            return actionableResults.isEmpty
+                ? preservingActionableResults(from: previous)
+                : self
+        }
+
+        if actionableResults.isEmpty {
+            return preservingActionableResults(from: previous)
+        }
+
+        guard let challengerPreference = recommendedPreference,
+              let challengerResult = result(for: challengerPreference),
+              challengerResult.isActionableForPlaybackRecommendation,
+              let challengerElapsed = challengerResult.elapsedMilliseconds
+        else {
+            return preservingActionableResults(from: previous)
+        }
+        guard challengerPreference != currentPreference else { return self }
+        guard let currentResult = result(for: currentPreference) else {
+            return preservingActionableResults(from: previous)
+        }
+        guard currentResult.isActionableForPlaybackRecommendation,
+              let currentElapsed = currentResult.elapsedMilliseconds
+        else {
+            return !currentResult.isCandidateCompatible
+                ? preservingActionableResults(from: previous)
+                : self
+        }
+
+        let requiredAdvantage = max(
+            Self.minimumSwitchAdvantageMilliseconds,
+            Int((Double(currentElapsed) * Self.minimumSwitchAdvantageRatio).rounded(.up))
+        )
+        guard currentElapsed - challengerElapsed >= requiredAdvantage else {
+            return PlaybackCDNProbeSnapshot(
+                probedAt: probedAt,
+                recommendedPreference: currentPreference,
+                results: results
+            )
+        }
+        return self
+    }
+
+    private func preservingActionableResults(
+        from previous: PlaybackCDNProbeSnapshot
+    ) -> PlaybackCDNProbeSnapshot {
+        var mergedResults = results
+        for previousResult in previous.actionableResults {
+            if let index = mergedResults.firstIndex(where: { $0.preference == previousResult.preference }) {
+                if !mergedResults[index].isActionableForPlaybackRecommendation {
+                    mergedResults[index] = previousResult
+                }
+            } else {
+                mergedResults.append(previousResult)
+            }
+        }
+        let recommendation = previous.recommendedPreference
+            ?? previous.actionableResults.first?.preference
+        return PlaybackCDNProbeSnapshot(
+            probedAt: probedAt,
+            recommendedPreference: recommendation,
+            results: mergedResults
+        )
+    }
 }
 
 @MainActor
@@ -154,6 +236,7 @@ final class PlaybackCDNProbeCoordinator {
 
     private var refreshTask: Task<PlaybackCDNProbeSnapshot?, Never>?
     private var refreshToken: UUID?
+    private var refreshUsesPlaybackURLs = false
     private var lastAdaptiveRefreshAt: Date?
     private var lastPressureRefreshAt: Date?
     private let pressureRefreshInterval: TimeInterval = 10 * 60
@@ -205,6 +288,37 @@ final class PlaybackCDNProbeCoordinator {
         startRefresh(libraryStore: libraryStore)
     }
 
+    func refreshAfterSuccessfulPlaybackIfNeeded(
+        libraryStore: LibraryStore,
+        playbackURLs: [URL]
+    ) {
+        let playbackURLs = playbackURLs.removingDuplicateURLs()
+        guard libraryStore.playbackCDNPreference == .automatic,
+              !playbackURLs.isEmpty
+        else { return }
+        let hasVerifiedRecommendation = libraryStore.playbackCDNProbeSnapshotForCurrentContext?
+            .actionableResults.isEmpty == false
+        let stickyPreference = libraryStore.playbackCDNProbeSnapshotForCurrentContext?.recommendedPreference
+        let activePreference = libraryStore.automaticPlaybackCDNRecommendation
+        let isStickyPreferenceBeingAvoided = stickyPreference != nil && stickyPreference != activePreference
+        guard !hasVerifiedRecommendation
+                || isStickyPreferenceBeingAvoided
+                || shouldRefresh(libraryStore: libraryStore)
+        else { return }
+
+        if refreshTask != nil {
+            guard !refreshUsesPlaybackURLs else { return }
+            refreshTask?.cancel()
+            refreshTask = nil
+            refreshToken = nil
+        }
+        PlayerMetricsLog.signpostEvent(
+            "PlaybackCDNRefresh",
+            message: "trigger=postFirstFrame mode=realURL urls=\(playbackURLs.count)"
+        )
+        startRefresh(libraryStore: libraryStore, playbackURLs: playbackURLs)
+    }
+
     func prepareRecommendationForImmediatePlaybackIfNeeded(
         libraryStore: LibraryStore,
         timeout: TimeInterval = 0.75
@@ -225,11 +339,11 @@ final class PlaybackCDNProbeCoordinator {
             signpostMessage = "skipped preference=\(libraryStore.playbackCDNPreference.rawValue)"
             return
         }
+        refreshIfNeeded(libraryStore: libraryStore)
         guard libraryStore.automaticPlaybackCDNRecommendation == nil else {
             signpostMessage = "ready existing=\(libraryStore.automaticPlaybackCDNRecommendation?.rawValue ?? "-")"
             return
         }
-        refreshIfNeeded(libraryStore: libraryStore)
 
         let deadline = Date().addingTimeInterval(max(0, timeout))
         let initialWait = min(max(timeout * 0.28, 0.08), 0.22)
@@ -308,16 +422,17 @@ final class PlaybackCDNProbeCoordinator {
         return Date().timeIntervalSince(lastAdaptiveRefreshAt) >= libraryStore.playbackCDNProbeRefreshInterval
     }
 
-    private func startRefresh(libraryStore: LibraryStore) {
+    private func startRefresh(libraryStore: LibraryStore, playbackURLs: [URL] = []) {
         let token = UUID()
         refreshToken = token
+        refreshUsesPlaybackURLs = !playbackURLs.isEmpty
         refreshTask = Task(priority: .utility) { [weak self, weak libraryStore] in
             guard let libraryStore else { return nil }
             let signpostState = PlayerMetricsLog.beginSignpostedInterval(
                 "PlaybackCDNRefresh",
-                message: "mode=full preference=\(libraryStore.playbackCDNPreference.rawValue)"
+                message: "mode=\(playbackURLs.isEmpty ? "host" : "realURL") preference=\(libraryStore.playbackCDNPreference.rawValue)"
             )
-            var signpostMessage = "mode=full loading"
+            var signpostMessage = "mode=\(playbackURLs.isEmpty ? "host" : "realURL") loading"
             defer {
                 PlayerMetricsLog.endSignpostedInterval(
                     "PlaybackCDNRefresh",
@@ -329,7 +444,8 @@ final class PlaybackCDNProbeCoordinator {
                 libraryStore.playbackNetworkAddressFamilyPreference
             }
             let snapshot = await PlaybackCDNProbeService.recommendedSnapshot(
-                addressFamilyPreference: addressFamilyPreference
+                addressFamilyPreference: addressFamilyPreference,
+                playbackURLs: playbackURLs
             )
             await MainActor.run {
                 guard let self, self.refreshToken == token, !Task.isCancelled else { return }
@@ -339,8 +455,9 @@ final class PlaybackCDNProbeCoordinator {
                 }
                 self.refreshTask = nil
                 self.refreshToken = nil
+                self.refreshUsesPlaybackURLs = false
             }
-            signpostMessage = "mode=full result=\(snapshot.recommendedPreference?.rawValue ?? "-")"
+            signpostMessage = "mode=\(playbackURLs.isEmpty ? "host" : "realURL") result=\(snapshot.recommendedPreference?.rawValue ?? "-")"
             return snapshot
         }
     }
@@ -480,6 +597,7 @@ enum PlaybackCDNProbeService {
                 errorDescription: playbackURLs.isEmpty ? "没有可测速 Host" : "当前播放 URL 不能安全改写到该 CDN",
                 addressFamily: addressFamilyPreference.requiredFamily,
                 probeMode: playbackURLs.isEmpty ? .bareHostFallback : .realPlaybackURL,
+                isCandidateCompatible: playbackURLs.isEmpty,
                 probedHost: host
             )
         }
@@ -552,6 +670,16 @@ enum PlaybackCDNProbeService {
     ) -> ProbeTarget? {
         let playbackURLs = playbackURLs.removingDuplicateURLs()
         if !playbackURLs.isEmpty {
+            if let url = playbackURLs.first(where: {
+                $0.host?.localizedCaseInsensitiveCompare(host) == .orderedSame
+            }) {
+                return ProbeTarget(
+                    url: url,
+                    mode: .realPlaybackURL,
+                    hostWasRewritten: false,
+                    isWeakReference: false
+                )
+            }
             let rewritten = preference.preferredURLs(
                 primary: playbackURLs.first,
                 backups: Array(playbackURLs.dropFirst())

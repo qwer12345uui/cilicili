@@ -3,96 +3,71 @@ import Foundation
 
 typealias DashStream = DASHStream
 
-enum VideoCodecPreference: String, CaseIterable, Identifiable, Codable, Sendable {
-    case auto
-    case preferAV1
-    case forceHEVC
-    case forceH264
-
+struct VideoCodecPreference: Identifiable, Codable, Equatable, Sendable {
     nonisolated static let storageKey = "cc.bili.playback.videoCodecPreference.v1"
-    nonisolated static let defaultValue: VideoCodecPreference = .auto
-    nonisolated static var allCases: [VideoCodecPreference] {
-        var preferences: [VideoCodecPreference] = [.auto]
-        if PlaybackCodecPolicy.canDecodeAV1 {
-            preferences.append(.preferAV1)
+    nonisolated static let defaultValue = VideoCodecPreference(codecOrder: [.hevc, .h264])
+    nonisolated static let auto = defaultValue
+    nonisolated static let preferAV1 = VideoCodecPreference(codecOrder: [.av1, .hevc, .h264])
+    nonisolated static let forceHEVC = VideoCodecPreference(codecOrder: [.hevc])
+    nonisolated static let forceH264 = VideoCodecPreference(codecOrder: [.h264])
+
+    let codecOrder: [VideoCodecFamily]
+
+    nonisolated init(codecOrder: [VideoCodecFamily]) {
+        var seen = Set<VideoCodecFamily>()
+        let normalized = codecOrder.filter {
+            $0 != .unknown && seen.insert($0).inserted
         }
-        preferences += [.forceHEVC, .forceH264]
-        return preferences
+        self.codecOrder = normalized.isEmpty ? Self.defaultCodecOrder : normalized
     }
 
     nonisolated var id: String { rawValue }
 
+    nonisolated var rawValue: String {
+        codecOrder.map(\.storageToken).joined(separator: ",")
+    }
+
     nonisolated var title: String {
-        switch self {
-        case .auto:
-            return "自动（HEVC 优先）"
-        case .preferAV1:
-            return "优先 AV1"
-        case .forceHEVC:
-            return "仅 HEVC"
-        case .forceH264:
-            return "仅 H.264"
+        if codecOrder.count == 1, let codec = codecOrder.first {
+            return "仅 \(codec.title)"
         }
+        return codecOrder.map(\.title).joined(separator: " → ")
     }
 
     nonisolated var detail: String {
-        switch self {
-        case .auto:
-            return "按 HEVC、H.264 的顺序选择可硬解视频流。"
-        case .preferAV1:
-            return "优先选择 AV1 硬解视频流；当前视频没有 AV1 时自动改用 HEVC 或 H.264。"
-        case .forceHEVC:
-            return "只请求和选择 HEVC；不可用时提示播放失败。"
-        case .forceH264:
-            return "只请求和选择 H.264；不可用时提示播放失败。"
-        }
-    }
-
-    nonisolated var codecOrder: [VideoCodecFamily] {
-        switch self {
-        case .auto:
-            return [.hevc, .h264, .unknown]
-        case .preferAV1:
-            return [.av1, .hevc, .h264, .unknown]
-        case .forceHEVC:
-            return [.hevc]
-        case .forceH264:
-            return [.h264]
-        }
+        "按 \(codecOrder.map(\.title).joined(separator: "、")) 的顺序自动选择；关闭的编码不会参与播放。"
     }
 
     nonisolated var forcedCodecFamily: VideoCodecFamily? {
-        switch self {
-        case .auto, .preferAV1:
-            return nil
-        case .forceHEVC:
-            return .hevc
-        case .forceH264:
-            return .h264
-        }
+        codecOrder.count == 1 ? codecOrder.first : nil
     }
 
     nonisolated var forcedUnavailableMessage: String? {
-        switch self {
-        case .auto, .preferAV1:
-            return nil
-        case .forceHEVC:
-            return "当前视频没有可硬解 HEVC 播放地址，可在设置中切换为自动或 H.264。"
-        case .forceH264:
-            return "当前视频没有可硬解 H.264 播放地址，可在设置中切换为自动或 HEVC。"
-        }
+        guard let forcedCodecFamily else { return nil }
+        return "当前视频没有可硬解 \(forcedCodecFamily.title) 播放地址，可在设置中启用其他编码。"
     }
 
     nonisolated static func stored(in userDefaults: UserDefaults = .standard) -> VideoCodecPreference {
-        let rawValue = userDefaults.string(forKey: storageKey)
-        let storedPreference: VideoCodecPreference?
-        if rawValue == "forceAV1" {
-            storedPreference = .preferAV1
-        } else {
-            storedPreference = rawValue.flatMap(VideoCodecPreference.init(rawValue:))
+        guard let rawValue = userDefaults.string(forKey: storageKey) else {
+            return defaultValue
         }
-        guard let storedPreference else { return defaultValue }
-
+        let storedPreference: VideoCodecPreference
+        switch rawValue {
+        case "auto":
+            storedPreference = .auto
+        case "forceAV1", "preferAV1":
+            storedPreference = .preferAV1
+        case "forceHEVC":
+            storedPreference = .forceHEVC
+        case "forceH264":
+            storedPreference = .forceH264
+        default:
+            storedPreference = VideoCodecPreference(
+                codecOrder: rawValue
+                    .split(separator: ",")
+                    .compactMap { VideoCodecFamily(storageToken: String($0)) }
+            )
+        }
         let resolvedPreference = storedPreference.resolvedForCurrentDevice
         if rawValue != resolvedPreference.rawValue {
             userDefaults.set(resolvedPreference.rawValue, forKey: storageKey)
@@ -101,19 +76,26 @@ enum VideoCodecPreference: String, CaseIterable, Identifiable, Codable, Sendable
     }
 
     nonisolated var isAvailableOnCurrentDevice: Bool {
-        self != .preferAV1 || PlaybackCodecPolicy.canDecodeAV1
+        !codecOrder.contains(.av1) || PlaybackCodecPolicy.canDecodeAV1
     }
 
     nonisolated var resolvedForCurrentDevice: VideoCodecPreference {
-        isAvailableOnCurrentDevice ? self : .auto
+        guard !isAvailableOnCurrentDevice else { return self }
+        return VideoCodecPreference(codecOrder: codecOrder.filter { $0 != .av1 })
     }
+
+    private nonisolated static let defaultCodecOrder: [VideoCodecFamily] = [.hevc, .h264]
 }
 
-enum VideoCodecFamily: Int, CaseIterable, Sendable {
+enum VideoCodecFamily: Int, CaseIterable, Codable, Identifiable, Sendable {
     case unknown = 0
     case h264 = 1
     case hevc = 2
     case av1 = 3
+
+    nonisolated var id: Int { rawValue }
+
+    nonisolated static let configurableCases: [VideoCodecFamily] = [.av1, .hevc, .h264]
 
     nonisolated var title: String {
         switch self {
@@ -127,6 +109,64 @@ enum VideoCodecFamily: Int, CaseIterable, Sendable {
             return "AV1"
         }
     }
+
+    nonisolated var storageToken: String {
+        switch self {
+        case .unknown:
+            return "unknown"
+        case .h264:
+            return "h264"
+        case .hevc:
+            return "hevc"
+        case .av1:
+            return "av1"
+        }
+    }
+
+    nonisolated init?(storageToken: String) {
+        switch storageToken.lowercased() {
+        case "h264", "avc", "avc1":
+            self = .h264
+        case "hevc", "hvc1", "hev1":
+            self = .hevc
+        case "av1", "av01":
+            self = .av1
+        default:
+            return nil
+        }
+    }
+
+    nonisolated var systemImage: String {
+        switch self {
+        case .unknown:
+            return "questionmark.square"
+        case .h264:
+            return "rectangle.compress.vertical"
+        case .hevc:
+            return "rectangle.stack"
+        case .av1:
+            return "sparkles.tv"
+        }
+    }
+
+    nonisolated var detail: String {
+        switch self {
+        case .unknown:
+            return "未知编码"
+        case .h264:
+            return "兼容性最好，通常文件更大。"
+        case .hevc:
+            return "画质和体积均衡，Apple 设备硬解成熟。"
+        case .av1:
+            return PlaybackCodecPolicy.canDecodeAV1
+                ? "压缩效率更高，当前设备支持硬解。"
+                : "当前设备未检测到 AV1 硬解能力。"
+        }
+    }
+
+    nonisolated var isAvailableOnCurrentDevice: Bool {
+        self != .av1 || PlaybackCodecPolicy.canDecodeAV1
+    }
 }
 
 nonisolated enum DashStreamDispatcher {
@@ -135,15 +175,12 @@ nonisolated enum DashStreamDispatcher {
         preference: VideoCodecPreference,
         supportsAV1HardwareDecode: Bool = PlaybackCodecPolicy.canDecodeAV1
     ) -> DashStream? {
+        let enabledFamilies = Set(preference.codecOrder)
         let playableStreams = streams.enumerated()
             .filter { _, stream in
                 guard stream.url != nil else { return false }
                 guard stream.videoCodecFamily != .av1 || supportsAV1HardwareDecode else { return false }
-                if let forcedCodecFamily = preference.forcedCodecFamily,
-                   stream.videoCodecFamily != forcedCodecFamily {
-                    return false
-                }
-                return true
+                return enabledFamilies.contains(stream.videoCodecFamily)
             }
         guard !playableStreams.isEmpty else { return nil }
 

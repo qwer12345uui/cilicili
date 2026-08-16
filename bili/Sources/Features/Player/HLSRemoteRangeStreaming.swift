@@ -1,7 +1,15 @@
 import Foundation
 import Network
+import QuartzCore
 
 enum HLSRemoteRangeStreamer {
+    struct HedgedStreamResult: Sendable {
+        let sourceURL: URL
+        let sourceIndex: Int
+        let cachePayload: VideoRangeStreamCachePayload?
+        let firstChunkElapsedMilliseconds: Double
+    }
+
     nonisolated static func stream(
         range: HTTPByteRange,
         from url: URL,
@@ -106,6 +114,223 @@ enum HLSRemoteRangeStreamer {
         return try cacheCollector?.finish()
     }
 
+    nonisolated static func streamHedged(
+        range: HTTPByteRange,
+        from urls: [URL],
+        headers: [String: String],
+        responseHeader: Data,
+        connection: NWConnection,
+        cacheLimit: Int64,
+        startupChunkSize: Int = 32 * 1024,
+        transform: HLSMediaSegmentTransform? = nil,
+        hedgeDelayNanoseconds: UInt64,
+        onFirstChunkSent: (@Sendable (Int) async -> Void)? = nil
+    ) async throws -> HedgedStreamResult {
+        let sourceURLs = urls.removingDuplicates()
+        guard let firstURL = sourceURLs.first else {
+            throw PlayerEngineError.unsupportedMedia
+        }
+        guard sourceURLs.count > 1 else {
+            let start = CACurrentMediaTime()
+            let payload = try await stream(
+                range: range,
+                from: firstURL,
+                headers: headers,
+                responseHeader: responseHeader,
+                connection: connection,
+                cacheLimit: cacheLimit,
+                startupChunkSize: startupChunkSize,
+                transform: transform,
+                onFirstChunkSent: onFirstChunkSent
+            )
+            return HedgedStreamResult(
+                sourceURL: firstURL,
+                sourceIndex: 0,
+                cachePayload: payload,
+                firstChunkElapsedMilliseconds: PlayerMetricsLog.elapsedMilliseconds(since: start)
+            )
+        }
+
+        let result: Result<HLSRemoteRangePreparedCandidate, Error> = try await withThrowingTaskGroup(
+            of: Result<HLSRemoteRangePreparedCandidate, Error>.self,
+            returning: Result<HLSRemoteRangePreparedCandidate, Error>.self
+        ) { group in
+            for (index, url) in sourceURLs.enumerated() {
+                group.addTask(priority: .userInitiated) {
+                    do {
+                        if index > 0 {
+                            try await Task.sleep(
+                                nanoseconds: hedgeDelayNanoseconds
+                                    + UInt64(index - 1) * 40_000_000
+                            )
+                        }
+                        let candidate = try await prepareCandidate(
+                            range: range,
+                            url: url,
+                            sourceIndex: index,
+                            headers: headers,
+                            cacheLimit: cacheLimit,
+                            startupChunkSize: startupChunkSize,
+                            transform: transform
+                        )
+                        return .success(candidate)
+                    } catch {
+                        return .failure(error)
+                    }
+                }
+            }
+
+            var lastError: Error?
+            while let candidateResult = try await group.next() {
+                switch candidateResult {
+                case let .success(candidate):
+                    group.cancelAll()
+                    do {
+                        let payload = try await finishCandidate(
+                            candidate,
+                            responseHeader: responseHeader,
+                            connection: connection,
+                            onFirstChunkSent: onFirstChunkSent
+                        )
+                        candidate.finishedPayload = payload
+                        return .success(candidate)
+                    } catch {
+                        lastError = error
+                    }
+                case let .failure(error):
+                    lastError = error
+                }
+            }
+            return .failure(lastError ?? PlayerEngineError.unsupportedMedia)
+        }
+
+        switch result {
+        case let .success(candidate):
+            return HedgedStreamResult(
+                sourceURL: candidate.sourceURL,
+                sourceIndex: candidate.sourceIndex,
+                cachePayload: candidate.finishedPayload,
+                firstChunkElapsedMilliseconds: candidate.firstChunkElapsedMilliseconds
+            )
+        case let .failure(error):
+            throw error
+        }
+    }
+
+    private nonisolated static func prepareCandidate(
+        range: HTTPByteRange,
+        url: URL,
+        sourceIndex: Int,
+        headers: [String: String],
+        cacheLimit: Int64,
+        startupChunkSize: Int,
+        transform: HLSMediaSegmentTransform?
+    ) async throws -> HLSRemoteRangePreparedCandidate {
+        var request = URLRequest(url: url)
+        request.cachePolicy = .reloadIgnoringLocalAndRemoteCacheData
+        request.timeoutInterval = range.length > 1_500_000 ? 3.2 : 2.0
+        headers.forEach { request.setValue($0.value, forHTTPHeaderField: $0.key) }
+        request.setValue("bytes=\(range.start)-\(range.endInclusive)", forHTTPHeaderField: "Range")
+
+        let stream = HLSRemoteRangeStreamingSession.shared.start(request: request)
+        let requestStart = CACurrentMediaTime()
+        do {
+            let response: URLResponse
+            do {
+                response = try await withTaskCancellationHandler {
+                    try await stream.handler.response()
+                } onCancel: {
+                    stream.task.cancel()
+                }
+            } catch let error as URLError {
+                throw HLSBridgeRemoteFailure.urlSession(error, url: url, range: range)
+            }
+            try HLSRemoteRangeResponseValidator.validate(response, requestedRange: range, url: url)
+
+            let candidate = HLSRemoteRangePreparedCandidate(
+                sourceURL: url,
+                sourceIndex: sourceIndex,
+                task: stream.task,
+                handler: stream.handler,
+                cacheCollector: VideoRangeStreamCacheCollector(range: range, cacheLimit: cacheLimit),
+                range: range
+            )
+            try await candidate.prepareFirstChunk(
+                startupChunkSize: startupChunkSize,
+                transform: transform,
+                startedAt: requestStart
+            )
+            return candidate
+        } catch {
+            stream.task.cancel()
+            HLSRemoteRangeStreamingSession.shared.finish(task: stream.task)
+            throw error
+        }
+    }
+
+    private nonisolated static func finishCandidate(
+        _ candidate: HLSRemoteRangePreparedCandidate,
+        responseHeader: Data,
+        connection: NWConnection,
+        onFirstChunkSent: (@Sendable (Int) async -> Void)?
+    ) async throws -> VideoRangeStreamCachePayload? {
+        var didStartResponse = false
+        do {
+            try await send(responseHeader, to: connection)
+            didStartResponse = true
+            try await send(candidate.firstOutboundChunk, to: connection)
+            await onFirstChunkSent?(candidate.firstOutboundChunk.count)
+
+            var chunk = Data()
+            let chunkSize = candidate.startupChunkSize
+            chunk.reserveCapacity(chunkSize)
+            while let data = try await candidate.nextChunk() {
+                try Task.checkCancellation()
+                try candidate.cacheCollector?.append(data)
+                chunk.append(data)
+                if chunk.count >= chunkSize {
+                    let outboundChunk: Data?
+                    if let transform = candidate.transform, !candidate.didApplyTransform {
+                        let transformResult = transform.applyResult(to: chunk)
+                        if transformResult.didNormalizeTiming {
+                            outboundChunk = transformResult.data
+                            candidate.didApplyTransform = true
+                        } else {
+                            outboundChunk = nil
+                        }
+                    } else {
+                        outboundChunk = chunk
+                    }
+                    if let outboundChunk {
+                        try await send(outboundChunk, to: connection)
+                        chunk.removeAll(keepingCapacity: true)
+                    }
+                }
+            }
+
+            if !chunk.isEmpty {
+                let outboundChunk: Data
+                if let transform = candidate.transform, !candidate.didApplyTransform {
+                    outboundChunk = transform.applyResult(to: chunk).data
+                    candidate.didApplyTransform = true
+                } else {
+                    outboundChunk = chunk
+                }
+                try await send(outboundChunk, to: connection)
+            }
+            connection.cancel()
+            return try candidate.cacheCollector?.finish()
+        } catch {
+            candidate.task.cancel()
+            candidate.cacheCollector?.cancel()
+            if didStartResponse {
+                connection.cancel()
+                throw HLSRangeStreamError.responseAlreadyStarted(error)
+            }
+            throw error
+        }
+    }
+
     private nonisolated static func send(_ data: Data, to connection: NWConnection) async throws {
         guard !data.isEmpty else { return }
         try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
@@ -117,6 +342,94 @@ enum HLSRemoteRangeStreamer {
                 }
             })
         }
+    }
+}
+
+nonisolated private final class HLSRemoteRangePreparedCandidate: @unchecked Sendable {
+    let sourceURL: URL
+    let sourceIndex: Int
+    let task: URLSessionDataTask
+    let handler: HLSRemoteRangeStreamHandler
+    let cacheCollector: VideoRangeStreamCacheCollector?
+    let range: HTTPByteRange
+    private(set) var startupChunkSize: Int
+    private(set) var transform: HLSMediaSegmentTransform?
+    private(set) var firstChunkElapsedMilliseconds: Double = 0
+    private(set) var firstOutboundChunk = Data()
+
+    private var iterator: AsyncThrowingStream<Data, Error>.Iterator
+    var didApplyTransform: Bool
+    var finishedPayload: VideoRangeStreamCachePayload?
+
+    init(
+        sourceURL: URL,
+        sourceIndex: Int,
+        task: URLSessionDataTask,
+        handler: HLSRemoteRangeStreamHandler,
+        cacheCollector: VideoRangeStreamCacheCollector?,
+        range: HTTPByteRange,
+        startupChunkSize: Int = 32 * 1024,
+        transform: HLSMediaSegmentTransform? = nil
+    ) {
+        self.sourceURL = sourceURL
+        self.sourceIndex = sourceIndex
+        self.task = task
+        self.handler = handler
+        self.cacheCollector = cacheCollector
+        self.range = range
+        self.startupChunkSize = min(max(startupChunkSize, 24 * 1024), 96 * 1024)
+        self.transform = transform
+        self.iterator = handler.chunks.makeAsyncIterator()
+        self.didApplyTransform = false
+    }
+
+    func prepareFirstChunk(
+        startupChunkSize: Int,
+        transform: HLSMediaSegmentTransform?,
+        startedAt: CFTimeInterval
+    ) async throws {
+        self.startupChunkSize = min(max(startupChunkSize, 24 * 1024), 96 * 1024)
+        self.transform = transform
+        var chunk = Data()
+        chunk.reserveCapacity(self.startupChunkSize)
+        while let data = try await iterator.next() {
+            try Task.checkCancellation()
+            try cacheCollector?.append(data)
+            chunk.append(data)
+            guard chunk.count >= self.startupChunkSize else { continue }
+
+            if let transform, !didApplyTransform {
+                let transformResult = transform.applyResult(to: chunk)
+                guard transformResult.didNormalizeTiming else { continue }
+                firstOutboundChunk = transformResult.data
+                didApplyTransform = true
+            } else {
+                firstOutboundChunk = chunk
+            }
+            firstChunkElapsedMilliseconds = PlayerMetricsLog.elapsedMilliseconds(since: startedAt)
+            return
+        }
+
+        guard !chunk.isEmpty else {
+            throw HLSBridgeRemoteFailure.emptyResponse(url: sourceURL, range: range)
+        }
+        if let transform, !didApplyTransform {
+            firstOutboundChunk = transform.applyResult(to: chunk).data
+            didApplyTransform = true
+        } else {
+            firstOutboundChunk = chunk
+        }
+        firstChunkElapsedMilliseconds = PlayerMetricsLog.elapsedMilliseconds(since: startedAt)
+    }
+
+    func nextChunk() async throws -> Data? {
+        try await iterator.next()
+    }
+
+    deinit {
+        task.cancel()
+        HLSRemoteRangeStreamingSession.shared.finish(task: task)
+        cacheCollector?.cancel()
     }
 }
 

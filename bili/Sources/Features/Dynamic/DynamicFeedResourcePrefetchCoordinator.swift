@@ -19,6 +19,11 @@ final class DynamicFeedResourcePrefetchCoordinator {
     }
 
     func scheduleResourcePrefetch(for items: [DynamicFeedItem], initialDelay: TimeInterval) {
+        if initialDelay <= 0.12 {
+            Task {
+                await ResourceLoadingForegroundPriorityGate.shared.beginFirstScreenPriorityWindow(for: .dynamic)
+            }
+        }
         let environment = PlaybackEnvironment.current
         let snapshotLimit = environment.shouldPreferConservativePlayback ? 5 : 8
         let snapshot = Array(items.prefix(snapshotLimit))
@@ -179,6 +184,12 @@ final class DynamicFeedResourcePrefetchCoordinator {
             if initialDelay > 0 {
                 try? await Task.sleep(nanoseconds: UInt64(initialDelay * 1_000_000_000))
             }
+            let foregroundDelay = await ResourceLoadingForegroundPriorityGate.shared
+                .backgroundDelayNanoseconds(for: .dynamic)
+            if foregroundDelay > 0 {
+                try? await Task.sleep(nanoseconds: foregroundDelay)
+            }
+            guard !Task.isCancelled else { return }
             await VideoPreloadCenter.shared.updatePlaybackPreferences(
                 preferredQuality: preferredQuality,
                 cdnPreference: cdnPreference,

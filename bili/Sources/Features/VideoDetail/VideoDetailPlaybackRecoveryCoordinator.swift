@@ -94,6 +94,11 @@ struct VideoDetailPlaybackRecoveryCoordinator: Sendable, Equatable {
         if Self.requiresPlayURLReload(input.reason), canReloadPlayURL {
             return handled(.reloadPlayURL, shouldRefreshCDN: shouldRefreshCDN)
         }
+        if Self.shouldRetrySameVariantOnAlternateCDN(input.reason),
+           input.recoveryAttemptCount == 0,
+           canReloadPlayURL {
+            return handled(.reloadPlayURL, shouldRefreshCDN: shouldRefreshCDN)
+        }
         if input.hasFallbackVariant {
             return handled(.switchVariant, shouldRefreshCDN: shouldRefreshCDN)
         }
@@ -105,6 +110,7 @@ struct VideoDetailPlaybackRecoveryCoordinator: Sendable, Equatable {
 
     static func shouldRefreshCDN(for reason: HLSBridgeFailureReason?) -> Bool {
         guard let reason else { return true }
+        guard reason.layer != .local, reason.layer != .avPlayerItem else { return false }
         switch reason.category {
         case .cancelled, .authDenied, .urlExpired:
             return false
@@ -141,6 +147,19 @@ struct VideoDetailPlaybackRecoveryCoordinator: Sendable, Equatable {
         }
     }
 
+    private static func shouldRetrySameVariantOnAlternateCDN(
+        _ reason: HLSBridgeFailureReason?
+    ) -> Bool {
+        guard let reason else { return false }
+        switch reason.category {
+        case .serverUnavailable, .timeout, .network, .invalidResponse:
+            return true
+        case .authDenied, .urlExpired, .rangeUnsupported, .rateLimited, .codecUnsupported,
+             .hardwareDecodeRejected, .decoderFailed, .terminalStall, .cancelled, .unknown:
+            return false
+        }
+    }
+
     private func ignored(
         _ reason: VideoDetailPlaybackRecoveryIgnoreReason
     ) -> VideoDetailPlaybackRecoveryDecision {
@@ -166,11 +185,13 @@ struct VideoDetailPlaybackRecoveryCoordinator: Sendable, Equatable {
 private struct FailureSignature: Hashable, Sendable {
     let selectedVariantID: String?
     let failedVariantID: String
+    let recoveryAttemptCount: Int
     let reasonKey: String
 
     init(_ input: VideoDetailPlaybackRecoveryInput) {
         selectedVariantID = input.selectedVariantID
         failedVariantID = input.failedVariantID
+        recoveryAttemptCount = input.recoveryAttemptCount
         if let reason = input.reason {
             reasonKey = [
                 reason.category.rawValue,

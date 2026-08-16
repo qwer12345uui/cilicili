@@ -23,6 +23,7 @@ extension VideoDetailViewModel {
     }
 
     private func flushPlaybackProgressForNavigation(resumeTime: TimeInterval) {
+        guard playbackOptions.recordsPlaybackHistory else { return }
         guard !libraryStore.incognitoModeEnabled else { return }
         guard resumeTime.isFinite,
               resumeTime >= TimeInterval(libraryStore.playbackHistorySyncThresholdSeconds)

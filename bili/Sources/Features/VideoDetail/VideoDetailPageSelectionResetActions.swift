@@ -25,15 +25,12 @@ extension VideoDetailViewModel {
         stablePlayerFirstFrameCancellable = nil
         syncPlayerIdentityRenderStore()
         playbackFallbackMessage = nil
-        cancelPlayURLSupplementTask()
         cancelPlayVariantSwitchTask()
         cancelCommentsLoadingTask()
         clearCommentThreadLoads()
         cancelStartupPlayURLTask()
-        cancelFastStartUpgradeTask()
         cancelHLSRenditionPrebuildTask()
         cancelSeekWarmups(clearRecent: true)
-        isSupplementingPlayQualities = false
         cancelSponsorBlockTask()
         sponsorBlockSegments = []
         sponsorBlockIdentity = nil

@@ -278,33 +278,25 @@ extension RootTabView {
         closeVideoFallbackTask = nil
         AppOrientationLock.restorePortrait()
 
-        let isAlreadyShowingPlaybackPage = bottomMode == .video
-            && !isClosingVideo
-            && activeVideo?.id == video.id
-            && videoNavigationPath.count == 1
-        guard !isAlreadyShowingPlaybackPage else { return true }
-
         beginPlaybackPreload(for: video)
         didConsumeStartupVideo = true
         isClosingVideo = false
 
+        var restoredPath = NavigationPath()
+        restoredPath.append(video)
         var transaction = Transaction()
         transaction.disablesAnimations = true
         withTransaction(transaction) {
-            activeVideo = video
+            activeVideo = nil
             videoNavigationPath = NavigationPath()
-            bottomMode = .video
+            rootNavigationPath = restoredPath
+            bottomMode = .root
         }
 
         await Task.yield()
-        guard bottomMode == .video,
-              activeVideo?.id == video.id,
-              !isClosingVideo
-        else { return false }
-
-        videoNavigationPath.append(video)
-        await Task.yield()
-        return bottomMode == .video && !videoNavigationPath.isEmpty
+        return bottomMode == .root
+            && rootNavigationPath.count == 1
+            && videoNavigationPath.isEmpty
     }
 
     func closeVideo() {

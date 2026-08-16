@@ -1,8 +1,6 @@
 import Foundation
 
 struct VideoDetailPlaybackWarmupTaskState {
-    var fastStartUpgradeTask: Task<Void, Never>?
-    var fastStartUpgradeGeneration = 0
     var hlsRenditionPrebuildTask: Task<Void, Never>?
     var hlsRenditionPrebuildGeneration = 0
     var seekWarmupTasks: [String: Task<Void, Never>] = [:]
@@ -13,16 +11,6 @@ struct VideoDetailPlaybackWarmupTaskState {
 }
 
 extension VideoDetailViewModel {
-    var fastStartUpgradeTask: Task<Void, Never>? {
-        get { playbackWarmupTaskState.fastStartUpgradeTask }
-        set { playbackWarmupTaskState.fastStartUpgradeTask = newValue }
-    }
-
-    var fastStartUpgradeGeneration: Int {
-        get { playbackWarmupTaskState.fastStartUpgradeGeneration }
-        set { playbackWarmupTaskState.fastStartUpgradeGeneration = newValue }
-    }
-
     var hlsRenditionPrebuildTask: Task<Void, Never>? {
         get { playbackWarmupTaskState.hlsRenditionPrebuildTask }
         set { playbackWarmupTaskState.hlsRenditionPrebuildTask = newValue }

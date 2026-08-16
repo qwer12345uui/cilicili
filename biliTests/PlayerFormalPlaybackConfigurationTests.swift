@@ -6,6 +6,36 @@ import UIKit
 @testable import bili
 
 final class PlayerFormalPlaybackConfigurationTests: XCTestCase {
+    func testTelegramProgressThumbTracksPlaybackPosition() {
+        let width: CGFloat = 200
+        let diameter: CGFloat = 16
+
+        XCTAssertEqual(
+            PlayerNativeProgressSlider.thumbLeadingOffset(
+                progress: 0,
+                width: width,
+                thumbDiameter: diameter
+            ),
+            0
+        )
+        XCTAssertEqual(
+            PlayerNativeProgressSlider.thumbLeadingOffset(
+                progress: 0.5,
+                width: width,
+                thumbDiameter: diameter
+            ),
+            92
+        )
+        XCTAssertEqual(
+            PlayerNativeProgressSlider.thumbLeadingOffset(
+                progress: 1,
+                width: width,
+                thumbDiameter: diameter
+            ),
+            184
+        )
+    }
+
     func testLivePlayerControlLayoutOnlyKeepsNavigationActions() {
         XCTAssertFalse(BiliPlayerControlLayout.live.showsProgress)
         XCTAssertFalse(BiliPlayerControlLayout.live.showsPlaybackToggle)
@@ -92,6 +122,18 @@ final class PlayerFormalPlaybackConfigurationTests: XCTestCase {
         let expectedPreference: VideoCodecPreference = PlaybackCodecPolicy.canDecodeAV1 ? .preferAV1 : .auto
         XCTAssertEqual(settings.videoCodecPreference, expectedPreference)
         XCTAssertEqual(defaults.string(forKey: VideoCodecPreference.storageKey), expectedPreference.rawValue)
+    }
+
+    @MainActor
+    func testLibraryStorePersistsCodecEnablementAndOrder() {
+        let defaults = makeUserDefaults()
+        let store = LibraryStore(userDefaults: defaults)
+        let preference = VideoCodecPreference(codecOrder: [.h264, .hevc])
+
+        store.setVideoCodecPreference(preference)
+
+        XCTAssertEqual(LibraryStore(userDefaults: defaults).videoCodecPreference, preference)
+        XCTAssertEqual(defaults.string(forKey: VideoCodecPreference.storageKey), "h264,hevc")
     }
 
     @MainActor
@@ -354,6 +396,9 @@ final class PlayerFormalPlaybackConfigurationTests: XCTestCase {
             "cc.bili.display.telegramTopEdgeBlurExperimentEnabled.v1",
             "cc.bili.display.uploaderProfileGlassSheetExperimentEnabled.v1",
             "cc.bili.display.uploaderProfileGlassSheetExperimentEnabled.v2",
+            "cc.bili.videoDetail.moreControlsSwiftUISheetExperimentEnabled.v1",
+            "cc.bili.playback.nativePlayerProgressSliderExperimentEnabled.v1",
+            "cc.bili.playback.iosNativePlaybackControlsExperimentEnabled.v1",
         ]
         retiredKeys.forEach { defaults.set(true, forKey: $0) }
 
@@ -520,6 +565,69 @@ final class PlayerFormalPlaybackConfigurationTests: XCTestCase {
         XCTAssertTrue(player.isStoppedAppBackgroundSurfaceRecoveryReadyForReveal())
         player.finishAppBackgroundSurfaceRecoveryReveal()
         XCTAssertEqual(player.playbackPhase, .paused)
+    }
+
+    @MainActor
+    func testForegroundPictureInPictureRecoveryReusesCurrentPlaybackPage() async {
+        let engine = PlayerLifecycleEngineSpy(isPlaying: true)
+        engine.supportsPictureInPicture = true
+        engine.isPictureInPictureActive = true
+        let player = PlayerStateViewModel(
+            videoURL: nil,
+            audioURL: nil,
+            title: "画中画返回测试",
+            referer: "https://www.bilibili.com",
+            engine: engine
+        )
+        var restoreRequestCount = 0
+        player.restoreUserInterfaceForPictureInPictureStop = {
+            restoreRequestCount += 1
+            return true
+        }
+        defer { player.stop() }
+
+        let didRestore = await player.restoreInlinePlaybackFromPictureInPictureIfNeeded()
+
+        XCTAssertTrue(didRestore)
+        XCTAssertEqual(restoreRequestCount, 0)
+        XCTAssertEqual(engine.stopPictureInPictureCallCount, 1)
+        XCTAssertFalse(player.isPictureInPictureActive)
+    }
+
+    @MainActor
+    func testPictureInPictureRestoreCoordinatorCoalescesDuplicateRequests() async {
+        let coordinator = PictureInPictureRestoreCoordinator.shared
+        let previousHandler = coordinator.restoreHandler
+        let video = VideoItem(
+            bvid: "BV1PiPRestoreTest",
+            aid: nil,
+            title: "画中画恢复合并测试",
+            pic: nil,
+            desc: nil,
+            duration: nil,
+            pubdate: nil,
+            owner: nil,
+            stat: nil,
+            cid: nil,
+            pages: nil,
+            dimension: nil
+        )
+        var restoreRequestCount = 0
+        coordinator.restoreHandler = { _ in
+            restoreRequestCount += 1
+            try? await Task.sleep(nanoseconds: 20_000_000)
+            return true
+        }
+        defer { coordinator.restoreHandler = previousHandler }
+
+        async let firstRestore = coordinator.restorePlaybackUI(for: video)
+        await Task.yield()
+        async let secondRestore = coordinator.restorePlaybackUI(for: video)
+        let results = await (firstRestore, secondRestore)
+
+        XCTAssertTrue(results.0)
+        XCTAssertTrue(results.1)
+        XCTAssertEqual(restoreRequestCount, 1)
     }
 
     @MainActor
@@ -965,12 +1073,126 @@ final class PlayerFormalPlaybackConfigurationTests: XCTestCase {
     }
 
     @MainActor
-    func testPictureInPictureFeatureDoesNotEnableAutomaticInlinePictureInPicture() {
+    func testPictureInPictureFeatureControlsAutomaticInlinePictureInPicture() {
         let surface = VideoSurfaceContainerView()
+        let isSupported = AVPictureInPictureController.isPictureInPictureSupported()
 
         surface.setPictureInPictureEnabled(true)
 
+        XCTAssertEqual(surface.nativePlayerViewController.allowsPictureInPicturePlayback, isSupported)
+        XCTAssertEqual(
+            surface.nativePlayerViewController.canStartPictureInPictureAutomaticallyFromInline,
+            isSupported
+        )
+
+        surface.setPictureInPictureEnabled(false)
+
+        XCTAssertFalse(surface.nativePlayerViewController.allowsPictureInPicturePlayback)
         XCTAssertFalse(surface.nativePlayerViewController.canStartPictureInPictureAutomaticallyFromInline)
+    }
+
+    @MainActor
+    func testDisablingPictureInPictureReleasesCustomControllerAndRemainsDisabled() throws {
+        guard AVPictureInPictureController.isPictureInPictureSupported() else {
+            throw XCTSkip("当前测试设备不支持画中画")
+        }
+        let player = PlayerStateViewModel(
+            videoURL: nil,
+            audioURL: nil,
+            title: "画中画开关测试",
+            referer: "https://www.bilibili.com"
+        )
+        let surface = VideoSurfaceContainerView()
+        defer {
+            surface.detachPlayerSurface()
+            player.stop()
+        }
+
+        player.attachSurface(surface, prefersNativePlaybackControls: false)
+        player.setPictureInPictureEnabled(true)
+        XCTAssertTrue(player.hasConfiguredPictureInPictureControllerForTesting)
+
+        player.setPictureInPictureEnabled(false)
+        player.setPictureInPictureEnabled(false)
+
+        XCTAssertFalse(player.isPictureInPictureEnabled)
+        XCTAssertFalse(player.hasConfiguredPictureInPictureControllerForTesting)
+        XCTAssertFalse(surface.nativePlayerViewController.allowsPictureInPicturePlayback)
+        XCTAssertFalse(surface.nativePlayerViewController.canStartPictureInPictureAutomaticallyFromInline)
+    }
+
+    @MainActor
+    func testRepeatedPictureInPictureDisableStillStopsEngine() {
+        let engine = PlayerLifecycleEngineSpy(isPlaying: true)
+        engine.supportsPictureInPicture = true
+        let player = PlayerStateViewModel(
+            videoURL: nil,
+            audioURL: nil,
+            title: "画中画重复关闭测试",
+            referer: "https://www.bilibili.com",
+            engine: engine
+        )
+        defer { player.stop() }
+
+        player.setPictureInPictureEnabled(true)
+        player.setPictureInPictureEnabled(false)
+        player.setPictureInPictureEnabled(false)
+
+        XCTAssertEqual(engine.pictureInPictureEnabledValues, [true, false, false])
+        XCTAssertEqual(engine.stopPictureInPictureCallCount, 2)
+        XCTAssertFalse(player.isPictureInPictureEnabled)
+    }
+
+    @MainActor
+    func testVideoSurfaceContainerCanShowSystemPlaybackControls() {
+        let surface = VideoSurfaceContainerView()
+
+        XCTAssertFalse(surface.nativePlayerViewController.showsPlaybackControls)
+        surface.setShowsSystemPlaybackControls(true)
+        XCTAssertTrue(surface.nativePlayerViewController.showsPlaybackControls)
+        XCTAssertTrue(surface.nativePlayerViewController.speeds.isEmpty)
+        XCTAssertFalse(surface.nativePlayerViewController.allowsVideoFrameAnalysis)
+
+        let engine = AVPlayerHLSBridgeEngine()
+        engine.attachNativePlaybackController(surface.nativePlayerViewController)
+        XCTAssertTrue(surface.nativePlayerViewController.showsPlaybackControls)
+        XCTAssertTrue(surface.nativePlayerViewController.speeds.isEmpty)
+        XCTAssertFalse(surface.nativePlayerViewController.allowsVideoFrameAnalysis)
+        engine.detachNativePlaybackController(surface.nativePlayerViewController)
+    }
+
+    @MainActor
+    func testNativePlaybackControlsInstallNonCancellingSurfaceGestures() {
+        let surface = VideoSurfaceContainerView()
+        let player = PlayerStateViewModel(
+            videoURL: nil,
+            audioURL: nil,
+            title: "原生手势测试",
+            referer: "https://www.bilibili.com"
+        )
+        defer {
+            surface.detachPlayerSurface()
+            player.stop()
+        }
+
+        surface.setPlayerViewModel(player, prefersNativePlaybackControls: true)
+        surface.setShowsSystemPlaybackControls(true)
+        surface.setNativePlaybackControllerEnabled(true)
+
+        let gestureRecognizers = surface.nativePlayerViewController.contentOverlayView?
+            .subviews
+            .flatMap { $0.gestureRecognizers ?? [] }
+            ?? []
+        let doubleTapGesture = gestureRecognizers
+            .compactMap { $0 as? UITapGestureRecognizer }
+            .first { $0.numberOfTapsRequired == 2 }
+        let panGesture = gestureRecognizers.first { $0 is UIPanGestureRecognizer }
+
+        XCTAssertNotNil(doubleTapGesture)
+        XCTAssertNotNil(panGesture)
+        XCTAssertFalse(doubleTapGesture?.cancelsTouchesInView ?? true)
+        XCTAssertFalse(panGesture?.cancelsTouchesInView ?? true)
+        XCTAssertTrue(surface.nativePlayerViewController.contentOverlayView?.isUserInteractionEnabled == true)
     }
 
     @MainActor
@@ -1028,6 +1250,8 @@ final class PlayerLifecycleEngineSpy: PlayerRenderingEngine {
     private(set) var seekCallCount = 0
     private(set) var lastSeekTime: TimeInterval?
     private(set) var temporaryAudioSuppressionValues: [Bool] = []
+    private(set) var pictureInPictureEnabledValues: [Bool] = []
+    private(set) var stopPictureInPictureCallCount = 0
 
     init(isPlaying: Bool) {
         self.isPlaying = isPlaying
@@ -1112,7 +1336,9 @@ final class PlayerLifecycleEngineSpy: PlayerRenderingEngine {
     func setTemporaryAudioSuppressed(_ isSuppressed: Bool) {
         temporaryAudioSuppressionValues.append(isSuppressed)
     }
-    func setPictureInPictureEnabled(_: Bool) {}
+    func setPictureInPictureEnabled(_ isEnabled: Bool) {
+        pictureInPictureEnabledValues.append(isEnabled)
+    }
     func seek(toTime time: TimeInterval) -> TimeInterval? {
         seekCallCount += 1
         lastSeekTime = time
@@ -1148,6 +1374,9 @@ final class PlayerLifecycleEngineSpy: PlayerRenderingEngine {
     func currentSurfaceSnapshotImage() -> UIImage? { nil }
     func pictureInPictureContentSource() -> AVPictureInPictureController.ContentSource? { nil }
     func togglePictureInPicture() {}
-    func stopPictureInPictureIfNeeded() {}
+    func stopPictureInPictureIfNeeded() {
+        stopPictureInPictureCallCount += 1
+        isPictureInPictureActive = false
+    }
     func invalidatePictureInPicturePlaybackState() {}
 }

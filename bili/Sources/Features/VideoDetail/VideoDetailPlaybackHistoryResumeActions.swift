@@ -3,6 +3,7 @@ import Foundation
 extension VideoDetailViewModel {
     func prepareHistoryResumeBeforeApplyingPlayURL(_ data: PlayURLData, cid: Int) async -> Bool {
         guard stablePlayerViewModel == nil else { return false }
+        guard playbackOptions.resumesPlaybackHistory else { return false }
         if VideoDetailPlaybackHistorySelectionPolicy.preservesManualPage(
             manuallySelectedCID: manuallySelectedPageCID,
             currentCID: cid
@@ -130,6 +131,7 @@ extension VideoDetailViewModel {
     }
 
     func beginCloudHistoryResumeFetchIfNeeded() {
+        guard playbackOptions.resumesPlaybackHistory else { return }
         guard manuallySelectedPageCID == nil else { return }
         guard !didResolveCloudHistoryResume,
               pendingPlaybackHistoryResumeTime == nil,

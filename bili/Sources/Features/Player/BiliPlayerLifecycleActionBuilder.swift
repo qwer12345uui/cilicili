@@ -251,7 +251,15 @@ struct BiliPlayerLifecycleActionBuilder {
             guard canActivatePlayback else { return }
             if shouldHandlePictureInPicture {
                 let didRestorePictureInPicture = await viewModel.restoreInlinePlaybackFromPictureInPictureIfNeeded()
-                if didRestorePictureInPicture || viewModel.isPictureInPictureActive {
+                if didRestorePictureInPicture {
+                    appBackgroundRecoverySnapshotModel.releaseForStableSurfaceTransition(
+                        isReadyForReveal: {
+                            !viewModel.isPictureInPictureActive
+                        }
+                    )
+                    return
+                }
+                if viewModel.isPictureInPictureActive {
                     return
                 }
             }

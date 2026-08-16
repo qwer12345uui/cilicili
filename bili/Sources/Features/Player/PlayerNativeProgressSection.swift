@@ -5,6 +5,7 @@ struct PlayerNativeProgressSection: View {
     let clock: PlayerPlaybackClock
     let canSeek: Bool
     let sliderVisualScale: CGFloat
+    let style: PlayerNativeProgressStyle
     let onScrubStart: (Double) -> Void
     let onScrubChanged: (Double) -> Void
     let onScrubEnded: (Double) -> Void
@@ -15,6 +16,7 @@ struct PlayerNativeProgressSection: View {
             clock: clock,
             canSeek: canSeek,
             sliderVisualScale: sliderVisualScale,
+            style: style,
             onScrubStart: onScrubStart,
             onScrubChanged: onScrubChanged,
             onScrubEnded: onScrubEnded,

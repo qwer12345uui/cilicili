@@ -7,9 +7,7 @@ extension VideoDetailViewModel {
     static let seekWarmupBucketDuration: TimeInterval = 30
     static let maxInFlightSeekWarmups = 1
     static let recentSeekWarmupLimit = 10
-    static let fastStartUpgradeStabilityDelayNanoseconds: UInt64 = 1_250_000_000
-    static let fastStartUpgradeWarmupTimeout: TimeInterval = 1.15
-    static let fastStartUpgradeSeekCooldown: TimeInterval = 1.5
+    static let qualitySwitchWarmupTimeout: TimeInterval = 1.15
     static let hlsRenditionPrebuildDelayNanoseconds: UInt64 = 850_000_000
     static let hlsRenditionPrebuildStepNanoseconds: UInt64 = 360_000_000
     static let hlsRenditionPrebuildTimeout: TimeInterval = 0.78

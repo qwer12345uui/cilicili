@@ -5,6 +5,7 @@ nonisolated enum PlaybackStartupRequestSchedulingPolicy {
     static let wbiFailureThreshold = 2
     static let wbiFailureWindow: TimeInterval = 20
     static let wbiSuppressionDuration: TimeInterval = 30
+    static let wbiRouteHintDuration: TimeInterval = 2 * 60
 }
 
 nonisolated final class StartupPlayURLRequestLease: @unchecked Sendable {
@@ -120,6 +121,75 @@ actor StartupWBIHealthStore {
     }
 }
 
+nonisolated struct StartupWBIRouteHintKey: Hashable, Sendable {
+    let bvid: String
+    let cid: Int
+    let requestedQuality: Int
+    let accountMID: Int?
+    let credentialVersion: Int
+}
+
+nonisolated enum StartupWBIRouteHint: String, Equatable, Sendable {
+    case compatibilityWBI
+    case webpageOnly
+}
+
+actor StartupWBIRouteHintStore {
+    private struct Entry: Sendable {
+        let hint: StartupWBIRouteHint
+        let expiresAt: TimeInterval
+    }
+
+    private let duration: TimeInterval
+    private let limit: Int
+    private var entries = [StartupWBIRouteHintKey: Entry]()
+
+    init(
+        duration: TimeInterval = PlaybackStartupRequestSchedulingPolicy.wbiRouteHintDuration,
+        limit: Int = 64
+    ) {
+        self.duration = max(duration, 1)
+        self.limit = max(limit, 1)
+    }
+
+    func hint(
+        for key: StartupWBIRouteHintKey,
+        now: TimeInterval = Date().timeIntervalSinceReferenceDate
+    ) -> StartupWBIRouteHint? {
+        guard let entry = entries[key] else { return nil }
+        guard entry.expiresAt > now else {
+            entries[key] = nil
+            return nil
+        }
+        return entry.hint
+    }
+
+    func store(
+        _ hint: StartupWBIRouteHint,
+        for key: StartupWBIRouteHintKey,
+        now: TimeInterval = Date().timeIntervalSinceReferenceDate
+    ) {
+        entries[key] = Entry(hint: hint, expiresAt: now + duration)
+        guard entries.count > limit else { return }
+        let overflow = entries.count - limit
+        entries
+            .sorted { $0.value.expiresAt < $1.value.expiresAt }
+            .prefix(overflow)
+            .map(\.key)
+            .forEach { entries[$0] = nil }
+    }
+
+    func clear(containing bvid: String) {
+        entries.keys
+            .filter { $0.bvid == bvid }
+            .forEach { entries[$0] = nil }
+    }
+
+    func clear() {
+        entries.removeAll()
+    }
+}
+
 nonisolated enum StartupPlayURLRoute: String, CaseIterable, Hashable, Sendable {
     case webpage
     case wbi
@@ -138,6 +208,19 @@ nonisolated struct StartupPlayURLSchedulingDecision: Equatable, Sendable {
         primaryRoute != nil && fallbackRoute != nil
     }
 
+    func preferringWBIForPiliPlus(
+        piliPlusStyleEnabled: Bool,
+        wbiAvailable: Bool
+    ) -> StartupPlayURLSchedulingDecision {
+        guard piliPlusStyleEnabled,
+              wbiAvailable
+        else { return self }
+        return StartupPlayURLSchedulingDecision(
+            primaryRoute: .wbi,
+            fallbackRoute: .webpage
+        )
+    }
+
     var diagnosticMessage: String {
         guard let primaryRoute, let fallbackRoute else {
             return "startupScheduler=adaptive mode=race learning"
@@ -145,16 +228,40 @@ nonisolated struct StartupPlayURLSchedulingDecision: Equatable, Sendable {
         let delayMilliseconds = PlaybackStartupRequestSchedulingPolicy.staggeredFallbackDelayNanoseconds / 1_000_000
         return "startupScheduler=adaptive mode=staggered primary=\(primaryRoute.rawValue) fallback=\(fallbackRoute.rawValue) delay=\(delayMilliseconds)ms"
     }
+
+    func defersWebpageFallbackUntilWBIFailure(piliPlusStyleEnabled: Bool) -> Bool {
+        piliPlusStyleEnabled
+            && primaryRoute == .wbi
+            && fallbackRoute == .webpage
+    }
+
+    func diagnosticMessage(piliPlusStyleEnabled: Bool) -> String {
+        guard defersWebpageFallbackUntilWBIFailure(
+            piliPlusStyleEnabled: piliPlusStyleEnabled
+        ) else {
+            return diagnosticMessage
+        }
+        let delayMilliseconds = PiliPlusStylePlayURLSelectionExperiment.webpageHedgeDelayNanoseconds / 1_000_000
+        let startMode = delayMilliseconds == 0 ? "immediate" : "delayed"
+        return "startupScheduler=adaptive mode=hedged primary=wbi fallback=webpage delay=\(delayMilliseconds)ms start=\(startMode) cancel=promptWaiter+underlying"
+    }
 }
 
 actor StartupPlayURLFallbackTracker {
     enum Status: String, Equatable, Sendable {
         case waiting
+        case deferred
         case started
+        case startedAfterWBIFailure
         case cancelledBeforeStart
+        case notNeeded
     }
 
-    private var status: Status = .waiting
+    private var status: Status
+
+    init(initialStatus: Status = .waiting) {
+        status = initialStatus
+    }
 
     func markStarted() {
         guard status == .waiting else { return }
@@ -164,6 +271,16 @@ actor StartupPlayURLFallbackTracker {
     func markCancelledBeforeStart() {
         guard status == .waiting else { return }
         status = .cancelledBeforeStart
+    }
+
+    func markStartedAfterWBIFailure() {
+        guard status == .deferred else { return }
+        status = .startedAfterWBIFailure
+    }
+
+    func markNotNeeded() {
+        guard status == .deferred else { return }
+        status = .notNeeded
     }
 
     func currentStatus() -> Status {

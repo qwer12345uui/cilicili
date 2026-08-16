@@ -6,8 +6,7 @@ struct VideoDetailViewContent: View {
     @ObservedObject var runtimeSettings: VideoDetailRuntimeSettingsStore
     @ObservedObject var fullscreenCoordinator: VideoDetailFullscreenCoordinator
     @Binding var selectedContentTab: VideoDetailContentTab
-    @Binding var replySheetComment: Comment?
-    @Binding var replySheetSecondaryID: Int?
+    @Binding var sheetRoute: VideoDetailSheetRoute?
     @Binding var pendingCommentAnchor: VideoCommentAnchor?
     @Binding var isShowingDanmakuSettings: Bool
     @Binding var isShowingFavoriteFolders: Bool
@@ -27,8 +26,7 @@ struct VideoDetailViewContent: View {
                 fullscreenCoordinator: fullscreenCoordinator,
                 viewModel: viewModel,
                 selectedContentTab: $selectedContentTab,
-                replySheetComment: $replySheetComment,
-                replySheetSecondaryID: $replySheetSecondaryID,
+                sheetRoute: $sheetRoute,
                 pendingCommentAnchor: $pendingCommentAnchor,
                 isShowingDanmakuSettings: $isShowingDanmakuSettings,
                 isShowingFavoriteFolders: $isShowingFavoriteFolders,

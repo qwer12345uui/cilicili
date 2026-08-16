@@ -5,7 +5,6 @@ struct VideoDetailQualityControlRenderSnapshot: Equatable {
     var qualityAccessoryButtonTitle = "清晰度"
     var qualityButtonSystemImage = "slider.horizontal.3"
     var qualityMenuItems: [VideoDetailPlaybackQualityMenuItem] = []
-    var isSupplementingPlayQualities = false
     var isSwitchingPlayQuality = false
 
     init() {}
@@ -15,7 +14,6 @@ struct VideoDetailQualityControlRenderSnapshot: Equatable {
         qualityAccessoryButtonTitle = playback.qualityAccessoryButtonTitle
         qualityButtonSystemImage = playback.qualityButtonSystemImage
         qualityMenuItems = playback.qualityMenuItems
-        isSupplementingPlayQualities = playback.isSupplementingPlayQualities
         isSwitchingPlayQuality = playback.isSwitchingPlayQuality
     }
 }

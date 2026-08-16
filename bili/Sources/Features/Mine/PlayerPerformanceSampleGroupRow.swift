@@ -15,7 +15,7 @@ struct PlayerPerformanceSampleGroupRow: View {
             Text(group.subtitle)
                 .font(.caption)
                 .foregroundStyle(.secondary)
-                .lineLimit(1)
+                .lineLimit(2)
 
             PlayerPerformanceMetricGrid(group: group)
 

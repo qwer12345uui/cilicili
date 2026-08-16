@@ -26,13 +26,13 @@ extension VideoDetailViewModel {
                     bvid: bvid,
                     cid: cid,
                     page: page,
-                    timeout: Self.fastStartUpgradeWarmupTimeout
+                    timeout: Self.qualitySwitchWarmupTimeout
                 )
             } else {
                 didWarmVariant = await VideoPreloadCenter.shared.warmVariantAndWait(
                     variant,
                     bvid: bvid,
-                    timeout: Self.fastStartUpgradeWarmupTimeout
+                    timeout: Self.qualitySwitchWarmupTimeout
                 )
             }
             if !didWarmVariant {

@@ -1,7 +1,19 @@
+import Foundation
 import XCTest
 @testable import bili
 
 final class PlaybackStartupRequestSchedulingTests: XCTestCase {
+    func testExpectedPlayURLCancellationDoesNotBecomeAPlaybackFailure() {
+        XCTAssertTrue(VideoDetailViewModel.isExpectedPlayURLCancellation(CancellationError()))
+        XCTAssertTrue(VideoDetailViewModel.isExpectedPlayURLCancellation(URLError(.cancelled)))
+        XCTAssertTrue(
+            VideoDetailViewModel.isExpectedPlayURLCancellation(
+                NSError(domain: NSURLErrorDomain, code: NSURLErrorCancelled)
+            )
+        )
+        XCTAssertFalse(VideoDetailViewModel.isExpectedPlayURLCancellation(URLError(.timedOut)))
+    }
+
     func testSchedulerRacesUntilAStartSourceHasEnoughAcceptedSamples() async {
         let scheduler = StartupPlayURLRoutePerformanceStore(
             sampleLimit: 4,
@@ -116,6 +128,78 @@ final class PlaybackStartupRequestSchedulingTests: XCTestCase {
         )
     }
 
+    func testPiliPlusDefersWebpageFallbackUntilWBIFailure() {
+        let decision = StartupPlayURLSchedulingDecision(
+            primaryRoute: .wbi,
+            fallbackRoute: .webpage
+        )
+
+        XCTAssertTrue(
+            decision.defersWebpageFallbackUntilWBIFailure(piliPlusStyleEnabled: true)
+        )
+        XCTAssertEqual(
+            decision.diagnosticMessage(piliPlusStyleEnabled: true),
+            "startupScheduler=adaptive mode=hedged primary=wbi fallback=webpage delay=0ms start=immediate cancel=promptWaiter+underlying"
+        )
+        XCTAssertEqual(PiliPlusStylePlayURLSelectionExperiment.webpageHedgeDelayNanoseconds, 0)
+    }
+
+    func testPiliPlusUsesWBIFirstWhileSchedulerIsStillLearning() {
+        let decision = StartupPlayURLSchedulingDecision.race.preferringWBIForPiliPlus(
+            piliPlusStyleEnabled: true,
+            wbiAvailable: true
+        )
+
+        XCTAssertEqual(decision.primaryRoute, .wbi)
+        XCTAssertEqual(decision.fallbackRoute, .webpage)
+        XCTAssertTrue(decision.defersWebpageFallbackUntilWBIFailure(piliPlusStyleEnabled: true))
+    }
+
+    func testPiliPlusOverridesLearnedWebpagePreference() {
+        let decision = StartupPlayURLSchedulingDecision(
+            primaryRoute: .webpage,
+            fallbackRoute: .wbi
+        ).preferringWBIForPiliPlus(
+            piliPlusStyleEnabled: true,
+            wbiAvailable: true
+        )
+
+        XCTAssertEqual(decision.primaryRoute, .wbi)
+        XCTAssertEqual(decision.fallbackRoute, .webpage)
+        XCTAssertTrue(decision.defersWebpageFallbackUntilWBIFailure(piliPlusStyleEnabled: true))
+    }
+
+    func testPiliPlusKeepsFullRaceWhenWBIIsUnavailable() {
+        let decision = StartupPlayURLSchedulingDecision.race.preferringWBIForPiliPlus(
+            piliPlusStyleEnabled: true,
+            wbiAvailable: false
+        )
+
+        XCTAssertFalse(decision.usesStaggeredFallback)
+    }
+
+    func testNonPiliPlusAndWebpagePrimaryKeepStaggeredFallback() {
+        let wbiPrimary = StartupPlayURLSchedulingDecision(
+            primaryRoute: .wbi,
+            fallbackRoute: .webpage
+        )
+        let webpagePrimary = StartupPlayURLSchedulingDecision(
+            primaryRoute: .webpage,
+            fallbackRoute: .wbi
+        )
+
+        XCTAssertFalse(
+            wbiPrimary.defersWebpageFallbackUntilWBIFailure(piliPlusStyleEnabled: false)
+        )
+        XCTAssertFalse(
+            webpagePrimary.defersWebpageFallbackUntilWBIFailure(piliPlusStyleEnabled: true)
+        )
+        XCTAssertEqual(
+            webpagePrimary.diagnosticMessage(piliPlusStyleEnabled: true),
+            webpagePrimary.diagnosticMessage
+        )
+    }
+
     func testPerformanceCopyKeepsStartupSchedulerMessage() {
         var session = PlayerPerformanceSession(id: "BVstartupScheduler")
         session.startupSchedulerMessage = "startupScheduler=adaptive mode=race learning"
@@ -126,6 +210,13 @@ final class PlaybackStartupRequestSchedulingTests: XCTestCase {
         )
 
         XCTAssertTrue(copy.contains("startupScheduler:\n  startupScheduler=adaptive mode=race learning"))
+    }
+
+    func testStartupSchedulerRetainsEnoughMessagesForWBIRecoveryDiagnostics() {
+        XCTAssertGreaterThanOrEqual(
+            PlayerPerformanceStore.startupSchedulerDiagnosticPartLimit,
+            8
+        )
     }
 
     func testFallbackTrackerKeepsTheTerminalStatus() async {
@@ -142,6 +233,22 @@ final class PlaybackStartupRequestSchedulingTests: XCTestCase {
         let startedStatus = await started.currentStatus()
 
         XCTAssertEqual(startedStatus, .started)
+    }
+
+    func testDeferredFallbackTracksSuccessAndWBIFailureSeparately() async {
+        let notNeeded = StartupPlayURLFallbackTracker(initialStatus: .deferred)
+        await notNeeded.markNotNeeded()
+        await notNeeded.markStartedAfterWBIFailure()
+        let notNeededStatus = await notNeeded.currentStatus()
+
+        XCTAssertEqual(notNeededStatus, .notNeeded)
+
+        let started = StartupPlayURLFallbackTracker(initialStatus: .deferred)
+        await started.markStartedAfterWBIFailure()
+        await started.markNotNeeded()
+        let startedStatus = await started.currentStatus()
+
+        XCTAssertEqual(startedStatus, .startedAfterWBIFailure)
     }
 
     func testExpiredRequestLeaseRejectsLateSchedulerFeedback() async {
@@ -169,6 +276,27 @@ final class PlaybackStartupRequestSchedulingTests: XCTestCase {
     func testPreloadRequestsDoNotRecordSchedulerFeedback() {
         XCTAssertTrue(StartupPlayURLRequestSource.foreground.recordsSchedulerFeedback)
         XCTAssertFalse(StartupPlayURLRequestSource.preload.recordsSchedulerFeedback)
+    }
+
+    func testSharedTaskWaiterCancelsWithoutCancellingUnderlyingRequest() async throws {
+        let underlying = Task<Int, Error> {
+            try await Task.sleep(for: .milliseconds(80))
+            return 42
+        }
+        let waiter = Task<Int, Error> {
+            try await BiliAPIClient.awaitSharedTask(underlying)
+        }
+
+        waiter.cancel()
+        do {
+            _ = try await waiter.value
+            XCTFail("Cancelled waiter should throw")
+        } catch is CancellationError {
+            // Expected: cancellation belongs to this waiter, not the shared request.
+        }
+
+        let underlyingValue = try await underlying.value
+        XCTAssertEqual(underlyingValue, 42)
     }
 
     func testWBIHealthRequiresTwoFailuresBeforeSuppression() async {
@@ -211,5 +339,229 @@ final class PlaybackStartupRequestSchedulingTests: XCTestCase {
 
         XCTAssertTrue(didReset)
         XCTAssertEqual(nextFailure, .observed(consecutiveFailures: 1))
+    }
+
+    func testContentSpecificEmptyPlayURLDoesNotSuppressWBIForOtherVideos() {
+        XCTAssertNil(
+            BiliAPIClient.startupWBIHealthFailureReason(for: BiliAPIError.emptyPlayURL)
+        )
+        XCTAssertNil(
+            BiliAPIClient.startupWBIHealthFailureReason(
+                for: BiliAPIError.unsupportedHardwarePlayback("AV1")
+            )
+        )
+        XCTAssertEqual(
+            BiliAPIClient.startupWBIHealthFailureReason(for: URLError(.timedOut)),
+            "network.-1001"
+        )
+    }
+
+    func testPiliPlusCompatibilityRescueRejectsUnrelatedAPIErrors() {
+        XCTAssertTrue(BiliAPIClient.shouldRescuePiliPlusWBI(after: BiliAPIError.emptyPlayURL))
+        XCTAssertFalse(BiliAPIClient.shouldRescuePiliPlusWBI(after: BiliAPIError.emptyData))
+        XCTAssertFalse(
+            BiliAPIClient.shouldRescuePiliPlusWBI(
+                after: BiliAPIError.api(code: -352, message: "risk control")
+            )
+        )
+    }
+
+    func testWBIRouteHintIsScopedAndExpires() async {
+        let store = StartupWBIRouteHintStore(duration: 10)
+        let key = StartupWBIRouteHintKey(
+            bvid: "BVrouteHint",
+            cid: 1,
+            requestedQuality: 116,
+            accountMID: 42,
+            credentialVersion: 3
+        )
+        let otherAccount = StartupWBIRouteHintKey(
+            bvid: key.bvid,
+            cid: key.cid,
+            requestedQuality: key.requestedQuality,
+            accountMID: 43,
+            credentialVersion: key.credentialVersion
+        )
+
+        await store.store(.compatibilityWBI, for: key, now: 100)
+        let storedHint = await store.hint(for: key, now: 109)
+        let otherAccountHint = await store.hint(for: otherAccount, now: 109)
+        let expiredHint = await store.hint(for: key, now: 111)
+
+        XCTAssertEqual(storedHint, .compatibilityWBI)
+        XCTAssertNil(otherAccountHint)
+        XCTAssertNil(expiredHint)
+    }
+
+    func testWBIRouteHintCanClearOneVideoWithoutAffectingAnother() async {
+        let store = StartupWBIRouteHintStore(duration: 10)
+        let first = StartupWBIRouteHintKey(
+            bvid: "BVfirst",
+            cid: 1,
+            requestedQuality: 116,
+            accountMID: nil,
+            credentialVersion: 1
+        )
+        let second = StartupWBIRouteHintKey(
+            bvid: "BVsecond",
+            cid: 2,
+            requestedQuality: 116,
+            accountMID: nil,
+            credentialVersion: 1
+        )
+        await store.store(.webpageOnly, for: first, now: 100)
+        await store.store(.compatibilityWBI, for: second, now: 100)
+
+        await store.clear(containing: first.bvid)
+        let firstHint = await store.hint(for: first, now: 101)
+        let secondHint = await store.hint(for: second, now: 101)
+
+        XCTAssertNil(firstHint)
+        XCTAssertEqual(secondHint, .compatibilityWBI)
+    }
+
+    func testPiliPlusSampleGroupingSeparatesSchedulerVersions() {
+        XCTAssertEqual(
+            PiliPlusStylePlayURLSelectionExperiment.sampleGroupStrategy(
+                startupSchedulerMessage: "strategy=piliPlusConditionalWBIRescueV17",
+                isEnabled: true
+            ).key,
+            "piliPlusConditionalWBIRescueV17"
+        )
+        XCTAssertEqual(
+            PiliPlusStylePlayURLSelectionExperiment.sampleGroupStrategy(
+                startupSchedulerMessage: "strategy=piliPlusPromptWinnerCancellationV16",
+                isEnabled: true
+            ).key,
+            "piliPlusPromptWinnerCancellationV16"
+        )
+        XCTAssertEqual(
+            PiliPlusStylePlayURLSelectionExperiment.sampleGroupStrategy(
+                startupSchedulerMessage: "strategy=piliPlusBaseQualitySelectionV15",
+                isEnabled: true
+            ).key,
+            "piliPlusBaseQualitySelectionV15"
+        )
+        XCTAssertEqual(
+            PiliPlusStylePlayURLSelectionExperiment.sampleGroupStrategy(
+                startupSchedulerMessage: "strategy=piliPlusWBIResponseDiagnosticsV13",
+                isEnabled: true
+            ).key,
+            "piliPlusWBIResponseDiagnosticsV13"
+        )
+        XCTAssertEqual(
+            PiliPlusStylePlayURLSelectionExperiment.sampleGroupStrategy(
+                startupSchedulerMessage: "strategy=piliPlusStreamingWebpagePlayInfoV11",
+                isEnabled: true
+            ).key,
+            "piliPlusStreamingWebpagePlayInfoV11"
+        )
+        XCTAssertEqual(
+            PiliPlusStylePlayURLSelectionExperiment.sampleGroupStrategy(
+                startupSchedulerMessage: "strategy=piliPlusScopedWBIHealthV10",
+                isEnabled: true
+            ).key,
+            "piliPlusScopedWBIHealthV10"
+        )
+        XCTAssertEqual(
+            PiliPlusStylePlayURLSelectionExperiment.sampleGroupStrategy(
+                startupSchedulerMessage: "strategy=piliPlusCancellableWebpageHedgeV9",
+                isEnabled: true
+            ).key,
+            "piliPlusCancellableWebpageHedgeV9"
+        )
+        XCTAssertEqual(
+            PiliPlusStylePlayURLSelectionExperiment.sampleGroupStrategy(
+                startupSchedulerMessage: "strategy=piliPlusBaseQualityWBIWebpageRaceV8",
+                isEnabled: true
+            ).key,
+            "piliPlusBaseQualityWBIWebpageRaceV8"
+        )
+        XCTAssertEqual(
+            PiliPlusStylePlayURLSelectionExperiment.sampleGroupStrategy(
+                startupSchedulerMessage: "strategy=piliPlusStandardWBIWebpageRaceV7",
+                isEnabled: true
+            ).key,
+            "piliPlusStandardWBIWebpageRaceV7"
+        )
+        XCTAssertEqual(
+            PiliPlusStylePlayURLSelectionExperiment.sampleGroupStrategy(
+                startupSchedulerMessage: "strategy=piliPlusStandardWBIRaceV6",
+                isEnabled: true
+            ).key,
+            "piliPlusStandardWBIRaceV6"
+        )
+        XCTAssertEqual(
+            PiliPlusStylePlayURLSelectionExperiment.sampleGroupStrategy(
+                startupSchedulerMessage: "strategy=piliPlusLegacyFirstFallbackV5",
+                isEnabled: true
+            ).key,
+            "piliPlusLegacyFirstFallbackV5"
+        )
+        XCTAssertEqual(
+            PiliPlusStylePlayURLSelectionExperiment.sampleGroupStrategy(
+                startupSchedulerMessage: "strategy=piliPlusStaggeredRescueV4",
+                isEnabled: true
+            ).key,
+            "piliPlusStaggeredRescueV4"
+        )
+        XCTAssertEqual(
+            PiliPlusStylePlayURLSelectionExperiment.sampleGroupStrategy(
+                startupSchedulerMessage: "route=singleWBIBaseQ80",
+                isEnabled: true
+            ).key,
+            "piliPlusSingleResponseV1"
+        )
+        XCTAssertEqual(
+            PiliPlusStylePlayURLSelectionExperiment.sampleGroupStrategy(
+                startupSchedulerMessage: "route=singleWBITargetQ",
+                isEnabled: true
+            ).key,
+            "piliPlusTargetRaceV2"
+        )
+        XCTAssertEqual(
+            PiliPlusStylePlayURLSelectionExperiment.sampleGroupStrategy(
+                startupSchedulerMessage: "strategy=piliPlusTargetRescueV3",
+                isEnabled: true
+            ).key,
+            "piliPlusTargetRescueV3"
+        )
+        let currentStrategy = PiliPlusStylePlayURLSelectionExperiment.sampleGroupStrategy(
+            startupSchedulerMessage: "strategy=\(PiliPlusStylePlayURLSelectionExperiment.currentStrategyKey)",
+            isEnabled: true
+        )
+        XCTAssertEqual(currentStrategy.key, PiliPlusStylePlayURLSelectionExperiment.currentStrategyKey)
+        XCTAssertEqual(currentStrategy.title, "取流策略：V18")
+    }
+
+    func testPiliPlusWebpageHedgeDiagnosticIncludesCancellationPhase() {
+        let message = BiliAPIClient.piliPlusWebpageHedgeDiagnosticMessage(
+            event: "webpageHedgeCancelled",
+            delayMilliseconds: 0,
+            elapsedMilliseconds: 112,
+            phase: "inFlight",
+            requestElapsedMilliseconds: 22
+        )
+
+        XCTAssertTrue(message.contains("event=webpageHedgeCancelled"))
+        XCTAssertTrue(message.contains("strategy=\(PiliPlusStylePlayURLSelectionExperiment.currentStrategyKey)"))
+        XCTAssertTrue(message.contains("delay=0ms"))
+        XCTAssertTrue(message.contains("phase=inFlight"))
+        XCTAssertTrue(message.contains("request=22ms"))
+    }
+
+    func testPiliPlusWebpageStreamDiagnosticIncludesSavedBytes() {
+        let message = BiliAPIClient.piliPlusWebpageStreamDiagnosticMessage(
+            mode: "incremental",
+            receivedBytes: 120_000,
+            expectedBytes: 500_000,
+            elapsedMilliseconds: 210
+        )
+
+        XCTAssertTrue(message.contains("mode=incremental"))
+        XCTAssertTrue(message.contains("strategy=\(PiliPlusStylePlayURLSelectionExperiment.currentStrategyKey)"))
+        XCTAssertTrue(message.contains("received=120000"))
+        XCTAssertTrue(message.contains("expected=500000"))
+        XCTAssertTrue(message.contains("saved=380000"))
     }
 }
