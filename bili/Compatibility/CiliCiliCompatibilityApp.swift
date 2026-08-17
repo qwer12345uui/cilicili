@@ -752,12 +752,7 @@ private struct NativeVideoDTO: Decodable {
 
     func asNativeVideo() -> NativeVideo? {
         guard let bvid, !bvid.isEmpty else { return nil }
-        let normalizedCover: URL?
-        if let pic, pic.hasPrefix("//") {
-            normalizedCover = URL(string: "https:\(pic)")
-        } else {
-            normalizedCover = URL(string: pic ?? "")
-        }
+        let normalizedCover = NativeURL.httpsURL(from: pic)
         return NativeVideo(
             bvid: bvid,
             title: NativeText.clean(title ?? "未命名视频"),
@@ -828,6 +823,20 @@ private enum NativeText {
             .replacingOccurrences(of: "&quot;", with: "\"")
             .replacingOccurrences(of: "&amp;", with: "&")
             .trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+}
+
+private enum NativeURL {
+    static func httpsURL(from rawValue: String?) -> URL? {
+        guard var rawValue, !rawValue.isEmpty else { return nil }
+        if rawValue.hasPrefix("//") {
+            rawValue = "https:\(rawValue)"
+        }
+        guard var components = URLComponents(string: rawValue) else { return nil }
+        if components.scheme?.lowercased() == "http" {
+            components.scheme = "https"
+        }
+        return components.url
     }
 }
 
@@ -1162,24 +1171,30 @@ private final class NativeAuthStore: ObservableObject {
 private final class NativePlayerController: ObservableObject {
     let player = AVPlayer()
     @Published private(set) var isLoading = true
+    @Published private(set) var isReadyToPlay = false
     @Published private(set) var errorMessage: String?
 
     private let video: NativeVideo
+    private var statusObservation: NSKeyValueObservation?
+    private var failureObserver: NSObjectProtocol?
 
     init(video: NativeVideo) {
         self.video = video
     }
 
     func prepare() {
+        cleanupObservers()
+        player.pause()
+        player.replaceCurrentItem(with: nil)
         isLoading = true
+        isReadyToPlay = false
         errorMessage = nil
         Task {
             do {
                 let url = try await NativeBiliAPI.playbackURL(for: video)
                 let item = AVPlayerItem(url: url)
+                observePlaybackState(of: item)
                 player.replaceCurrentItem(with: item)
-                player.play()
-                isLoading = false
             } catch {
                 errorMessage = error.localizedDescription
                 isLoading = false
@@ -1188,12 +1203,14 @@ private final class NativePlayerController: ObservableObject {
     }
 
     func stop() {
+        cleanupObservers()
         player.pause()
         player.replaceCurrentItem(with: nil)
+        isReadyToPlay = false
     }
 
     func captureCurrentFrame(completion: @escaping (Result<UIImage, Error>) -> Void) {
-        guard let asset = player.currentItem?.asset else {
+        guard isReadyToPlay, let asset = player.currentItem?.asset else {
             completion(.failure(NativeMediaError.unavailablePlayback))
             return
         }
@@ -1208,6 +1225,71 @@ private final class NativePlayerController: ObservableObject {
                 DispatchQueue.main.async { completion(.failure(error)) }
             }
         }
+    }
+
+    private func observePlaybackState(of item: AVPlayerItem) {
+        statusObservation = item.observe(\.status, options: [.new]) { [weak self] observedItem, _ in
+            let status = observedItem.status
+            let itemError = observedItem.error
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                switch status {
+                case .readyToPlay:
+                    self.isLoading = false
+                    self.isReadyToPlay = true
+                    self.player.play()
+                case .failed:
+                    self.isLoading = false
+                    self.isReadyToPlay = false
+                    self.errorMessage = itemError?.localizedDescription ?? NativeMediaError.unavailablePlayback.localizedDescription
+                case .unknown:
+                    break
+                @unknown default:
+                    self.isLoading = false
+                }
+            }
+        }
+        failureObserver = NotificationCenter.default.addObserver(
+            forName: .AVPlayerItemFailedToPlayToEndTime,
+            object: item,
+            queue: .main
+        ) { [weak self] notification in
+            let failure = notification.userInfo?[AVPlayerItemFailedToPlayToEndTimeErrorKey] as? Error
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                self.isLoading = false
+                self.isReadyToPlay = false
+                self.errorMessage = failure?.localizedDescription ?? NativeMediaError.unavailablePlayback.localizedDescription
+            }
+        }
+    }
+
+    private func cleanupObservers() {
+        statusObservation?.invalidate()
+        statusObservation = nil
+        if let failureObserver {
+            NotificationCenter.default.removeObserver(failureObserver)
+        }
+        failureObserver = nil
+    }
+}
+
+private enum NativeExternalPlayer {
+    static func open(_ video: NativeVideo) {
+        guard let webURL = URL(string: "https://www.bilibili.com/video/\(video.bvid)") else { return }
+        let appURL = URL(string: "bilibili://video/\(video.bvid)")!
+        UIApplication.shared.open(appURL, options: [:]) { opened in
+            if !opened {
+                UIApplication.shared.open(webURL, options: [:])
+            }
+        }
+    }
+}
+
+private enum NativeOfficialLogin {
+    static func open() {
+        guard let url = URL(string: "https://passport.bilibili.com/login") else { return }
+        UIApplication.shared.open(url, options: [:])
     }
 }
 
@@ -1250,12 +1332,19 @@ private struct NativeVideoCard: View {
                 NativeCoverImage(url: video.coverURL)
                     .frame(height: 118)
                     .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+                LinearGradient(colors: [Color.clear, Color.black.opacity(0.34)], startPoint: .center, endPoint: .bottom)
+                    .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+                Image(systemName: "play.fill")
+                    .font(.system(size: 25, weight: .bold))
+                    .foregroundColor(.white.opacity(0.94))
+                    .shadow(color: .black.opacity(0.34), radius: 4, y: 2)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
                 Text(video.durationText)
                     .font(.system(size: 11, weight: .bold))
                     .foregroundColor(.white)
                     .padding(.horizontal, 7)
                     .padding(.vertical, 4)
-                    .background(Color.black.opacity(0.58), in: Capsule())
+                    .background(Color.black.opacity(0.65), in: Capsule())
                     .padding(9)
             }
             Text(video.title)
@@ -1304,13 +1393,31 @@ private struct NativeCoverImage: View {
     let url: URL?
 
     var body: some View {
-        AsyncImage(url: url) { phase in
-            switch phase {
-            case let .success(image):
-                image.resizable().scaledToFill()
-            default:
-                LinearGradient(colors: [CompatibilityPalette.pink.opacity(0.82), Color.indigo.opacity(0.72)], startPoint: .topLeading, endPoint: .bottomTrailing)
-                    .overlay(Image(systemName: "play.fill").font(.system(size: 28, weight: .bold)).foregroundColor(.white.opacity(0.86)))
+        GeometryReader { proxy in
+            AsyncImage(url: url) { phase in
+                switch phase {
+                case let .success(image):
+                    image
+                        .resizable()
+                        .scaledToFill()
+                        .frame(width: proxy.size.width, height: proxy.size.height)
+                case .empty:
+                    Color(UIColor.tertiarySystemFill)
+                        .overlay(ProgressView().tint(CompatibilityPalette.pink))
+                case .failure:
+                    Color(UIColor.tertiarySystemFill)
+                        .overlay(
+                            VStack(spacing: 6) {
+                                Image(systemName: "photo")
+                                    .font(.system(size: 21, weight: .semibold))
+                                Text("封面加载失败")
+                                    .font(.system(size: 11, weight: .medium))
+                            }
+                            .foregroundColor(.secondary)
+                        )
+                @unknown default:
+                    Color(UIColor.tertiarySystemFill)
+                }
             }
         }
         .clipped()
@@ -1443,6 +1550,35 @@ private struct NativeLoginView: View {
                     .padding(.horizontal, 22)
                     .padding(.vertical, 12)
                     .background(CompatibilityPalette.pink, in: Capsule())
+                VStack(spacing: 10) {
+                    Text("也可在官方页面登录")
+                        .font(.system(size: 13, weight: .medium))
+                        .foregroundColor(.secondary)
+                    HStack(spacing: 10) {
+                        Button {
+                            NativeOfficialLogin.open()
+                        } label: {
+                            Label("手机号验证码登录", systemImage: "number")
+                                .font(.system(size: 13, weight: .semibold))
+                                .frame(maxWidth: .infinity)
+                                .padding(.vertical, 10)
+                        }
+                        Button {
+                            NativeOfficialLogin.open()
+                        } label: {
+                            Label("账号密码登录", systemImage: "lock.fill")
+                                .font(.system(size: 13, weight: .semibold))
+                                .frame(maxWidth: .infinity)
+                                .padding(.vertical, 10)
+                        }
+                    }
+                    .foregroundColor(CompatibilityPalette.pink)
+                    Text("手机号、验证码和密码仅在官方页面中输入，本应用不会读取或保存。")
+                        .font(.system(size: 11))
+                        .foregroundColor(.secondary)
+                        .multilineTextAlignment(.center)
+                }
+                .padding(.horizontal, 20)
                 if authStore.isLoggedIn {
                     Button("退出当前账号") { authStore.logout() }
                         .font(.system(size: 14, weight: .semibold))
@@ -1480,7 +1616,7 @@ private struct NativePlayerView: View {
     let video: NativeVideo
     @Environment(\.presentationMode) private var presentationMode
     @StateObject private var controller: NativePlayerController
-    @State private var saveStatus = "播放后可保存当前画面"
+    @State private var saveStatus = "内嵌播放成功后可保存当前画面"
 
     init(video: NativeVideo) {
         self.video = video
@@ -1492,12 +1628,22 @@ private struct NativePlayerView: View {
             ScrollView(showsIndicators: false) {
                 VStack(alignment: .leading, spacing: 18) {
                     ZStack {
-                        Color.black
-                        NativeAVPlayerView(player: controller.player)
+                        NativeCoverImage(url: video.coverURL)
+                        Color.black.opacity(controller.isReadyToPlay ? 0 : 0.16)
+                        if controller.isReadyToPlay {
+                            NativeAVPlayerView(player: controller.player)
+                        }
                         if controller.isLoading {
-                            ProgressView("正在获取播放地址")
+                            ProgressView("正在验证播放地址")
                                 .tint(.white)
                                 .foregroundColor(.white)
+                                .padding(12)
+                                .background(Color.black.opacity(0.46), in: Capsule())
+                        } else if !controller.isReadyToPlay {
+                            Image(systemName: "play.fill")
+                                .font(.system(size: 38, weight: .bold))
+                                .foregroundColor(.white.opacity(0.92))
+                                .shadow(color: .black.opacity(0.45), radius: 5, y: 2)
                         }
                     }
                     .frame(height: 230)
@@ -1514,8 +1660,43 @@ private struct NativePlayerView: View {
                             .foregroundColor(.secondary)
                     }
                     if let error = controller.errorMessage {
-                        NativeErrorPanel(message: error, retry: controller.prepare)
+                        VStack(alignment: .leading, spacing: 10) {
+                            Text("内嵌播放不可用")
+                                .font(.system(size: 16, weight: .bold))
+                            Text(error)
+                                .font(.system(size: 13))
+                                .foregroundColor(.secondary)
+                                .fixedSize(horizontal: false, vertical: true)
+                            Button("重新尝试内嵌播放", action: controller.prepare)
+                                .font(.system(size: 14, weight: .bold))
+                                .foregroundColor(CompatibilityPalette.pink)
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(16)
+                        .background(Color(UIColor.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
                     }
+                    Button {
+                        NativeExternalPlayer.open(video)
+                    } label: {
+                        HStack(spacing: 12) {
+                            Image(systemName: "play.rectangle.fill")
+                                .font(.system(size: 22, weight: .semibold))
+                            VStack(alignment: .leading, spacing: 3) {
+                                Text("使用官方播放器打开")
+                                    .font(.system(size: 16, weight: .semibold))
+                                Text("优先唤起哔哩哔哩；未安装时打开官方网页")
+                                    .font(.system(size: 13))
+                                    .foregroundColor(.secondary)
+                            }
+                            Spacer()
+                            Image(systemName: "arrow.up.right")
+                                .font(.system(size: 14, weight: .semibold))
+                        }
+                        .foregroundColor(.primary)
+                        .padding(15)
+                        .background(CompatibilityPalette.pink.opacity(0.12), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+                    }
+                    .buttonStyle(CompatibilityPressStyle())
                     Button {
                         controller.captureCurrentFrame { result in
                             switch result {
@@ -1546,6 +1727,8 @@ private struct NativePlayerView: View {
                         .background(Color(UIColor.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
                     }
                     .buttonStyle(CompatibilityPressStyle())
+                    .disabled(!controller.isReadyToPlay)
+                    .opacity(controller.isReadyToPlay ? 1 : 0.58)
                 }
                 .padding(16)
             }
